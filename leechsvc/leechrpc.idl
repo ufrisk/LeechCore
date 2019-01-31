@@ -1,0 +1,12 @@
+[
+    uuid(906B0DC2-1337-0666-0001-0000657A63DC),
+    version(1.0),
+    endpoint("ncacn_ip_tcp:0.0.0.0[28473]"),
+    pointer_default(unique)
+]
+
+interface LeechRpc
+{
+    //[helpstring("Submit a command to the remote leech service.")]
+    error_status_t LeechRpc_ReservedSubmitCommand([in] handle_t hBinding, [in] long cbIn, [in, size_is(cbIn)] byte *pbIn, [out] long *pcbOut, [out, size_is(,*pcbOut)] byte **ppbOut);
+}

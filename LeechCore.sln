@@ -1,0 +1,39 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 15
+VisualStudioVersion = 15.0.28307.271
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "leechcore", "leechcore\leechcore.vcxproj", "{3476ABD2-5DEA-43E6-A676-8BE25F74535A}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "leechsvc", "leechsvc\leechsvc.vcxproj", "{4FAF78C0-D61B-41CE-830E-62C38DACDD52}"
+	ProjectSection(ProjectDependencies) = postProject
+		{3476ABD2-5DEA-43E6-A676-8BE25F74535A} = {3476ABD2-5DEA-43E6-A676-8BE25F74535A}
+	EndProjectSection
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Release|x64 = Release|x64
+		ReleaseMT|x64 = ReleaseMT|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{3476ABD2-5DEA-43E6-A676-8BE25F74535A}.Debug|x64.ActiveCfg = Debug|x64
+		{3476ABD2-5DEA-43E6-A676-8BE25F74535A}.Debug|x64.Build.0 = Debug|x64
+		{3476ABD2-5DEA-43E6-A676-8BE25F74535A}.Release|x64.ActiveCfg = Release|x64
+		{3476ABD2-5DEA-43E6-A676-8BE25F74535A}.Release|x64.Build.0 = Release|x64
+		{3476ABD2-5DEA-43E6-A676-8BE25F74535A}.ReleaseMT|x64.ActiveCfg = ReleaseMT|x64
+		{3476ABD2-5DEA-43E6-A676-8BE25F74535A}.ReleaseMT|x64.Build.0 = ReleaseMT|x64
+		{4FAF78C0-D61B-41CE-830E-62C38DACDD52}.Debug|x64.ActiveCfg = Debug|x64
+		{4FAF78C0-D61B-41CE-830E-62C38DACDD52}.Debug|x64.Build.0 = Debug|x64
+		{4FAF78C0-D61B-41CE-830E-62C38DACDD52}.Release|x64.ActiveCfg = Release|x64
+		{4FAF78C0-D61B-41CE-830E-62C38DACDD52}.Release|x64.Build.0 = Release|x64
+		{4FAF78C0-D61B-41CE-830E-62C38DACDD52}.ReleaseMT|x64.ActiveCfg = ReleaseMT|x64
+		{4FAF78C0-D61B-41CE-830E-62C38DACDD52}.ReleaseMT|x64.Build.0 = ReleaseMT|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {C56A097C-48F0-4688-BCF6-6B94DDE5C3B9}
+	EndGlobalSection
+EndGlobal

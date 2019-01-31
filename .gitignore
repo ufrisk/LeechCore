@@ -1,0 +1,12 @@
+﻿*.ilk
+*.pdb
+*.exp
+*.iobj
+*.ipdb
+*.lastcodeanalysissucceeded
+/.vs
+leechrpc_h.h
+leechrpc_c.c
+leechrpc_s.c
+/files/lib
+/files/temp
