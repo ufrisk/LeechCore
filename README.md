@@ -82,3 +82,6 @@ Changelog:
 ===================
 v1.0
 * Initial Release.
+
+Latest / v1.0.1
+* Fixes for the pmem device.
