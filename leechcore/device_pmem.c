@@ -53,7 +53,9 @@ struct PmemMemoryInfo {
 
 #define DEVICEPMEM_SERVICENAME      "pmem"
 #define DEVICEPMEM_MEMORYFILE       "\\\\.\\pmem"
-#define DEVICEPMEM_DRIVERFILE       "winpmem_x64.sys"
+#define DEVICEPMEM_DRIVERFILE_1     "att_winpmem_64.sys"
+#define DEVICEPMEM_DRIVERFILE_2     "winpmem_64.sys"
+#define DEVICEPMEM_DRIVERFILE_3     "winpmem_x64.sys"
 
 typedef struct tdDEVICE_CONTEXT_PMEM {
     HANDLE hFile;
@@ -174,7 +176,8 @@ VOID DevicePMEM_SvcClose()
 BOOL DevicePMEM_SvcStart()
 {
     PDEVICE_CONTEXT_PMEM ctx = (PDEVICE_CONTEXT_PMEM)ctxDeviceMain->hDevice;
-    DWORD dwWinErr;
+    LPCSTR szDRIVERFILES[] = { DEVICEPMEM_DRIVERFILE_1, DEVICEPMEM_DRIVERFILE_2, DEVICEPMEM_DRIVERFILE_3 };
+    DWORD i, dwWinErr;
     CHAR szDriverFile[MAX_PATH] = { 0 };
     FILE *pDriverFile = NULL;
     HMODULE hModuleLeechCore;
@@ -183,13 +186,21 @@ BOOL DevicePMEM_SvcStart()
     if(!_strnicmp("pmem://", ctxDeviceMain->cfg.szDevice, 7)) {
         strcat_s(szDriverFile, _countof(szDriverFile), ctxDeviceMain->cfg.szDevice + 7);
     } else {
-        hModuleLeechCore = LoadLibraryA("leechcore.dll");
-        // NB! defaults to locating 'winpmem_x64.sys' relative to the loaded
+        // NB! defaults to locating driver .sys file relative to the loaded
         // 'leechcore.dll' - if unable to locate library (for whatever reason)
         // defaults will be to try to loade relative to executable (NULL).
-        Util_GetPathDll(szDriverFile, hModuleLeechCore);
-        if(hModuleLeechCore) { FreeLibrary(hModuleLeechCore); }
-        strcat_s(szDriverFile, _countof(szDriverFile), DEVICEPMEM_DRIVERFILE);
+        for(i = 0; i < (sizeof(szDRIVERFILES) / sizeof(LPCSTR)); i++) {
+            hModuleLeechCore = LoadLibraryA("leechcore.dll");
+            Util_GetPathDll(szDriverFile, hModuleLeechCore);
+            if(hModuleLeechCore) { FreeLibrary(hModuleLeechCore); }
+            strcat_s(szDriverFile, _countof(szDriverFile), szDRIVERFILES[i]);
+            if(!fopen_s(&pDriverFile, szDriverFile, "rb") && pDriverFile) {
+                fclose(pDriverFile);
+                pDriverFile = NULL;
+                break;
+            }
+            ZeroMemory(szDriverFile, _countof(szDriverFile));
+        }
     }
     if(fopen_s(&pDriverFile, szDriverFile, "rb") || !pDriverFile) {
         vprintf(
