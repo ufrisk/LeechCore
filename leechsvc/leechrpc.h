@@ -5,7 +5,7 @@
 //
 #ifndef __LEECHRPC_H__
 #define __LEECHRPC_H__
-#include "leechcore.h"
+#include "../files/leechcore.h"
 #ifdef _WIN32
 #include <windows.h>
 
