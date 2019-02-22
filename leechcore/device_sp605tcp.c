@@ -440,7 +440,7 @@ BOOL Device605_TCP_WriteTlp(_In_ PBYTE pbTlp, _In_ DWORD cbTlp)
     return Device605_TCP_TxTlp(ctx, pbTlp, cbTlp, TRUE);
 }
 
-BOOL Device605_TCP_CommandData(_In_ ULONG64 fOption, _In_reads_(cbDataIn) PBYTE pbDataIn, _In_ DWORD cbDataIn, _Out_writes_(cbDataOut) PBYTE pbDataOut, _In_ DWORD cbDataOut, _Out_ PDWORD pcbDataOut)
+BOOL Device605_TCP_CommandData(_In_ ULONG64 fOption, _In_reads_(cbDataIn) PBYTE pbDataIn, _In_ DWORD cbDataIn, _Out_writes_opt_(cbDataOut) PBYTE pbDataOut, _In_ DWORD cbDataOut, _Out_opt_ PDWORD pcbDataOut)
 {
     switch(fOption) {
         case LEECHCORE_COMMANDDATA_FPGA_WRITE_TLP:

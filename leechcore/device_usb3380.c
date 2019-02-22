@@ -347,6 +347,7 @@ BOOL Device3380_Open()
 {
     BOOL result;
     DWORD dwReg;
+    QWORD paMax;
     result = Device3380_Open2();
     if(!result) { return FALSE; }
     Device3380_ReadCsr(REG_USBSTAT, &dwReg, CSR_CONFIGSPACE_MEMM | CSR_BYTEALL);
@@ -375,10 +376,11 @@ BOOL Device3380_Open()
     ctxDeviceMain->pfnReadScatterMEM = Device3380_ReadScatterGather;
     ctxDeviceMain->pfnWriteMEM = Device3380_WriteDMA;
     // initialize memory map
-    MemMap_Initialize(min(ctxDeviceMain->cfg.paMax, ctxDeviceMain->cfg.paMaxNative));
-    MemMap_AddRange(0x00000000, 0x000A0000, 0x00000000);
+    paMax = min(ctxDeviceMain->cfg.paMax, ctxDeviceMain->cfg.paMaxNative);
+    MemMap_Initialize(paMax);
+    MemMap_AddRange(0x00000000, min(0x000A0000, paMax), 0x00000000);
     // ... SMM LOWER 0x000A0000-0x000FFFFF
-    MemMap_AddRange(0x00100000, 0xEFF00000, 0x00100000);
+    MemMap_AddRange(0x00100000, min(0xF0000000, paMax) - 0x00100000, 0x00100000);
     // ... PCI SPACE 0xF0000000-0xFFFFFFFF
     return TRUE;
 }

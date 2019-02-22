@@ -158,12 +158,11 @@
       </Command>
     </PostBuildEvent>
     <PreBuildEvent>
-      <Command>
-      </Command>
+      <Command>copy $(SolutionDir)\files\leechcore.h $(ProjectDir)\ /y</Command>
     </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="..\files\leechcore.h" />
+    <ClInclude Include="leechcore.h" />
     <ClInclude Include="leechrpc.h" />
     <ClInclude Include="leechrpc_h.h" />
     <ClInclude Include="leechsvc.h" />

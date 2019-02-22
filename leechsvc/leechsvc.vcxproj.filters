@@ -33,7 +33,7 @@
     <ClInclude Include="version.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\files\leechcore.h">
+    <ClInclude Include="leechcore.h">
       <Filter>Header Files\leechcore</Filter>
     </ClInclude>
   </ItemGroup>

@@ -92,6 +92,7 @@ typedef struct tdEXCEPTION_RECORD64         { CHAR sz[152]; } EXCEPTION_RECORD64
 #define __bcount(x)
 #define _Inout_bytecount_(x)
 #define _Inout_updates_bytes_(x)
+#define _Out_writes_opt_(x)
 #define _Success_(return)
 
 #define max(a, b)                           (((a) > (b)) ? (a) : (b))
@@ -118,6 +119,8 @@ typedef struct tdEXCEPTION_RECORD64         { CHAR sz[152]; } EXCEPTION_RECORD64
 #define CloseHandle(h)                          // TODO: remove this dummy implementation & replace with WARN.
 #define _ftelli64(f)                        (ftello(f))
 #define _fseeki64(f, o, w)                  (fseeko(f, o, w))
+#define _chsize_s(fd, cb)                   (ftruncate64(fd, cb))
+#define _fileno(f)                          (fileno(f))
 #define InterlockedAdd64(p, v)              (__sync_fetch_and_add(p, v))
 #define InterlockedIncrement64(p)           (__sync_fetch_and_add(p, 1))
 

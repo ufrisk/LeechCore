@@ -452,7 +452,7 @@ BOOL LeechRPC_SetOption(_In_ QWORD fOption, _In_ QWORD qwValue)
 }
 
 _Success_(return)
-BOOL LeechRPC_CommandData(_In_ ULONG64 fOption, _In_reads_(cbDataIn) PBYTE pbDataIn, _In_ DWORD cbDataIn, _Out_writes_(cbDataOut) PBYTE pbDataOut, _In_ DWORD cbDataOut, _Out_ PDWORD pcbDataOut)
+BOOL LeechRPC_CommandData(_In_ ULONG64 fOption, _In_reads_(cbDataIn) PBYTE pbDataIn, _In_ DWORD cbDataIn, _Out_writes_opt_(cbDataOut) PBYTE pbDataOut, _In_ DWORD cbDataOut, _Out_opt_ PDWORD pcbDataOut)
 {
     BOOL result;
     PLEECHRPC_MSG_BIN pMsgReq = NULL;
@@ -468,16 +468,16 @@ BOOL LeechRPC_CommandData(_In_ ULONG64 fOption, _In_reads_(cbDataIn) PBYTE pbDat
     // 2: transmit & get result
     result = LeechRPC_SubmitCommand((PLEECHRPC_MSG_HDR)pMsgReq, LEECHRPC_MSGTYPE_COMMANDDATA_RSP, (PPLEECHRPC_MSG_HDR)&pMsgRsp);
     if(result) {
-        if(!pbDataOut) {
+        if(!pbDataOut && pcbDataOut) {
             *pcbDataOut = (DWORD)pMsgRsp->qwData[0];
-        } else if(pMsgRsp->qwData[0] <= cbDataOut) {
+        } else if((pMsgRsp->qwData[0] <= cbDataOut) && pbDataOut && pcbDataOut) {
             *pcbDataOut = (DWORD)pMsgRsp->qwData[0];
             memcpy(pbDataOut, pMsgRsp->pb, pMsgRsp->qwData[0]);
         } else {
             result = FALSE;
         }
     }
-    if(!result) {
+    if(!result && pcbDataOut) {
         *pcbDataOut = 0;
     }
     LocalFree(pMsgReq);

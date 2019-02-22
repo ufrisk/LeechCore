@@ -142,6 +142,7 @@ DLLEXPORT BOOL LeechCore_WriteEx(_In_ ULONG64 pa, _In_ PBYTE pb, _In_ DWORD cb, 
         ((flags & LEECHCORE_FLAG_WRITE_RETRY) && LeechCore_Write(pa, pb, cb));
     if(result && (flags & LEECHCORE_FLAG_WRITE_VERIFY)) {
         if(!(pbRead = LocalAlloc(0, cb))) { return FALSE; }
+        LeechCore_Read(pa, pbRead, cb);
         result = !memcmp(pb, pbRead, cb);
         LocalFree(pbRead);
     }
@@ -308,7 +309,7 @@ BOOL LeechCore_CommandData_Core(_In_ ULONG64 fOption, _In_reads_(cbDataIn) PBYTE
 }
 
 _Success_(return)
-DLLEXPORT BOOL LeechCore_CommandData(_In_ ULONG64 fOption, _In_reads_(cbDataIn) PBYTE pbDataIn, _In_ DWORD cbDataIn, _Out_writes_(cbDataOut) PBYTE pbDataOut, _In_ DWORD cbDataOut, _Out_ PDWORD pcbDataOut)
+DLLEXPORT BOOL LeechCore_CommandData(_In_ ULONG64 fOption, _In_reads_(cbDataIn) PBYTE pbDataIn, _In_ DWORD cbDataIn, _Out_writes_opt_(cbDataOut) PBYTE pbDataOut, _In_ DWORD cbDataOut, _Out_opt_ PDWORD pcbDataOut)
 {
     BOOL result = FALSE;
     QWORD tmCallStart;
@@ -331,7 +332,7 @@ DWORD LeechCore_Read_DoWork_Scatter(_In_ QWORD qwAddr, _Out_ PBYTE pb, _In_ DWOR
     PBYTE pbBuffer;
     PMEM_IO_SCATTER_HEADER pDMAs, *ppDMAs;
     DWORD i, o, cDMAs, cbReadTotal = 0;
-    cDMAs = cb >> 12;
+    cDMAs = (cb + 0xfff) >> 12;
     pbBuffer = (PBYTE)LocalAlloc(LMEM_ZEROINIT, cDMAs * (sizeof(PMEM_IO_SCATTER_HEADER) + sizeof(MEM_IO_SCATTER_HEADER)));
     if(!pbBuffer) { return 0; }
     ppDMAs = (PMEM_IO_SCATTER_HEADER*)pbBuffer;
@@ -346,11 +347,15 @@ DWORD LeechCore_Read_DoWork_Scatter(_In_ QWORD qwAddr, _Out_ PBYTE pb, _In_ DWOR
     }
     LeechCore_ReadScatter(ppDMAs, cDMAs);
     for(i = 0; i < cDMAs; i++) {
-        if(pDMAs[i].cb == 0x1000) {
-            if(pPageStat) { pPageStat->pfnPageStatUpdate(pPageStat->h, pDMAs[i].qwA + 0x1000, 1, 0); }
-            cbReadTotal += 0x1000;
+        if(pDMAs[i].cb == pDMAs[i].cbMax) {
+            if(pPageStat && (pDMAs[i].cbMax == 0x1000)) {
+                pPageStat->pfnPageStatUpdate(pPageStat->h, pDMAs[i].qwA + 0x1000, 1, 0);
+            }
+            cbReadTotal += pDMAs[i].cbMax;
         } else {
-            if(pPageStat) { pPageStat->pfnPageStatUpdate(pPageStat->h, pDMAs[i].qwA + 0x1000, 0, 1); }
+            if(pPageStat && (pDMAs[i].cbMax == 0x1000)) {
+                pPageStat->pfnPageStatUpdate(pPageStat->h, pDMAs[i].qwA + 0x1000, 0, 1);
+            }
             ZeroMemory(pDMAs[i].pb, pDMAs[i].cbMax);
         }
     }
@@ -364,8 +369,7 @@ DWORD LeechCore_Read_DoWork(_In_ QWORD qwAddr, _Out_ PBYTE pb, _In_ DWORD cb, _I
     DWORD cbChunk, cChunkTotal, cChunkSuccess = 0;
     DWORD i, cbSuccess = 0;
     // calculate current chunk sizes
-    cbChunk = ~0xfff & min(cb, cbMaxSizeIo);
-    cbChunk = (cbChunk > 0x3000) ? cbChunk : 0x1000;
+    cbChunk = ~0xfff & min(cb + 0xfff, cbMaxSizeIo);
     cChunkTotal = (cb / cbChunk) + ((cb % cbChunk) ? 1 : 0);
     // try read memory
     memset(pb, 0, cb);
@@ -381,12 +385,13 @@ DLLEXPORT DWORD LeechCore_ReadEx(_In_ ULONG64 pa, _Out_writes_(cb) PBYTE pb, _In
 {
     BYTE pbWorkaround[4096];
     DWORD cbDataRead;
+    if(cb == 0) { return 0; }
     // read memory (with strange workaround for 1-page reads...)
     if(cb > 0x1000) {
         cbDataRead = LeechCore_Read_DoWork(pa, pb, cb, pPageStat, (DWORD)ctxDeviceMain->cfg.cbMaxSizeMemIo);
     } else {
         // why is this working ??? if not here console is screwed up... (threading issue?)
-        cbDataRead = LeechCore_Read_DoWork(pa, pbWorkaround, 0x1000, pPageStat, (DWORD)ctxDeviceMain->cfg.cbMaxSizeMemIo);
+        cbDataRead = LeechCore_Read_DoWork(pa, pbWorkaround, cb, pPageStat, (DWORD)ctxDeviceMain->cfg.cbMaxSizeMemIo);
         memcpy(pb, pbWorkaround, cb);
     }
     if((flags & LEECHCORE_FLAG_READ_RETRY) && (cb != cbDataRead)) {

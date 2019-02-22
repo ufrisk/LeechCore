@@ -83,5 +83,6 @@ Changelog:
 v1.0
 * Initial Release.
 
-Latest / v1.0.1
+Latest / v1.0.2
 * Fixes for the pmem device.
+* Multiple bug fixes

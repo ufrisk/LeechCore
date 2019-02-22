@@ -208,6 +208,12 @@ ULONG FT60x_FT_SetChipConfiguration(HANDLE ftHandle, PVOID pvConfiguration)
     return ioctl((int)(QWORD)ftHandle, 1, pvConfiguration) ? 0x20 : 0;
 }
 
+ULONG FT60x_FT_SetSuspendTimeout(HANDLE ftHandle, ULONG Timeout)
+{
+    // dummy function, only here for compatibility in Linux case
+    return 0;
+}
+
 ULONG FT60x_FT_AbortPipe(HANDLE ftHandle, UCHAR ucPipeID)
 {
     // dummy function, only here for compatibility in Linux case
@@ -278,6 +284,7 @@ FARPROC GetProcAddress(HMODULE hModule, LPSTR lpProcName)
     if(0 == strcmp("FT_Create", lpProcName))                { return (FARPROC)FT60x_FT_Create; }
     if(0 == strcmp("FT_GetChipConfiguration", lpProcName))  { return (FARPROC)FT60x_FT_GetChipConfiguration; }
     if(0 == strcmp("FT_SetChipConfiguration", lpProcName))  { return (FARPROC)FT60x_FT_SetChipConfiguration; }
+    if(0 == strcmp("FT_SetSuspendTimeout", lpProcName))     { return (FARPROC)FT60x_FT_SetSuspendTimeout; }
     if(0 == strcmp("FT_ReadPipe", lpProcName))              { return (FARPROC)FT60x_FT_ReadPipe; }
     if(0 == strcmp("FT_WritePipe", lpProcName))             { return (FARPROC)FT60x_FT_WritePipe; }
     return NULL;

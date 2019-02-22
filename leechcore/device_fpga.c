@@ -118,10 +118,10 @@ const DEVICE_PERFORMANCE PERFORMANCE_PROFILES[DEVICE_ID_MAX + 1] = {
         .RX_FLUSH_LIMIT = 0xfffff000,
         .MAX_SIZE_RX = 0x1c000,
         .MAX_SIZE_TX = 0x1000,
-        .DELAY_PROBE_READ = 500,
+        .DELAY_PROBE_READ = 750,
         .DELAY_PROBE_WRITE = 150,
         .DELAY_WRITE = 0,
-        .DELAY_READ = 300,
+        .DELAY_READ = 400,
         .RETRY_ON_ERROR = FALSE
     }, {
         .SZ_DEVICE_NAME = "PCIe Card",
@@ -913,7 +913,7 @@ BOOL DeviceFPGA_SetOption(_In_ QWORD fOption, _In_ QWORD qwValue)
     return FALSE;
 }
 
-BOOL DeviceFPGA_CommandData(_In_ ULONG64 fOption, _In_reads_(cbDataIn) PBYTE pbDataIn, _In_ DWORD cbDataIn, _Out_writes_(cbDataOut) PBYTE pbDataOut, _In_ DWORD cbDataOut, _Out_ PDWORD pcbDataOut)
+BOOL DeviceFPGA_CommandData(_In_ ULONG64 fOption, _In_reads_(cbDataIn) PBYTE pbDataIn, _In_ DWORD cbDataIn, _Out_writes_opt_(cbDataOut) PBYTE pbDataOut, _In_ DWORD cbDataOut, _Out_opt_ PDWORD pcbDataOut)
 {
     switch(fOption) {
         case LEECHCORE_COMMANDDATA_FPGA_WRITE_TLP:

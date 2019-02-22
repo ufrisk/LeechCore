@@ -43,7 +43,7 @@ typedef struct tdLEECHCORE_CONTEXT {
     VOID(*pfnClose)();
     BOOL(*pfnGetOption)(_In_ QWORD fOption, _Out_ PQWORD pqwValue);
     BOOL(*pfnSetOption)(_In_ QWORD fOption, _In_ QWORD qwValue);
-    BOOL(*pfnCommandData)(_In_ ULONG64 fOption, _In_reads_(cbDataIn) PBYTE pbDataIn, _In_ DWORD cbDataIn, _Out_writes_(cbDataOut) PBYTE pbDataOut, _In_ DWORD cbDataOut, _Out_ PDWORD pcbDataOut);
+    BOOL(*pfnCommandData)(_In_ ULONG64 fOption, _In_reads_(cbDataIn) PBYTE pbDataIn, _In_ DWORD cbDataIn, _Out_writes_opt_(cbDataOut) PBYTE pbDataOut, _In_ DWORD cbDataOut, _Out_opt_ PDWORD pcbDataOut);
     DEVICE_PHYSMEMMAP MemMap;
 } LEECHCORE_CONTEXT, *PLEECHCORE_CONTEXT;
 
