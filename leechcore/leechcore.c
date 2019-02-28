@@ -385,7 +385,7 @@ DLLEXPORT DWORD LeechCore_ReadEx(_In_ ULONG64 pa, _Out_writes_(cb) PBYTE pb, _In
 {
     BYTE pbWorkaround[4096];
     DWORD cbDataRead;
-    if(cb == 0) { return 0; }
+    if(!pb || !cb) { return 0; }
     // read memory (with strange workaround for 1-page reads...)
     if(cb > 0x1000) {
         cbDataRead = LeechCore_Read_DoWork(pa, pb, cb, pPageStat, (DWORD)ctxDeviceMain->cfg.cbMaxSizeMemIo);
@@ -431,7 +431,10 @@ DLLEXPORT BOOL LeechCore_Open(_Inout_ PLEECHCORE_CONFIG pConfig)
         memcpy(pConfig, &ctxDeviceMain->cfg, sizeof(LEECHCORE_CONFIG));
         return TRUE;
     }
-    LeechCore_Close();
+    if(ctxDeviceMain) {
+        vprintf("Failed loading LeechCore - already initialized.\n");
+        return FALSE;
+    }
     ctxDeviceMain = (PLEECHCORE_CONTEXT)LocalAlloc(LMEM_ZEROINIT, sizeof(LEECHCORE_CONTEXT));
     if(!ctxDeviceMain) { return FALSE; }
     memcpy(&ctxDeviceMain->cfg, pConfig, sizeof(LEECHCORE_CONFIG));
@@ -487,7 +490,7 @@ DLLEXPORT BOOL LeechCore_Open(_Inout_ PLEECHCORE_CONFIG pConfig)
     } else {
         LeechCore_Close();
         if(pConfig->flags & LEECHCORE_CONFIG_FLAG_PRINTF) {
-            printf("Failed loading LeechCore v%i.%i.%i\n", VERSION_MAJOR, VERSION_MINOR, VERSION_REVISION);
+            vprintf("Failed loading LeechCore v%i.%i.%i\n", VERSION_MAJOR, VERSION_MINOR, VERSION_REVISION);
         }
     }
     LeechCore_StatisticsCallEnd(LEECHCORE_STATISTICS_ID_OPEN, tmCallStart);

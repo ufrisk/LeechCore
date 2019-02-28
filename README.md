@@ -31,7 +31,7 @@ Please find a summary of the supported software based memory acquisition methods
 Please find a summary of the supported hardware based memory acquisition methods listed below. All hardware based memory acquisition methods are supported on both Windows and Linux. The FPGA based methods however sports a slight performance penalty on Linux and will max out at approx: 90MB/s compared to 150MB/s on Windows.
 
 | Device                                    | Type | Interface | Speed | 64-bit memory access | PCIe TLP access |
-| ------------------------------------------------------------ | ------- | ---- | ------- | ----------------- | --- |
+| ---------------------------------------------------------------------- | ------- | ---- | ------- | --- | --- |
 | [AC701/FT601](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)    | FPGA    | USB3 | 150MB/s | Yes | Yes |
 | [PCIeScreamer](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)   | FPGA    | USB3 | 100MB/s | Yes | Yes |
 | [SP605/FT601](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)    | FPGA    | USB3 |  75MB/s | Yes | Yes |
@@ -83,6 +83,6 @@ Changelog:
 v1.0
 * Initial Release.
 
-Latest / v1.0.2
-* Fixes for the pmem device.
-* Multiple bug fixes
+v1.1
+* Multiple bug fixes including pmem device.
+* LeechService: Multiple parallel connections and connection timeouts supported.

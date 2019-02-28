@@ -151,6 +151,7 @@ BOOL LeechRPC_SubmitCommand(_In_ PLEECHRPC_MSG_HDR pMsgIn, _In_ LEECHRPC_MSGTYPE
     switch(pMsgIn->tpMsg) {
         case LEECHRPC_MSGTYPE_PING_REQ:
         case LEECHRPC_MSGTYPE_CLOSE_REQ:
+        case LEECHRPC_MSGTYPE_KEEPALIVE_REQ:
             pMsgIn->cbMsg = sizeof(LEECHRPC_MSG_HDR);
             break;
         case LEECHRPC_MSGTYPE_OPEN_REQ:
@@ -172,6 +173,7 @@ BOOL LeechRPC_SubmitCommand(_In_ PLEECHRPC_MSG_HDR pMsgIn, _In_ LEECHRPC_MSGTYPE
     }
     // submit message to RPC server.
     __try {
+        pMsgIn->qwRpcClientID = ctxDeviceMain->qwRpcClientID;
         error = LeechRpc_ReservedSubmitCommand(ctx->hRPC, pMsgIn->cbMsg, (PBYTE)pMsgIn, &cbMsgOut, (PBYTE*)ppMsgOut);
     } __except(EXCEPTION_EXECUTE_HANDLER) { error = E_FAIL; }
     if(error) {
@@ -180,12 +182,13 @@ BOOL LeechRPC_SubmitCommand(_In_ PLEECHRPC_MSG_HDR pMsgIn, _In_ LEECHRPC_MSGTYPE
     }
     // sanity check non-trusted incoming message from RPC server.
     fOK = (cbMsgOut >= sizeof(LEECHRPC_MSG_HDR)) && *ppMsgOut && ((*ppMsgOut)->dwMagic == LEECHRPC_MSGMAGIC);
-    fOK = fOK && ((*ppMsgOut)->tpMsg < LEECHRPC_MSGTYPE_MAX) && ((*ppMsgOut)->cbMsg == cbMsgOut);
+    fOK = fOK && ((*ppMsgOut)->tpMsg <= LEECHRPC_MSGTYPE_MAX) && ((*ppMsgOut)->cbMsg == cbMsgOut);
     fOK = fOK && (*ppMsgOut)->fMsgResult && ((*ppMsgOut)->tpMsg == tpMsgRsp);
     if(fOK) {
         switch((*ppMsgOut)->tpMsg) {
             case LEECHRPC_MSGTYPE_PING_RSP:
             case LEECHRPC_MSGTYPE_CLOSE_RSP:
+            case LEECHRPC_MSGTYPE_KEEPALIVE_RSP:
             case LEECHRPC_MSGTYPE_WRITE_RSP:
             case LEECHRPC_MSGTYPE_SETOPTION_RSP:
                 fOK = (*ppMsgOut)->cbMsg == sizeof(LEECHRPC_MSG_HDR);
@@ -233,6 +236,33 @@ BOOL LeechRPC_Ping()
 
 
 //-----------------------------------------------------------------------------
+// CLIENT TRACK / KEEPALIVE FUNCTIONALITY BELOW:
+//-----------------------------------------------------------------------------
+
+VOID LeechRPC_KeepaliveThreadClient(PVOID pv)
+{
+    PLEECHRPC_CLIENT_CONTEXT ctx = (PLEECHRPC_CLIENT_CONTEXT)ctxDeviceMain->hDevice;
+    LEECHRPC_MSG_HDR MsgReq = { 0 };
+    PLEECHRPC_MSG_HDR pMsgRsp = NULL;
+    DWORD c = 0;
+    ctx->fHousekeeperThread = TRUE;
+    ctx->fHousekeeperThreadIsRunning = TRUE;
+    while(ctx->fHousekeeperThread) {
+        c++;
+        if(0 == (c % (10 * 15))) { // send keepalive every 15s
+            ZeroMemory(&MsgReq, sizeof(LEECHRPC_MSG_HDR));
+            MsgReq.tpMsg = LEECHRPC_MSGTYPE_KEEPALIVE_REQ;
+            LeechRPC_SubmitCommand(&MsgReq, LEECHRPC_MSGTYPE_KEEPALIVE_RSP, &pMsgRsp);
+            LocalFree(pMsgRsp);
+        }
+        Sleep(100);
+    }
+    ctx->fHousekeeperThreadIsRunning = FALSE;
+}
+
+
+
+//-----------------------------------------------------------------------------
 // OPEN/CLOSE FUNCTIONALITY BELOW:
 //-----------------------------------------------------------------------------
 
@@ -254,6 +284,7 @@ VOID LeechRPC_Close()
     LEECHRPC_MSG_HDR Msg = { 0 };
     PLEECHRPC_MSG_HDR pMsgRsp = NULL;
     if(!ctx) { return; }
+    ctx->fHousekeeperThread = FALSE;
     Msg.tpMsg = LEECHRPC_MSGTYPE_CLOSE_REQ;
     if(LeechRPC_SubmitCommand(&Msg, LEECHRPC_MSGTYPE_CLOSE_RSP, &pMsgRsp)) {
         LocalFree(pMsgRsp);
@@ -528,6 +559,7 @@ BOOL LeechRPC_Open()
         ctxDeviceMain->cfg.flags = ctxDeviceMain->cfg.flags | LEECHCORE_CONFIG_FLAG_REMOTE_NO_COMPRESS;
     }
     // call open on the remote service
+    Util_GenRandom((PBYTE)&ctxDeviceMain->qwRpcClientID, sizeof(QWORD));
     MsgReq.tpMsg = LEECHRPC_MSGTYPE_OPEN_REQ;
     memcpy(&MsgReq.cfg, &ctxDeviceMain->cfg, sizeof(LEECHCORE_CONFIG));
     ZeroMemory(MsgReq.cfg.szRemote, _countof(MsgReq.cfg.szRemote));
@@ -548,6 +580,7 @@ BOOL LeechRPC_Open()
         vprintfv("RPC: INFO: Compression disabled.\n");
     }
     // all ok - initialize this rpc device stub.
+    CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)LeechRPC_KeepaliveThreadClient, NULL, 0, NULL);
     memcpy(&ctxDeviceMain->cfg, &pMsgRsp->cfg, sizeof(LEECHCORE_CONFIG));
     ctxDeviceMain->cfg.fRemote = TRUE;
     ctxDeviceMain->cfg.cbMaxSizeMemIo = 0x01000000; // 16MB

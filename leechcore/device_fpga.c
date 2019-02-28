@@ -642,6 +642,7 @@ VOID DeviceFPGA_ReadScatterMEM_Impl(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_
         usleep(ctx->perf.DELAY_READ);
         DeviceFPGA_RxTlpSynchronous(ctx);
     }
+    ctx->hRxTlpCallbackFn = NULL;
     ctx->pMRdBufferX = NULL;
 }
 
@@ -814,6 +815,7 @@ BOOL DeviceFPGA_ListenTlp(_In_ DWORD dwTime)
 {
     PDEVICE_CONTEXT_FPGA ctx = (PDEVICE_CONTEXT_FPGA)ctxDeviceMain->hDevice;
     QWORD tmStart = GetTickCount64();
+    ctx->hRxTlpCallbackFn = NULL;
     while(GetTickCount64() - tmStart < dwTime) {
         DeviceFPGA_TxTlp(ctx, NULL, 0, TRUE, TRUE);
         Sleep(10);
@@ -917,9 +919,9 @@ BOOL DeviceFPGA_CommandData(_In_ ULONG64 fOption, _In_reads_(cbDataIn) PBYTE pbD
 {
     switch(fOption) {
         case LEECHCORE_COMMANDDATA_FPGA_WRITE_TLP:
-            return DeviceFPGA_WriteTlp(pbDataIn, cbDataIn);
+            return (cbDataIn >= 12) && pbDataIn && DeviceFPGA_WriteTlp(pbDataIn, cbDataIn);
         case LEECHCORE_COMMANDDATA_FPGA_LISTEN_TLP:
-            return (cbDataIn == 4) && DeviceFPGA_ListenTlp(*(PDWORD)pbDataIn);
+            return (cbDataIn == 4) && pbDataIn && DeviceFPGA_ListenTlp(*(PDWORD)pbDataIn);
     }
     return FALSE;
 }

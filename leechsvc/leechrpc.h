@@ -5,7 +5,7 @@
 //
 #ifndef __LEECHRPC_H__
 #define __LEECHRPC_H__
-#include "../files/leechcore.h"
+#include "leechcore.h"
 #ifdef _WIN32
 #include <windows.h>
 
@@ -58,7 +58,9 @@ typedef enum {
     LEECHRPC_MSGTYPE_SETOPTION_RSP = 16,
     LEECHRPC_MSGTYPE_COMMANDDATA_REQ = 17,
     LEECHRPC_MSGTYPE_COMMANDDATA_RSP = 18,
-    LEECHRPC_MSGTYPE_MAX = 19,
+    LEECHRPC_MSGTYPE_KEEPALIVE_REQ = 19,
+    LEECHRPC_MSGTYPE_KEEPALIVE_RSP = 20,
+    LEECHRPC_MSGTYPE_MAX = 20,
 } LEECHRPC_MSGTYPE;
 
 #define LEECHRPC_MSGMAGIC       0xd05a0666
@@ -68,6 +70,7 @@ typedef struct tdLEECHRPC_MSG_HDR {
     DWORD cbMsg;
     LEECHRPC_MSGTYPE tpMsg;
     BOOL fMsgResult;
+    QWORD qwRpcClientID;
 } LEECHRPC_MSG_HDR, *PLEECHRPC_MSG_HDR, **PPLEECHRPC_MSG_HDR;
 
 typedef struct tdLEECHRPC_MSG_OPEN {
@@ -76,6 +79,7 @@ typedef struct tdLEECHRPC_MSG_OPEN {
     DWORD cbMsg;
     LEECHRPC_MSGTYPE tpMsg;
     BOOL fMsgResult;
+    QWORD qwRpcClientID;
     // MSG
     LEECHCORE_CONFIG cfg;
 } LEECHRPC_MSG_OPEN, *PLEECHRPC_MSG_OPEN;
@@ -86,6 +90,7 @@ typedef struct tdLEECHRPC_MSG_BIN {
     DWORD cbMsg;
     LEECHRPC_MSGTYPE tpMsg;
     BOOL fMsgResult;
+    QWORD qwRpcClientID;
     // MSG
     QWORD qwData[2];
     DWORD cbDecompress; // cb uncompressed data, 0 = no compression
@@ -99,6 +104,7 @@ typedef struct tdLEECHRPC_MSG_DATA {
     DWORD cbMsg;
     LEECHRPC_MSGTYPE tpMsg;
     BOOL fMsgResult;
+    QWORD qwRpcClientID;
     // MSG
     QWORD qwData[2];
 } LEECHRPC_MSG_DATA, *PLEECHRPC_MSG_DATA;

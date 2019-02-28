@@ -43,4 +43,11 @@ VOID Util_GetPathDll(_Out_writes_(MAX_PATH) PCHAR szPath, _In_opt_ HMODULE hModu
 */
 VOID Util_Split2(_In_ LPSTR sz, CHAR chDelimiter, _Out_writes_(MAX_PATH) PCHAR _szBuf, _Out_ LPSTR *psz1, _Out_ LPSTR *psz2);
 
+/*
+* Simple random number function.
+* -- pb = buffer to receive random data.
+* -- cb = length of random data to create.
+*/
+VOID Util_GenRandom(_Out_ PBYTE pb, _In_ DWORD cb);
+
 #endif /* __UTIL_H__ */

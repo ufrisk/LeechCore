@@ -110,3 +110,16 @@ VOID Util_Split2(_In_ LPSTR sz, CHAR chDelimiter, _Out_writes_(MAX_PATH) PCHAR _
         }
     }
 }
+
+VOID Util_GenRandom(_Out_ PBYTE pb, _In_ DWORD cb)
+{
+    DWORD i = 0;
+    srand((unsigned int)GetTickCount64());
+    if(cb % 2) {
+        *(PBYTE)(pb) = (BYTE)rand();
+        i++;
+    }
+    for(; i <= cb - 2; i += 2) {
+        *(PWORD)(pb + i) = (WORD)rand();
+    }
+}
