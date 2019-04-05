@@ -4,7 +4,7 @@ The LeechCore Memory Acquisition Library focuses on Physical Memory Acquisition 
 
 Use the LeechCore library locally or connect to, over the network, a LeechAgent to acquire physical memory or run commands remotely. The connection is by default compressed and secured with mutually authenticated kerberos - making it ideal in incident response when combined with analysis and live memory capture using Comae DumpIt or WinPMEM - even over high latency low-bandwidth connections!
 
-The LeechCore library is used by [PCILeech](https://github.com/ufrisk/pcileech) and [The Memory Process File System](https://github.com/ufrisk/MemProcFS).
+The LeechCore library is used by [PCILeech](https://github.com/ufrisk/pcileech) and [The Memory Process File System (MemProcFS)](https://github.com/ufrisk/MemProcFS).
 
 The LeechCore library is supported on 32/64-bit **Windows** (`.dll`) and 64-bit **Linux** (`.so`). No executable exists for LeechCore - the library is always loaded by other applications using it - such as PCILeech and The Memory Process File System `MemProcFS.exe`.
 
@@ -52,7 +52,10 @@ There is also a possibility to run the LeechAgent in interactive mode (as a norm
 
 The LeechAgent listens on the port `28473` - please ensure network connectivity for this port in the firewall. Also, if doing live capture ensure that LeechAgent (if running in interactive mode) is started as an administrator.
 
-For more information please check the [LeechCore wiki](https://github.com/ufrisk/LeechCore/wiki) and the [blog entry](https://blog.frizk.net/2019/01/remote-live-memory-analysis.html) about remote live memory capture.
+For more information please check the [LeechCore wiki](https://github.com/ufrisk/LeechCore/wiki) and the [blog entry](http://blog.frizk.net/2019/04/LeechAgent.html) about remote live memory capture with the LeechAgent.
+
+The video below shows the process of installing the LeechAgent to a remote computer, connecting to it with MemProcFS to analyze and dump the memory while also connecting to it in parallel with PCILecch to submit a Python memory analysis script that make use of the MemProcFS API to analyze the remote CPU page tables for rwx-sections. Click on the video to open a higher-quality version on Youtube.
+<p align="center"><a href="https://www.youtube.com/watch?v=UIsNWJ5KTvQ" alt="Installing the LeechAgent, Dumping remote memory and running remote Python analysis scripts." target="_new"><img src="https://raw.githubusercontent.com/wiki/ufrisk/LeechCore/resources/agent-anim.gif"/></a></p>
 
 **Examples:**
 
@@ -99,6 +102,7 @@ v1.1
 * LeechService: Multiple parallel connections and connection timeouts supported.
 
 v1.2
+* Project upgrade to Visual Studio 2019.
 * Release of the LeechAgent - remote memory acquisition and remote physical memory analysis.
 * LeechCore Windows x86 support. Now Windows x86/x64 and Linux x64 is supported.
 * Bug fixes and additional functionality to support LeechAgent.
