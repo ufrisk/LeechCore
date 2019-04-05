@@ -173,7 +173,7 @@ BOOL DeviceRawTCP_ReadDMA(_In_ QWORD qwAddr, _Out_ PBYTE pb, _In_ DWORD cb)
 	return Rx.cb >= cb;
 }
 
-VOID DeviceRawTCP_ReadScatterGather_ReadRegion(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_ DWORD cpMEMs, _In_ DWORD pa, _In_ DWORD cb)
+VOID DeviceRawTCP_ReadScatterGather_ReadRegion(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_ DWORD cpMEMs, _In_ QWORD pa, _In_ DWORD cb)
 {
     BOOL result;
     PDEVICE_CONTEXT_RAWTCP ctx = (PDEVICE_CONTEXT_RAWTCP)ctxDeviceMain->hDevice;
@@ -194,7 +194,8 @@ VOID DeviceRawTCP_ReadScatterGather(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_
 {
     PDEVICE_CONTEXT_RAWTCP ctx = (PDEVICE_CONTEXT_RAWTCP)ctxDeviceMain->hDevice;
     PMEM_IO_SCATTER_HEADER pMEM;
-    DWORD i, c = 0, iBase = 0, paBase = 0, cbCurrent = 0;
+    QWORD paBase = 0;
+    DWORD i, c = 0, iBase = 0, cbCurrent = 0;
     for(i = 0; i < cpMEMs; i++) {
         pMEM = ppMEMs[i];
         if(!MemMap_VerifyTranslateMEM(pMEM, NULL)) { continue; }
@@ -202,7 +203,7 @@ VOID DeviceRawTCP_ReadScatterGather(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_
             if(pMEM->cbMax && (pMEM->cb != pMEM->cbMax)) {
                 c = 1;
                 iBase = i;
-                paBase = (DWORD)pMEM->qwA;
+                paBase = pMEM->qwA;
                 cbCurrent = pMEM->cbMax;
             }
         } else if((paBase + cbCurrent == pMEM->qwA) && (cbCurrent + pMEM->cbMax <= RAWTCP_MAX_SIZE_RX)) {
@@ -214,7 +215,7 @@ VOID DeviceRawTCP_ReadScatterGather(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_
             if(pMEM->cbMax && (pMEM->cb != pMEM->cbMax)) {
                 c = 1;
                 iBase = i;
-                paBase = (DWORD)pMEM->qwA;
+                paBase = pMEM->qwA;
                 cbCurrent = pMEM->cbMax;
             }
         }

@@ -60,6 +60,9 @@
     <ClCompile Include="util.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="leechrpcshared.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="device.h">

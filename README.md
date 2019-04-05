@@ -2,17 +2,17 @@ The LeechCore Physical Memory Acquisition Library:
 =========================================
 The LeechCore Memory Acquisition Library focuses on Physical Memory Acquisition using various hardware and software based methods.
 
-Connect to a remote LeechCore instance hosted by a LeechService to acquire physical memory remotely. The connection is by default compressed and secured with mutually authenticated kerberos - making it ideal in incident response when combined with live memory capture using Comae DumpIt or WinPMEM - even over medium latency low-bandwidth connections!
+Use the LeechCore library locally or connect to, over the network, a LeechAgent to acquire physical memory or run commands remotely. The connection is by default compressed and secured with mutually authenticated kerberos - making it ideal in incident response when combined with analysis and live memory capture using Comae DumpIt or WinPMEM - even over high latency low-bandwidth connections!
 
-The LeechCore library is used for memory acquisition by [The Memory Process File System](https://github.com/ufrisk/MemProcFS).
+The LeechCore library is used by [PCILeech](https://github.com/ufrisk/pcileech) and [The Memory Process File System](https://github.com/ufrisk/MemProcFS).
 
-The LeechCore library is supported on both **Windows** (`.dll`) and **Linux** (`.so`). No executable exists for LeechCore - the library is always loaded by other applications using it - such as The Memory Process File System `MemProcFS.exe` or the LeechService `LeechSvc.exe`.
+The LeechCore library is supported on 32/64-bit **Windows** (`.dll`) and 64-bit **Linux** (`.so`). No executable exists for LeechCore - the library is always loaded by other applications using it - such as PCILeech and The Memory Process File System `MemProcFS.exe`.
 
 For detailed information about individual memory acquisition methods or the LeechCore API please check out the [LeechCore wiki](https://github.com/ufrisk/LeechCore/wiki).
 
 Memory Acquisition Methods:
 ===========================
-**Software based memory aqusition methods:**
+### Software based memory aqusition methods:
 
 Please find a summary of the supported software based memory acquisition methods listed below. Please note that the LeechService only provides a network connection to a remote LeechCore library. It's possible to use both hardware and software based memory acquisition once connected.
 
@@ -26,7 +26,7 @@ Please find a summary of the supported software based memory acquisition methods
 | [WinPMEM](https://github.com/ufrisk/LeechCore/wiki/Device_WinPMEM)                       | Live&nbsp;Memory | No  |
 | [LeechService*](https://github.com/ufrisk/LeechCore/wiki/Device_Remote)                  | Remote           | No  |
 
-**Hardware based memory aqusition methods:**
+### Hardware based memory aqusition methods:
 
 Please find a summary of the supported hardware based memory acquisition methods listed below. All hardware based memory acquisition methods are supported on both Windows and Linux. The FPGA based methods however sports a slight performance penalty on Linux and will max out at approx: 90MB/s compared to 150MB/s on Windows.
 
@@ -40,34 +40,45 @@ Please find a summary of the supported hardware based memory acquisition methods
 | [PP3380](https://github.com/ufrisk/LeechCore/wiki/Device_USB3380)      | USB3380 | USB3 | 150MB/s | No  | No  |
 | [DMA patched HP iLO](https://github.com/ufrisk/LeechCore/wiki/Device_iLO) | TCP/IP | TCP | 1MB/s  | Yes | No  |
 
-The LeechService Memory Acquisition Service:
-============================================
-The LeechService Memory Acquisition Service exists for Windows only. It allows users of the LeechCore library to connect to a remote instance of the LeechCore library (loaded by the LeechService). The connection takes place by default over mutually authenticated encrypted kerberos (if in service mode in an active directory domain).
+The LeechAgent Memory Acquisition and Analysis Agent:
+=====================================================
+The LeechAgent Memory Acquisition and Analysis Agent exists for Windows only. It allows users of the LeechCore library (PCILeech and MemProcFS) to connect to remotely installed LeechAgents over the network. The connection is secured, by default, with mutually authenticated encrypted kerberos.
 
-If running as a service LeechService authenticates all incoming connections against membership in the Local Administrators group. The clients must also authenticate the service itself against the SPN used by the service - please check the Application Event Log for information about the SPN and also successful authentication events against the service.
+Once connected physical memory may be acquired over the secure compressed connection. Memory analysis scripts, written in Python, may also be submitted for remote processing by the LeechAgent.
 
-There is also a possibility to run the LeechService in interactive mode (as a normal program). If run in interactive mode a user may also start the LeechService in "insecure" mode - which means no authentication or logging at all.
+The LeechAgent authenticates all incoming connections against membership in the Local Administrators group. The clients must also authenticate the agent itself against the SPN used by the agent - please check the Application Event Log for information about the SPN and also successful authentication events against the agent.
 
-The LeechService listens on the port `28473` - please ensure network connectivity for this port in the firewall. Also, if doing live capture ensure that LeechService (if running in interactive mode) is started as an administrator.
+There is also a possibility to run the LeechAgent in interactive mode (as a normal program). If run in interactive mode a user may also start the LeechAgent in "insecure" mode - which means no authentication or logging at all.
+
+The LeechAgent listens on the port `28473` - please ensure network connectivity for this port in the firewall. Also, if doing live capture ensure that LeechAgent (if running in interactive mode) is started as an administrator.
 
 For more information please check the [LeechCore wiki](https://github.com/ufrisk/LeechCore/wiki) and the [blog entry](https://blog.frizk.net/2019/01/remote-live-memory-analysis.html) about remote live memory capture.
 
 **Examples:**
 
-Installing the LeechService (run as elevated administrator)'. Please ensure that the LeechSvc.exe is on the local C: drive before installing the service. Please also ensure that dependencies such as required `.dll` and/or `.sys` files are put in the same directory as the service before running the install command.
-* `LeechSvc.exe install`
+Installing the LeechAgent on the local system (run as elevated administrator)'. Please ensure that the LeechAgent.exe is on the local C: drive before installing the agent service. Please also ensure that dependencies such as required `.dll` and/or `.sys` files (and optional Python sub-subfolder) are put in the same directory as the LeechAgent before running the install command.
+* `LeechAgent.exe -install`
 
-Uninstall an existing LeechService:
-* `LeechSvc.exe uninstall`
+Installing the LeechAgent on a remote system (or on the local system) in the `Program Files\LeechAgent` folder. An Actice Directory environment with remote access to the Service Manager of the target system is required. For additional information see the [wiki entry](https://github.com/ufrisk/LeechCore/wiki/LeechAgent_Install) about installing LeechAgent.
+* `LeechSvc.exe -remoteinstall <remotecomputer.contoso.com>`
 
-Start the LeechService in interactive mode only accepting connections from administative users over kerberos-secured connections. Remember to start as elevated administrator if clients accessing LeechSvc should load WinPMEM to access live memory.
-* `LeechSvc.exe interactive`
+Uninstall an existing, locally installed, LeechAgent. The agent service will be uninstalled but any files will remain.
+* `LeechAgent.exe -uninstall`
 
-Start the LeechService in interactive mode with DumpIt LIVEKD to allow connecting clients to access live memory. Start as elevated administrator. Only accept connections from administative users over kerberos-secured connections. 
-* `DumpIt.exe /LIVEKD /A LeechSvc.exe /C interactive`
+Uninstall a LeechAgent from a remote system and delete the `Program Files\LeechAgent` folder.
+* `LeechAgent.exe -remoteuninstall <remotecomputer.contoso.com>`
 
-Start the LeevhService in interactive mode with DumpIt LIVEKD to allow connecting clients to access live memory. Start as elevated administrator. Accept connections from all clients with access to port `tcp/28473` without any form of authentication.
-* `DumpIt.exe /LIVEKD /A LeechSvc.exe /C "interactive insecure"`
+Start the LeechAgent in interactive mode only accepting connections from administative users over kerberos-secured connections. Remember to start as elevated administrator if clients accessing LeechAgent should load WinPMEM to access live memory.
+* `LeechAgent.exe -interactive`
+
+Start the LeechAgent in interactive insecure mode - accepting connections from all clients with access to port `tcp/28473`. NB! unauthenticated clients may dump memory and submit Python scripts running as SYSTEM. Use with care for testing only!
+* `LeechAgent.exe -interactive -insecure`
+
+Start the LeechAgent in interactive mode with DumpIt LIVEKD to allow connecting clients to access live memory. Start as elevated administrator. Only accept connections from administative users over kerberos-secured connections. 
+* `DumpIt.exe /LIVEKD /A LeechAgent.exe /C -interactive`
+
+Start the LeevhAgent in interactive mode with DumpIt LIVEKD to allow connecting clients to access live memory. Start as elevated administrator. Accept connections from all clients with access to port `tcp/28473` without any form of authentication.
+* `DumpIt.exe /LIVEKD /A LeechAgent.exe /C "-interactive -insecure"`
 
 
 
@@ -86,3 +97,8 @@ v1.0
 v1.1
 * Multiple bug fixes including pmem device.
 * LeechService: Multiple parallel connections and connection timeouts supported.
+
+v1.2
+* Release of the LeechAgent - remote memory acquisition and remote physical memory analysis.
+* LeechCore Windows x86 support. Now Windows x86/x64 and Linux x64 is supported.
+* Bug fixes and additional functionality to support LeechAgent.

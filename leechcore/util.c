@@ -111,6 +111,31 @@ VOID Util_Split2(_In_ LPSTR sz, CHAR chDelimiter, _Out_writes_(MAX_PATH) PCHAR _
     }
 }
 
+VOID Util_Split3(_In_ LPSTR sz, CHAR chDelimiter, _Out_writes_(MAX_PATH) PCHAR _szBuf, _Out_ LPSTR *psz1, _Out_ LPSTR *psz2, _Out_ LPSTR *psz3)
+{
+    DWORD i;
+    strcpy_s(_szBuf, MAX_PATH, sz);
+    *psz1 = _szBuf;
+    *psz2 = NULL;
+    for(i = 0; i < MAX_PATH; i++) {
+        if('\0' == _szBuf[i]) {
+            if(!*psz2) {
+                *psz2 = _szBuf + i;
+            }
+            *psz3 = _szBuf + i;
+            return;
+        }
+        if(chDelimiter == _szBuf[i]) {
+            _szBuf[i] = '\0';
+            if(*psz2) {
+                *psz3 = _szBuf + i + 1;
+                return;
+            }
+            *psz2 = _szBuf + i + 1;
+        }
+    }
+}
+
 VOID Util_GenRandom(_Out_ PBYTE pb, _In_ DWORD cb)
 {
     DWORD i = 0;
@@ -123,3 +148,35 @@ VOID Util_GenRandom(_Out_ PBYTE pb, _In_ DWORD cb)
         *(PWORD)(pb + i) = (WORD)rand();
     }
 }
+
+BOOL Util_IsPlatformBitness64()
+{
+    BOOL f64 = TRUE;
+#ifndef ARCH_64
+    IsWow64Process(GetCurrentProcess(), &f64);
+#endif /* ARCH_64 */
+    return f64;
+}
+
+BOOL Util_IsProgramBitness64()
+{
+#ifndef _WIN64
+    return FALSE;
+#endif /* _WIN64 */
+    return TRUE;
+}
+
+#ifdef _WIN32
+
+_Success_(return)
+BOOL Util_GetBytesPipe(_In_ HANDLE hPipe_Rd, _Out_writes_opt_(cb) PBYTE pb, _In_ DWORD cb)
+{
+    DWORD cbReadTotal = 0, cbRead = 0;
+    while((cbReadTotal < cb) && ReadFile(hPipe_Rd, pb + cbReadTotal, cb - cbReadTotal, &cbRead, NULL)) {
+        cbReadTotal += cbRead;
+    }
+    return (cb == cbReadTotal);
+}
+
+#endif /* _WIN32 */
+

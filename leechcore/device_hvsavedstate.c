@@ -366,7 +366,7 @@ BOOL DeviceHvSavedState_Open_MemMap(PHVSAVEDSTATE_CONTEXT ctx)
     GPA_MEMORY_CHUNK *pChunks;
     hr = ctx->fn.GetGuestPhysicalMemoryChunks(ctx->hVmSavedStateDumpHandle, &cbPageSize, NULL, &cChunks);
     if((hr != E_OUTOFMEMORY) || !cChunks) { return FALSE; }
-    if(!(pChunks = (GPA_MEMORY_CHUNK*)LocalAlloc(0, cChunks * sizeof(GPA_MEMORY_CHUNK)))) { return FALSE; }
+    if(!(pChunks = (GPA_MEMORY_CHUNK*)LocalAlloc(0, (SIZE_T)(cChunks * sizeof(GPA_MEMORY_CHUNK))))) { return FALSE; }
     hr = ctx->fn.GetGuestPhysicalMemoryChunks(ctx->hVmSavedStateDumpHandle, &cbPageSize, pChunks, &cChunks);
     if(FAILED(hr)) {
         LocalFree(pChunks);
@@ -452,13 +452,14 @@ BOOL DeviceHvSavedState_Open_InitializeDll(PHVSAVEDSTATE_CONTEXT ctx)
     return TRUE;
 }
 
+_Success_(return)
 BOOL DeviceHvSavedState_GetOption(_In_ QWORD fOption, _Out_ PQWORD pqwValue)
 {
     PHVSAVEDSTATE_CONTEXT ctx = (PHVSAVEDSTATE_CONTEXT)ctxDeviceMain->hDevice;
     if (fOption == LEECHCORE_OPT_MEMORYINFO_VALID) {
+        *pqwValue = 0;
         return TRUE;
     }
-
     switch (fOption) {
         case LEECHCORE_OPT_MEMORYINFO_ADDR_MAX:
             *pqwValue = ctx->paMax;
@@ -473,7 +474,6 @@ BOOL DeviceHvSavedState_GetOption(_In_ QWORD fOption, _Out_ PQWORD pqwValue)
             vprintfvv(__FUNCTION__ ": No option for 0x%I64X\n", fOption);
             break;
     }
-
     *pqwValue = 0;
     return FALSE;
 }

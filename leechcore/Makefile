@@ -12,4 +12,4 @@ leechcore: $(OBJ)
 	mv leechcore.so ../files/
 
 clean:
-	rm *.o
+	rm -f *.o

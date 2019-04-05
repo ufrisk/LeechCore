@@ -119,7 +119,7 @@ DLLEXPORT VOID LeechCore_ReadScatter(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In
 }
 
 _Success_(return)
-DLLEXPORT BOOL LeechCore_Write(_In_ ULONG64 pa, _In_ PBYTE pb, _In_ DWORD cb)
+DLLEXPORT BOOL LeechCore_Write(_In_ ULONG64 pa, _In_reads_(cb) PBYTE pb, _In_ DWORD cb)
 {
     BOOL result;
     QWORD paDevice, tmCallStart;
@@ -134,7 +134,7 @@ DLLEXPORT BOOL LeechCore_Write(_In_ ULONG64 pa, _In_ PBYTE pb, _In_ DWORD cb)
 }
 
 _Success_(return)
-DLLEXPORT BOOL LeechCore_WriteEx(_In_ ULONG64 pa, _In_ PBYTE pb, _In_ DWORD cb, _In_ DWORD flags)
+DLLEXPORT BOOL LeechCore_WriteEx(_In_ ULONG64 pa, _In_reads_(cb) PBYTE pb, _In_ DWORD cb, _In_ DWORD flags)
 {
     BOOL result;
     PBYTE pbRead;
@@ -207,6 +207,7 @@ QWORD LeechCore_AutoIdentifyMaxAddress()
 _Success_(return)
 BOOL LeechCore_GetOption_Core(_In_ ULONG64 fOption, _Out_ PULONG64 pqwValue)
 {
+    QWORD v = 0;
     *pqwValue = 0;
     switch(fOption) {
         case LEECHCORE_OPT_CORE_PRINTF_ENABLE:
@@ -229,6 +230,19 @@ BOOL LeechCore_GetOption_Core(_In_ ULONG64 fOption, _Out_ PULONG64 pqwValue)
             return TRUE;
         case LEECHCORE_OPT_CORE_VERSION_REVISION:
             *pqwValue = VERSION_REVISION;
+            return TRUE;
+        case LEECHCORE_OPT_CORE_FLAG_BACKEND_FUNCTIONS:
+            if(ctxDeviceMain) {
+                v |= (ctxDeviceMain->cfg.flags & LEECHCORE_CONFIG_FLAG_REMOTE_NO_COMPRESS) ? LEECHRPC_FLAG_NOCOMPRESS : 0;
+                v |= ctxDeviceMain->pfnReadScatterMEM ? LEECHRPC_FLAG_FNEXIST_ReadScatterMEM : 0;
+                v |= ctxDeviceMain->pfnWriteMEM ? LEECHRPC_FLAG_FNEXIST_WriteMEM : 0;
+                v |= ctxDeviceMain->pfnProbeMEM ? LEECHRPC_FLAG_FNEXIST_ProbeMEM : 0;
+                v |= ctxDeviceMain->pfnClose ? LEECHRPC_FLAG_FNEXIST_Close : 0;
+                v |= ctxDeviceMain->pfnGetOption ? LEECHRPC_FLAG_FNEXIST_GetOption : 0;
+                v |= ctxDeviceMain->pfnSetOption ? LEECHRPC_FLAG_FNEXIST_SetOption : 0;
+                v |= ctxDeviceMain->pfnCommandData ? LEECHRPC_FLAG_FNEXIST_CommandData : 0;
+                *pqwValue = v;
+            }
             return TRUE;
     }
     return FALSE;
@@ -259,16 +273,19 @@ DLLEXPORT BOOL LeechCore_GetOption(_In_ ULONG64 fOption, _Out_ PULONG64 pqwValue
 {
     BOOL result;
     QWORD tmCallStart;
-    if(!ctxDeviceMain || !ctxDeviceMain->hDevice || !ctxDeviceMain->pfnGetOption) { return FALSE; }
-    tmCallStart = LeechCore_StatisticsCallStart();
+    if(!ctxDeviceMain) { return FALSE; }
     if(fOption & 0x81000000) {
+        tmCallStart = LeechCore_StatisticsCallStart();
         result = LeechCore_GetOption_Core(fOption, pqwValue);
+        LeechCore_StatisticsCallEnd(LEECHCORE_STATISTICS_ID_GETOPTION, tmCallStart);
     } else {
+        if(!ctxDeviceMain->hDevice || !ctxDeviceMain->pfnSetOption) { return FALSE; }
+        tmCallStart = LeechCore_StatisticsCallStart();
         LeechCore_LockAcquire();
         result = ctxDeviceMain->pfnGetOption(fOption, pqwValue);
         LeechCore_LockRelease();
+        LeechCore_StatisticsCallEnd(LEECHCORE_STATISTICS_ID_GETOPTION, tmCallStart);
     }
-    LeechCore_StatisticsCallEnd(LEECHCORE_STATISTICS_ID_GETOPTION, tmCallStart);
     return result;
 }
 
@@ -277,21 +294,24 @@ DLLEXPORT BOOL LeechCore_SetOption(_In_ ULONG64 fOption, _In_ ULONG64 qwValue)
 {
     BOOL result;
     QWORD tmCallStart;
-    if(!ctxDeviceMain || !ctxDeviceMain->hDevice || !ctxDeviceMain->pfnSetOption) { return FALSE; }
-    tmCallStart = LeechCore_StatisticsCallStart();
+    if(!ctxDeviceMain) { return FALSE; }
     if(fOption & 0x81000000) {
-        return LeechCore_SetOption_Core(fOption, qwValue);
+        tmCallStart = LeechCore_StatisticsCallStart();
+        result = LeechCore_SetOption_Core(fOption, qwValue);
+        LeechCore_StatisticsCallEnd(LEECHCORE_STATISTICS_ID_SETOPTION, tmCallStart);
     } else {
+        if(!ctxDeviceMain->hDevice || !ctxDeviceMain->pfnSetOption) { return FALSE; }
+        tmCallStart = LeechCore_StatisticsCallStart();
         LeechCore_LockAcquire();
         result = ctxDeviceMain->pfnSetOption(fOption, qwValue);
         LeechCore_LockRelease();
+        LeechCore_StatisticsCallEnd(LEECHCORE_STATISTICS_ID_SETOPTION, tmCallStart);
     }
-    LeechCore_StatisticsCallEnd(LEECHCORE_STATISTICS_ID_SETOPTION, tmCallStart);
     return result;
 }
 
 _Success_(return)
-BOOL LeechCore_CommandData_Core(_In_ ULONG64 fOption, _In_reads_(cbDataIn) PBYTE pbDataIn, _In_ DWORD cbDataIn, _Out_writes_(cbDataOut) PBYTE pbDataOut, _In_ DWORD cbDataOut, _Out_ PDWORD pcbDataOut)
+BOOL LeechCore_CommandData_Core(_In_ ULONG64 fOption, _In_reads_(cbDataIn) PBYTE pbDataIn, _In_ DWORD cbDataIn, _Out_writes_opt_(cbDataOut) PBYTE pbDataOut, _In_ DWORD cbDataOut, _Out_opt_ PDWORD pcbDataOut)
 {
     switch(fOption) {
         case LEECHCORE_COMMANDDATA_STATISTICS_GET:
@@ -327,6 +347,7 @@ DLLEXPORT BOOL LeechCore_CommandData(_In_ ULONG64 fOption, _In_reads_(cbDataIn) 
     return result;
 }
 
+_Success_(return)
 DWORD LeechCore_Read_DoWork_Scatter(_In_ QWORD qwAddr, _Out_ PBYTE pb, _In_ DWORD cb, _In_opt_ PLEECHCORE_PAGESTAT_MINIMAL pPageStat)
 {
     PBYTE pbBuffer;
@@ -405,6 +426,29 @@ DLLEXPORT DWORD LeechCore_Read(_In_ ULONG64 pa, _Out_writes_(cb) PBYTE pb, _In_ 
     return LeechCore_ReadEx(pa, pb, cb, 0, NULL);
 }
 
+_Success_(return)
+DLLEXPORT BOOL LeechCore_AgentCommand(
+    _In_ ULONG64 fCommand,
+    _In_ ULONG64 fDataIn,
+    _In_reads_(cbDataIn) PBYTE pbDataIn,
+    _In_ DWORD cbDataIn,
+    _Out_writes_opt_(*pcbDataOut) PBYTE *ppbDataOut,
+    _Out_opt_ PDWORD pcbDataOut
+)
+{
+    BOOL result = FALSE;
+    QWORD tmCallStart;
+    if(pcbDataOut) { *pcbDataOut = 0; }
+    if(ppbDataOut) { *ppbDataOut = NULL; }
+    if(!ctxDeviceMain || !ctxDeviceMain->pfnAgentCommand) { return FALSE; }
+    tmCallStart = LeechCore_StatisticsCallStart();
+    LeechCore_LockAcquire();
+    result = ctxDeviceMain->pfnAgentCommand(fCommand, fDataIn, pbDataIn, cbDataIn, ppbDataOut, pcbDataOut);
+    LeechCore_LockRelease();
+    LeechCore_StatisticsCallEnd(LEECHCORE_STATISTICS_ID_COMMANDSVC, tmCallStart);
+    return result;
+}
+
 
 
 // ----------------------------------------------------------------------------
@@ -449,7 +493,10 @@ DLLEXPORT BOOL LeechCore_Open(_Inout_ PLEECHCORE_CONFIG pConfig)
     ctxDeviceMain->paMaxUserInput = ctxDeviceMain->cfg.paMax;
     if(ctxDeviceMain->cfg.szRemote[0]) {
         if(0 == _strnicmp("rpc://", ctxDeviceMain->cfg.szRemote, 6)) {
-            result = LeechRPC_Open();
+            result = LeechRPC_Open(TRUE);
+        }
+        if(0 == _strnicmp("pipe://", ctxDeviceMain->cfg.szRemote, 7)) {
+            result = LeechRPC_Open(FALSE);
         }
     } else if(0 == _strnicmp("fpga", ctxDeviceMain->cfg.szDevice, 4)) {
         result = DeviceFPGA_Open();

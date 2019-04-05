@@ -198,10 +198,11 @@ VOID ReadScatterGather_Thread3(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_ DWOR
 {
     PDEVICE_DATA ctx = (PDEVICE_DATA)ctxDeviceMain->hDevice;
     PMEM_IO_SCATTER_HEADER pMEM;
-    DWORD i, c = 0, iBase = 0, paBase = 0, cbCurrent = 0;
+    QWORD i, iBase = 0;
+    DWORD c = 0, paBase = 0, cbCurrent = 0;
     ZeroMemory(ctx->ptd, sizeof(ctx->ptd));
     for(i = 0; i < 3; i++) {
-        ctx->ptd[i].iEP = i;
+        ctx->ptd[i].iEP = (DWORD)i;
         ctx->ptd[i].pb = ctx->pb18M + (i * 0x00600000); // 6MB per thread
         ctx->ptd[i].isFinished = TRUE;
     }

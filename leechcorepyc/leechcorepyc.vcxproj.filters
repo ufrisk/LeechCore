@@ -14,51 +14,31 @@
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
     <Filter Include="Header Files\leechcore">
-      <UniqueIdentifier>{084d5a27-836f-4585-9b31-ab1252b023e0}</UniqueIdentifier>
+      <UniqueIdentifier>{29bfed6e-f356-4e59-99f9-484f03d6fc7d}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="leechsvc.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="leechrpc_h.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="leechsvc_rpc.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="leechrpc.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
+    <ResourceCompile Include="leechcorepyc.rc">
+      <Filter>Resource Files</Filter>
+    </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="leechcorepyc.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="leechcorepyemb.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
     <ClInclude Include="version.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="leechcorepyc.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="leechcore.h">
       <Filter>Header Files\leechcore</Filter>
     </ClInclude>
-  </ItemGroup>
-  <ItemGroup>
-    <Midl Include="leechrpc.idl">
-      <Filter>Resource Files</Filter>
-    </Midl>
-  </ItemGroup>
-  <ItemGroup>
-    <ClCompile Include="leechsvc.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="leechrpc_s.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="leechsvc_rpc.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="leechrpcserver.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-  </ItemGroup>
-  <ItemGroup>
-    <ResourceCompile Include="leechsvc.rc">
-      <Filter>Resource Files</Filter>
-    </ResourceCompile>
   </ItemGroup>
 </Project>

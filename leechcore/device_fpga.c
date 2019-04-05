@@ -472,11 +472,12 @@ VOID DeviceFPGA_SetPerformanceProfile(_Inout_ PDEVICE_CONTEXT_FPGA ctx)
 // TLP handling functionality below:
 //-------------------------------------------------------------------------------
 
-BOOL DeviceFPGA_TxTlp(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ PBYTE pbTlp, _In_ DWORD cbTlp, BOOL fRdKeepalive, BOOL fFlush)
+BOOL DeviceFPGA_TxTlp(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_reads_(cbTlp) PBYTE pbTlp, _In_ DWORD cbTlp, BOOL fRdKeepalive, BOOL fFlush)
 {
     DWORD status;
     PBYTE pbTx;
-    DWORD i, cbTx, cbTxed = 0;
+    QWORD i;
+    DWORD cbTx, cbTxed = 0;
     if(cbTlp & 0x3) { return FALSE; }
     if(cbTlp > 2048) { return FALSE; }
     if(ctxDeviceMain->fVerboseExtraTlp) {
@@ -666,7 +667,8 @@ VOID DeviceFPGA_ReadScatterMEM(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_ DWOR
 
 VOID DeviceFPGA_ProbeMEM_Impl(_In_ QWORD qwAddr, _In_ DWORD cPages, _Inout_updates_bytes_(cPages) PBYTE pbResultMap)
 {
-    DWORD i, j, cTxTlp = 0;
+    QWORD i;
+    DWORD j, cTxTlp = 0;
     PDEVICE_CONTEXT_FPGA ctx = (PDEVICE_CONTEXT_FPGA)ctxDeviceMain->hDevice;
     TLP_CALLBACK_BUF_MRd bufMRd;
     DWORD tx[4];

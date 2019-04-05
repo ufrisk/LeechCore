@@ -12,131 +12,47 @@
 #include <rpc.h>
 #include "leechrpc_h.h"
 
-/*********************************************************************/
-/*                MIDL allocate and free                             */
-/*********************************************************************/
-void __RPC_FAR * __RPC_USER midl_user_allocate(size_t len)
-{
-    return LocalAlloc(0, len);
-}
-
-void __RPC_USER midl_user_free(void __RPC_FAR * ptr)
-{
-    LocalFree(ptr);
-}
-
-//-----------------------------------------------------------------------------
-// COMPRESSION FUNCTIONALITY BELOW:
-//-----------------------------------------------------------------------------
-
-#include <compressapi.h>
-
-VOID LeechRPC_CompressClose()
-{
-    PLEECHRPC_CLIENT_CONTEXT ctx = (PLEECHRPC_CLIENT_CONTEXT)ctxDeviceMain->hDevice;
-    if(ctx->Compress.fValid) {
-        DeleteCriticalSection(&ctx->Compress.LockCompressor);
-        DeleteCriticalSection(&ctx->Compress.LockDecompressor);
-    }
-    if(ctx->Compress.hCompressor) { ctx->Compress.fn.pfnCloseCompressor(ctx->Compress.hCompressor); }
-    if(ctx->Compress.hDecompressor) { ctx->Compress.fn.pfnCloseCompressor(ctx->Compress.hDecompressor); }
-    if(ctx->Compress.hDll) { FreeLibrary(ctx->Compress.hDll); }
-    ZeroMemory(&ctx->Compress, sizeof(ctx->Compress));
-}
-
-VOID LeechRPC_CompressInitialize()
-{
-    PLEECHRPC_CLIENT_CONTEXT ctx = (PLEECHRPC_CLIENT_CONTEXT)ctxDeviceMain->hDevice;
-    const LPSTR FN_LIST[] = { "CreateCompressor", "CreateDecompressor", "CloseCompressor", "CloseDecompressor", "Compress", "Decompress" };
-    DWORD i;
-    if(sizeof(ctx->Compress.fn) != sizeof(FN_LIST)) { return; }
-    ctx->Compress.hDll = LoadLibraryA("cabinet.dll");
-    if(!ctx->Compress.hDll) { return; }
-    for(i = 0; i < sizeof(FN_LIST) / sizeof(LPSTR); i++) {
-        if(!(*((PQWORD)&ctx->Compress.fn + i) = (QWORD)GetProcAddress(ctx->Compress.hDll, FN_LIST[i]))) { goto fail; }
-    }
-    ctx->Compress.fValid =
-        ctx->Compress.fn.pfnCreateCompressor(3, NULL, &ctx->Compress.hCompressor) &&
-        ctx->Compress.fn.pfnCreateDecompressor(3, NULL, &ctx->Compress.hDecompressor);
-    if(ctx->Compress.fValid) {
-        InitializeCriticalSection(&ctx->Compress.LockCompressor);
-        InitializeCriticalSection(&ctx->Compress.LockDecompressor);
-    }
-fail:
-    if(!ctx->Compress.fValid) {
-        LeechRPC_CompressClose();
-    }
-}
-
-/*
-* Compresses data already enclosed in the pMsg contigious buffer. Existing data
-* is overwritten with compressed data. (If possible and desirable).
-* -- pMsg
-*/
-VOID LeechRPC_Compress(_Inout_ PLEECHRPC_MSG_BIN pMsg)
-{
-    PLEECHRPC_CLIENT_CONTEXT ctx = (PLEECHRPC_CLIENT_CONTEXT)ctxDeviceMain->hDevice;
-    BOOL result;
-    PBYTE pb;
-    SIZE_T cb;
-    if(ctx->Compress.fValid && (pMsg->cb > 0x1000) && !(ctxDeviceMain->cfg.flags & LEECHCORE_CONFIG_FLAG_REMOTE_NO_COMPRESS)) {
-        if(!(pb = LocalAlloc(0, pMsg->cb))) { return; }
-        EnterCriticalSection(&ctx->Compress.LockCompressor);
-        result = ctx->Compress.fn.pfnCompress(ctx->Compress.hCompressor, pMsg->pb, pMsg->cb, pb, pMsg->cb, &cb);
-        LeaveCriticalSection(&ctx->Compress.LockCompressor);
-        if(result && (cb <= pMsg->cb)) {
-            memcpy(pMsg->pb, pb, cb);
-            pMsg->cbDecompress = pMsg->cb;
-            pMsg->cb = (DWORD)cb;
-            pMsg->cbMsg = sizeof(LEECHRPC_MSG_BIN) + (DWORD)cb;
-        }
-        LocalFree(pb);
-    }
-}
-
-/*
-* Decompresses the data in pMsg if possible. The pMsg is also de-allocated and
-* must not be used after this function is called. A replacement struct will be
-* returned on succcess.
-* --pMsg = original pMsg to decompress and deallocate.
-* -- return = replacement pMsg on success, NULL on fail.
-*/
-PLEECHRPC_MSG_BIN LeechRPC_Decompress(_In_ PLEECHRPC_MSG_BIN pMsg)
-{
-    PLEECHRPC_CLIENT_CONTEXT ctx = (PLEECHRPC_CLIENT_CONTEXT)ctxDeviceMain->hDevice;
-    BOOL result;
-    SIZE_T cb;
-    PLEECHRPC_MSG_BIN pMsg2 = NULL;
-    if(!pMsg->cbDecompress) { return pMsg; }
-    if(!ctx->Compress.hDecompressor || (pMsg->cbDecompress > 0x04000000)) { goto fail; }
-    if(!(pMsg2 = (PLEECHRPC_MSG_BIN)LocalAlloc(0, sizeof(LEECHRPC_MSG_BIN) + pMsg->cbDecompress))) { goto fail; }
-    memcpy(pMsg2, pMsg, sizeof(LEECHRPC_MSG_BIN));
-    EnterCriticalSection(&ctx->Compress.LockDecompressor);
-    result = ctx->Compress.fn.pfnDecompress(
-        ctx->Compress.hDecompressor,
-        pMsg->pb,
-        pMsg->cb,
-        pMsg2->pb,
-        pMsg2->cbDecompress,
-        &cb);
-    LeaveCriticalSection(&ctx->Compress.LockDecompressor);
-    if(!result || (cb != pMsg->cbDecompress)) { goto fail; }
-    pMsg2->cb = (DWORD)cb;
-    pMsg2->cbMsg = sizeof(LEECHRPC_MSG_BIN) + pMsg2->cb;
-    pMsg2->cbDecompress = 0;
-    LocalFree(pMsg);
-    return pMsg2;
-fail:
-    LocalFree(pMsg);
-    LocalFree(pMsg2);
-    return NULL;
-}
-
-
-
 //-----------------------------------------------------------------------------
 // CORE FUNCTIONALITY BELOW:
 //-----------------------------------------------------------------------------
+
+/*
+* Send and receive data to the pipe server. First write the pMsgIn then listen
+* for a pMsgOut response from the server and read it.
+* NB! USER_FREE: *ppMsgOut
+* -- ctx
+* -- pMsgIn
+* -- pcbMsgOut
+* -- ppMsgOut
+* -- return
+*/
+_Success_(return)
+BOOL LeechRPC_SubmitCommand_Pipe(_In_ PLEECHRPC_CLIENT_CONTEXT ctx, _In_ PLEECHRPC_MSG_HDR pMsgIn, _Out_ PDWORD pcbMsgOut, _Out_ PPLEECHRPC_MSG_HDR ppMsgOut)
+{
+    DWORD cbWrite = 0;
+    LEECHRPC_MSG_HDR Hdr = { 0 };
+    PLEECHRPC_MSG_HDR pMsgOut;
+    if(!pcbMsgOut || !ppMsgOut) { return FALSE; }
+    // 1: write contents to pipe
+    if(!ctx->hPipeMem_Wr) { return FALSE; }
+    if(!WriteFile(ctx->hPipeMem_Wr, (PVOID)pMsgIn, pMsgIn->cbMsg, &cbWrite, NULL)) { return FALSE; }
+    // 2: read resulting contents : header
+    if(!Util_GetBytesPipe(ctx->hPipeMem_Rd, (PBYTE)&Hdr, sizeof(LEECHRPC_MSG_HDR))) { return FALSE; }
+    if((Hdr.dwMagic != LEECHRPC_MSGMAGIC) || (Hdr.cbMsg > 0x04000000)) { return FALSE; }
+    pMsgOut = (PLEECHRPC_MSG_HDR)LocalAlloc(0, Hdr.cbMsg);
+    if(!pMsgOut) { return FALSE; }
+    memcpy(pMsgOut, &Hdr, sizeof(LEECHRPC_MSG_HDR));
+    // 3: read resulting contents : data
+    if(pMsgOut->cbMsg > sizeof(LEECHRPC_MSG_HDR)) {
+        if(!Util_GetBytesPipe(ctx->hPipeMem_Rd, ((PBYTE)pMsgOut) + sizeof(LEECHRPC_MSG_HDR), pMsgOut->cbMsg - sizeof(LEECHRPC_MSG_HDR))) {
+            LocalFree(pMsgOut);
+            return FALSE;
+        }
+    }
+    *pcbMsgOut = pMsgOut->cbMsg;
+    *ppMsgOut = pMsgOut;
+    return TRUE;
+}
 
 _Success_(return)
 BOOL LeechRPC_SubmitCommand(_In_ PLEECHRPC_MSG_HDR pMsgIn, _In_ LEECHRPC_MSGTYPE tpMsgRsp, _Out_ PPLEECHRPC_MSG_HDR ppMsgOut)
@@ -145,6 +61,7 @@ BOOL LeechRPC_SubmitCommand(_In_ PLEECHRPC_MSG_HDR pMsgIn, _In_ LEECHRPC_MSGTYPE
     error_status_t error;
     BOOL fOK;
     DWORD cbMsgOut;
+    PLEECHRPC_MSG_BIN pMsgOutDecompress = NULL;
     // fill out message header given a message type
     pMsgIn->dwMagic = LEECHRPC_MSGMAGIC;
     pMsgIn->fMsgResult = TRUE;
@@ -165,20 +82,33 @@ BOOL LeechRPC_SubmitCommand(_In_ PLEECHRPC_MSG_HDR pMsgIn, _In_ LEECHRPC_MSGTYPE
         case LEECHRPC_MSGTYPE_WRITE_REQ:
         case LEECHRPC_MSGTYPE_PROBE_REQ:
         case LEECHRPC_MSGTYPE_COMMANDDATA_REQ:
+        case LEECHRPC_MSGTYPE_COMMANDSVC_REQ:
             pMsgIn->cbMsg = sizeof(LEECHRPC_MSG_BIN) + ((PLEECHRPC_MSG_BIN)pMsgIn)->cb;
-            LeechRPC_Compress((PLEECHRPC_MSG_BIN)pMsgIn);
+            LeechRPC_Compress(&ctx->Compress, (PLEECHRPC_MSG_BIN)pMsgIn, ctxDeviceMain->cfg.flags & LEECHCORE_CONFIG_FLAG_REMOTE_NO_COMPRESS);
             break;
         default:
             return FALSE;
     }
-    // submit message to RPC server.
-    __try {
-        pMsgIn->qwRpcClientID = ctxDeviceMain->qwRpcClientID;
-        error = LeechRpc_ReservedSubmitCommand(ctx->hRPC, pMsgIn->cbMsg, (PBYTE)pMsgIn, &cbMsgOut, (PBYTE*)ppMsgOut);
-    } __except(EXCEPTION_EXECUTE_HANDLER) { error = E_FAIL; }
-    if(error) {
-        *ppMsgOut = NULL;
-        return FALSE;
+    // submit message to RPC server or PIPE parent process.
+    if(ctx->fIsRpc) {
+        // RPC connection method:
+        __try {
+            pMsgIn->dwRpcClientID = ctxDeviceMain->dwRpcClientID;
+            pMsgIn->flags = (ctxDeviceMain->cfg.flags & LEECHCORE_CONFIG_FLAG_REMOTE_NO_COMPRESS) ? LEECHRPC_FLAG_NOCOMPRESS : 0;
+            error = LeechRpc_ReservedSubmitCommand(ctx->hRPC, pMsgIn->cbMsg, (PBYTE)pMsgIn, &cbMsgOut, (PBYTE*)ppMsgOut);
+        } __except(EXCEPTION_EXECUTE_HANDLER) { error = E_FAIL; }
+        if(error) {
+            *ppMsgOut = NULL;
+            return FALSE;
+        }
+    } else {
+        // PIPE connection method:
+        pMsgIn->dwRpcClientID = ctxDeviceMain->dwRpcClientID;
+        pMsgIn->flags = LEECHRPC_FLAG_NOCOMPRESS;
+        if(!LeechRPC_SubmitCommand_Pipe(ctx, pMsgIn, &cbMsgOut, ppMsgOut)) {
+            *ppMsgOut = NULL;
+            return FALSE;
+        }
     }
     // sanity check non-trusted incoming message from RPC server.
     fOK = (cbMsgOut >= sizeof(LEECHRPC_MSG_HDR)) && *ppMsgOut && ((*ppMsgOut)->dwMagic == LEECHRPC_MSGMAGIC);
@@ -202,17 +132,19 @@ BOOL LeechRPC_SubmitCommand(_In_ PLEECHRPC_MSG_HDR pMsgIn, _In_ LEECHRPC_MSGTYPE
             case LEECHRPC_MSGTYPE_READSCATTER_RSP:
             case LEECHRPC_MSGTYPE_PROBE_RSP:
             case LEECHRPC_MSGTYPE_COMMANDDATA_RSP:
+            case LEECHRPC_MSGTYPE_COMMANDSVC_RSP:
                 fOK = (*ppMsgOut)->cbMsg == sizeof(LEECHRPC_MSG_BIN) + ((PLEECHRPC_MSG_BIN)*ppMsgOut)->cb;
-                if(fOK) {
-                    *ppMsgOut = (PLEECHRPC_MSG_HDR)LeechRPC_Decompress((PLEECHRPC_MSG_BIN)*ppMsgOut);
-                    if(!*ppMsgOut) { goto fail; }
+                if(fOK && ((PLEECHRPC_MSG_BIN)*ppMsgOut)->cbDecompress) {
+                    if(!LeechRPC_Decompress(&ctx->Compress, (PLEECHRPC_MSG_BIN)*ppMsgOut, &pMsgOutDecompress)) { goto fail; }
+                    LocalFree(*ppMsgOut);
+                    *ppMsgOut = (PLEECHRPC_MSG_HDR)pMsgOutDecompress;
                 }
                 break;
             default:
-                LocalFree(*ppMsgOut);
-                *ppMsgOut = NULL;
-                return FALSE;
+                fOK = FALSE;
+                break;
         }
+        if(!fOK) { goto fail; }
         return TRUE;
     }
 fail:
@@ -254,6 +186,7 @@ VOID LeechRPC_KeepaliveThreadClient(PVOID pv)
             MsgReq.tpMsg = LEECHRPC_MSGTYPE_KEEPALIVE_REQ;
             LeechRPC_SubmitCommand(&MsgReq, LEECHRPC_MSGTYPE_KEEPALIVE_RSP, &pMsgRsp);
             LocalFree(pMsgRsp);
+            pMsgRsp = NULL;
         }
         Sleep(100);
     }
@@ -263,7 +196,7 @@ VOID LeechRPC_KeepaliveThreadClient(PVOID pv)
 
 
 //-----------------------------------------------------------------------------
-// OPEN/CLOSE FUNCTIONALITY BELOW:
+// RPC: OPEN/CLOSE FUNCTIONALITY BELOW:
 //-----------------------------------------------------------------------------
 
 VOID LeechRPC_RpcClose(PLEECHRPC_CLIENT_CONTEXT ctx)
@@ -289,8 +222,16 @@ VOID LeechRPC_Close()
     if(LeechRPC_SubmitCommand(&Msg, LEECHRPC_MSGTYPE_CLOSE_RSP, &pMsgRsp)) {
         LocalFree(pMsgRsp);
     }
+    if(ctx->hPipeMem_Rd) {
+        CloseHandle(ctx->hPipeMem_Rd);
+        ctx->hPipeMem_Rd = NULL;
+    }
+    if(ctx->hPipeMem_Wr) {
+        CloseHandle(ctx->hPipeMem_Wr);
+        ctx->hPipeMem_Wr = NULL;
+    }
     LeechRPC_RpcClose(ctx);
-    LeechRPC_CompressClose();
+    LeechRPC_CompressClose(&ctx->Compress);
     LocalFree(ctx);
     ctxDeviceMain->hDevice = NULL;
 }
@@ -340,6 +281,7 @@ BOOL LeechRPC_RpcInitialize(PLEECHRPC_CLIENT_CONTEXT ctx)
         }
     }
     vprintfv("leechrpcclient.c!LeechRPC_RpcInitialize: '%s'\n", ctx->szStringBinding);
+    ctx->fIsRpc = TRUE;
     return TRUE;
 }
 
@@ -500,10 +442,10 @@ BOOL LeechRPC_CommandData(_In_ ULONG64 fOption, _In_reads_(cbDataIn) PBYTE pbDat
     result = LeechRPC_SubmitCommand((PLEECHRPC_MSG_HDR)pMsgReq, LEECHRPC_MSGTYPE_COMMANDDATA_RSP, (PPLEECHRPC_MSG_HDR)&pMsgRsp);
     if(result) {
         if(!pbDataOut && pcbDataOut) {
-            *pcbDataOut = (DWORD)pMsgRsp->qwData[0];
-        } else if((pMsgRsp->qwData[0] <= cbDataOut) && pbDataOut && pcbDataOut) {
-            *pcbDataOut = (DWORD)pMsgRsp->qwData[0];
-            memcpy(pbDataOut, pMsgRsp->pb, pMsgRsp->qwData[0]);
+            *pcbDataOut = pMsgRsp->cb;
+        } else if((pMsgRsp->cb <= cbDataOut) && pbDataOut && pcbDataOut) {
+            *pcbDataOut = pMsgRsp->cb;
+            memcpy(pbDataOut, pMsgRsp->pb, pMsgRsp->cb);
         } else {
             result = FALSE;
         }
@@ -517,51 +459,132 @@ BOOL LeechRPC_CommandData(_In_ ULONG64 fOption, _In_reads_(cbDataIn) PBYTE pbDat
 }
 
 _Success_(return)
-BOOL LeechRPC_Open()
+DLLEXPORT BOOL LeechRPC_AgentCommand(
+    _In_ ULONG64 fCommand,
+    _In_ ULONG64 fDataIn,
+    _In_reads_(cbDataIn) PBYTE pbDataIn,
+    _In_ DWORD cbDataIn,
+    _Out_writes_opt_(*pcbDataOut) PBYTE *ppbDataOut,
+    _Out_opt_ PDWORD pcbDataOut
+)
+{
+    BOOL result;
+    PLEECHRPC_MSG_BIN pMsgReq = NULL;
+    PLEECHRPC_MSG_BIN pMsgRsp = NULL;
+    // 1: prepare message to send
+    if(!(pMsgReq = LocalAlloc(0, sizeof(LEECHRPC_MSG_BIN) + cbDataIn))) { return FALSE; }
+    ZeroMemory(pMsgReq, sizeof(LEECHRPC_MSG_BIN));
+    pMsgReq->tpMsg = LEECHRPC_MSGTYPE_COMMANDSVC_REQ;
+    pMsgReq->cb = cbDataIn;
+    pMsgReq->qwData[0] = fCommand;
+    pMsgReq->qwData[1] = fDataIn;
+    memcpy(pMsgReq->pb, pbDataIn, cbDataIn);
+    // 2: transmit & get result
+    result = LeechRPC_SubmitCommand((PLEECHRPC_MSG_HDR)pMsgReq, LEECHRPC_MSGTYPE_COMMANDSVC_RSP, (PPLEECHRPC_MSG_HDR)&pMsgRsp);
+    if(result && (pMsgRsp->cb > 0x04000000)) { result = FALSE; } // Max 64MB
+    if(pcbDataOut) { *pcbDataOut = 0; }
+    if(result && ppbDataOut && pcbDataOut) {
+        *ppbDataOut = LocalAlloc(0, pMsgRsp->cb);
+        if(!*ppbDataOut) {
+            result = FALSE;
+        } else {
+            *pcbDataOut = pMsgRsp->cb;
+            memcpy(*ppbDataOut, pMsgRsp->pb, pMsgRsp->cb);
+        }
+    }
+    if(!result && pcbDataOut) {
+        *pcbDataOut = 0;
+    }
+    LocalFree(pMsgReq);
+    LocalFree(pMsgRsp);
+    return result;
+}
+
+
+
+//-----------------------------------------------------------------------------
+// OPEN FUNCTIONALITY BELOW:
+//-----------------------------------------------------------------------------
+
+_Success_(return)
+BOOL LeechRPC_Open(_In_ BOOL fIsRpc)
 {
     PLEECHRPC_CLIENT_CONTEXT ctx;
-    CHAR _szBuffer[MAX_PATH];
+    CHAR _szBufferArg[MAX_PATH], _szBufferOpt[MAX_PATH];
     LEECHRPC_MSG_OPEN MsgReq = { 0 };
     PLEECHRPC_MSG_OPEN pMsgRsp = NULL;
     BOOL fOK;
-    LPSTR szArg1, szArg2;
-    DWORD dwPort;
+    LPSTR szArg1, szArg2, szArg3;
+    LPSTR szOpt[3];
+    DWORD i, dwPort = 0;
+    int(*pfn_printf_opt_tmp)(_In_z_ _Printf_format_string_ char const* const _Format, ...);
     ctx = (PLEECHRPC_CLIENT_CONTEXT)LocalAlloc(LMEM_ZEROINIT, sizeof(LEECHRPC_CLIENT_CONTEXT));
     if(!ctx) { return FALSE; }
     ctxDeviceMain->hDevice = (HANDLE)ctx;
-    // parse arguments
-    Util_Split2(ctxDeviceMain->cfg.szRemote + 6, ':', _szBuffer, &szArg1, &szArg2);
-    if(!szArg1 || !szArg1[0] || !szArg2 || !szArg2[0]) { goto fail; }
-    if(!_stricmp("insecure", szArg1)) {
-        ctx->fAllowInsecure = TRUE;
+    if(fIsRpc) {
+        // RPC SPECIFIC INITIALIZATION BELOW:
+        // parse arguments
+        Util_Split3(ctxDeviceMain->cfg.szRemote + 6, ':', _szBufferArg, &szArg1, &szArg2, &szArg3);
+        if(!szArg1 || !szArg1[0] || !szArg2 || !szArg2[0]) { goto fail; }
+        // Argument1 : Kerberos SPN or "insecure".
+        if(!_stricmp("insecure", szArg1)) {
+            ctx->fAllowInsecure = TRUE;
+        } else {
+            strncpy_s(ctx->szRemoteSPN, _countof(ctx->szRemoteSPN), szArg1, MAX_PATH);
+        }
+        // Argument2 : Tcp Address.
+        strncpy_s(ctx->szTcpAddr, _countof(ctx->szTcpAddr), szArg2, MAX_PATH);
+        // Argument3 : Options.
+        if(szArg3[0]) {
+            Util_Split3(szArg3, ',', _szBufferOpt, &szOpt[0], &szOpt[1], &szOpt[2]);
+            for(i = 0; i < 3; i++) {
+                if(0 == _stricmp("nocompress", szOpt[i])) {
+                    ctxDeviceMain->cfg.flags = ctxDeviceMain->cfg.flags | LEECHCORE_CONFIG_FLAG_REMOTE_NO_COMPRESS;
+                }
+                if(0 == _strnicmp("port=", szOpt[i], 5)) {
+                    dwPort = atoi(szOpt[i] + 5);
+                }
+            }
+        }
+        if(dwPort == 0) {
+            dwPort = 28473; // default port
+        }
+        _itoa_s(dwPort, ctx->szTcpPort, 6, 10);
+        // initialize rpc connection and ping
+        if(!LeechRPC_RpcInitialize(ctx)) {
+            vprintf("RPC: ERROR: Unable to connect to remote service '%s'\n", ctxDeviceMain->cfg.szRemote);
+            goto fail;
+        }
+        if(!LeechRPC_Ping()) {
+            vprintf("RPC: ERROR: Unable to ping remote service '%s'\n", ctxDeviceMain->cfg.szRemote);
+            goto fail;
+        }
+        if(!LeechRPC_CompressInitialize(&ctx->Compress)) {
+            ctxDeviceMain->cfg.flags = ctxDeviceMain->cfg.flags | LEECHCORE_CONFIG_FLAG_REMOTE_NO_COMPRESS;
+        }
     } else {
-        strncpy_s(ctx->szRemoteSPN, _countof(ctx->szRemoteSPN), szArg1, MAX_PATH);
-    }
-    Util_Split2(szArg2, ':', _szBuffer, &szArg1, &szArg2);
-    strncpy_s(ctx->szTcpAddr, _countof(ctx->szTcpAddr), szArg1, MAX_PATH);
-    if(szArg2 && szArg2[0] && atoi(szArg2) && (0xffff >= atoi(szArg2))) {
-        dwPort = atoi(szArg2);
-    } else {
-        dwPort = 28473; // default port
-    }
-    _itoa_s(dwPort, ctx->szTcpPort, 6, 10);
-    // initialize rpc connection and ping
-    if(!LeechRPC_RpcInitialize(ctx)) {
-        vprintf("RPC: ERROR: Unable to connect to remote service '%s'\n", ctxDeviceMain->cfg.szRemote);
-        goto fail;
-    }
-    if(!LeechRPC_Ping()) {
-        vprintf("RPC: ERROR: Unable to ping remote service '%s'\n", ctxDeviceMain->cfg.szRemote);
-        goto fail;
-    }
-    LeechRPC_CompressInitialize();
-    if(!ctx->Compress.fValid) {
+        // PIPE SPECIFIC INITIALIZATION BELOW:
+        // parse arguments
+        Util_Split2(ctxDeviceMain->cfg.szRemote + 7, ':', _szBufferArg, &szArg1, &szArg2);
+        if(!szArg1 || !szArg2) { goto fail; }
+        ctx->hPipeMem_Rd = (HANDLE)_atoi64(szArg1);
+        ctx->hPipeMem_Wr = (HANDLE)_atoi64(szArg2);
+        if(!ctx->hPipeMem_Rd || !ctx->hPipeMem_Wr) { goto fail; }
+        // ping parent process via the pipe
+        if(!LeechRPC_Ping()) {
+            vprintf("PIPE: ERROR: Unable to ping remote service '%s'\n", ctxDeviceMain->cfg.szRemote);
+            goto fail;
+        }
+        // no compression
         ctxDeviceMain->cfg.flags = ctxDeviceMain->cfg.flags | LEECHCORE_CONFIG_FLAG_REMOTE_NO_COMPRESS;
     }
     // call open on the remote service
-    Util_GenRandom((PBYTE)&ctxDeviceMain->qwRpcClientID, sizeof(QWORD));
+    Util_GenRandom((PBYTE)&ctxDeviceMain->dwRpcClientID, sizeof(DWORD));
     MsgReq.tpMsg = LEECHRPC_MSGTYPE_OPEN_REQ;
     memcpy(&MsgReq.cfg, &ctxDeviceMain->cfg, sizeof(LEECHCORE_CONFIG));
+    if(!_stricmp("existingremote", MsgReq.cfg.szDevice)) {
+        strncpy_s(MsgReq.cfg.szDevice, _countof(MsgReq.cfg.szDevice), "existing", _TRUNCATE);
+    }
     ZeroMemory(MsgReq.cfg.szRemote, _countof(MsgReq.cfg.szRemote));
     MsgReq.cfg.pfn_printf_opt = 0;
     if(!LeechRPC_SubmitCommand((PLEECHRPC_MSG_HDR)&MsgReq, LEECHRPC_MSGTYPE_OPEN_RSP, (PPLEECHRPC_MSG_HDR)&pMsgRsp)) {
@@ -581,17 +604,35 @@ BOOL LeechRPC_Open()
     }
     // all ok - initialize this rpc device stub.
     CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)LeechRPC_KeepaliveThreadClient, NULL, 0, NULL);
+    strncpy_s(pMsgRsp->cfg.szRemote, sizeof(pMsgRsp->cfg.szRemote), ctxDeviceMain->cfg.szRemote, _TRUNCATE); // ctx from remote doesn't contain remote info ...
+    pfn_printf_opt_tmp = ctxDeviceMain->cfg.pfn_printf_opt;
     memcpy(&ctxDeviceMain->cfg, &pMsgRsp->cfg, sizeof(LEECHCORE_CONFIG));
+    ctxDeviceMain->cfg.pfn_printf_opt = pfn_printf_opt_tmp;
     ctxDeviceMain->cfg.fRemote = TRUE;
     ctxDeviceMain->cfg.cbMaxSizeMemIo = 0x01000000; // 16MB
     ctxDeviceMain->fDeviceMultiThread = TRUE;
-    ctxDeviceMain->pfnReadScatterMEM = LeechRPC_ReadScatterMEM;
-    ctxDeviceMain->pfnWriteMEM = LeechRPC_WriteMEM;
-    ctxDeviceMain->pfnProbeMEM = LeechRPC_ProbeMEM;
-    ctxDeviceMain->pfnClose = LeechRPC_Close;
-    ctxDeviceMain->pfnGetOption = LeechRPC_GetOption;
-    ctxDeviceMain->pfnSetOption = LeechRPC_SetOption;
-    ctxDeviceMain->pfnCommandData = LeechRPC_CommandData;
+    if(pMsgRsp->flags & LEECHRPC_FLAG_FNEXIST_ReadScatterMEM) {
+        ctxDeviceMain->pfnReadScatterMEM = LeechRPC_ReadScatterMEM;
+    }
+    if(pMsgRsp->flags & LEECHRPC_FLAG_FNEXIST_WriteMEM) {
+        ctxDeviceMain->pfnWriteMEM = LeechRPC_WriteMEM;
+    }
+    if(pMsgRsp->flags & LEECHRPC_FLAG_FNEXIST_ProbeMEM) {
+        ctxDeviceMain->pfnProbeMEM = LeechRPC_ProbeMEM;
+    }
+    if(pMsgRsp->flags & LEECHRPC_FLAG_FNEXIST_Close) {
+        ctxDeviceMain->pfnClose = LeechRPC_Close;
+    }
+    if(pMsgRsp->flags & LEECHRPC_FLAG_FNEXIST_GetOption) {
+        ctxDeviceMain->pfnGetOption = LeechRPC_GetOption;
+    }
+    if(pMsgRsp->flags & LEECHRPC_FLAG_FNEXIST_SetOption) {
+        ctxDeviceMain->pfnSetOption = LeechRPC_SetOption;
+    }
+    if(pMsgRsp->flags & LEECHRPC_FLAG_FNEXIST_CommandData) {
+        ctxDeviceMain->pfnCommandData = LeechRPC_CommandData;
+    }
+    ctxDeviceMain->pfnAgentCommand = LeechRPC_AgentCommand;
     vprintfv("RPC: Successfully opened remote device of type: %.i\n", ctxDeviceMain->cfg.tpDevice);
     return TRUE;
 fail:
@@ -603,7 +644,7 @@ fail:
 #ifdef LINUX
 
 _Success_(return)
-BOOL LeechRPC_Open()
+BOOL LeechRPC_Open(_In_ BOOL fIsRpc)
 {
     return FALSE;
 }

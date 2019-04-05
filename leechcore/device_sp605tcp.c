@@ -148,7 +148,7 @@ VOID Device605_TCP_Close()
     ctxDeviceMain->hDevice = 0;
 }
 
-BOOL Device605_TCP_TxTlp(_In_ PDEVICE_CONTEXT_SP605_TCP ctx, _In_ PBYTE pbTlp, _In_ DWORD cbTlp, BOOL fFlush)
+BOOL Device605_TCP_TxTlp(_In_ PDEVICE_CONTEXT_SP605_TCP ctx, _In_reads_(cbTlp) PBYTE pbTlp, _In_ DWORD cbTlp, BOOL fFlush)
 {
     PBYTE pbTx;
     DWORD i, cbTx, len, Total = 0;
@@ -298,7 +298,8 @@ VOID Device605_TCP_ReadScatterMEM(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_ D
 
 VOID Device605_TCP_ProbeDMA(_In_ QWORD qwAddr, _In_ DWORD cPages, _Out_ __bcount(cPages) PBYTE pbResultMap)
 {
-    DWORD i, j;
+    QWORD i;
+    DWORD j;
     PDEVICE_CONTEXT_SP605_TCP ctx = (PDEVICE_CONTEXT_SP605_TCP)ctxDeviceMain->hDevice;
     TLP_CALLBACK_BUF_MRd bufMRd;
     DWORD tx[4];

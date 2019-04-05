@@ -85,43 +85,43 @@ typedef struct tdDUMP_HEADER32 {
 } DUMP_HEADER32, *PDUMP_HEADER32;
 
 typedef struct tdDUMP_HEADER64 {
-    ULONG Signature;
-    ULONG ValidDump;
-    ULONG MajorVersion;
-    ULONG MinorVersion;
-    ULONG64 DirectoryTableBase;
-    ULONG64 PfnDataBase;
-    ULONG64 PsLoadedModuleList;
-    ULONG64 PsActiveProcessHead;
-    ULONG MachineImageType;
-    ULONG NumberProcessors;
-    ULONG BugCheckCode;
-    ULONG64 BugCheckParameter1;
-    ULONG64 BugCheckParameter2;
-    ULONG64 BugCheckParameter3;
-    ULONG64 BugCheckParameter4;
-    CHAR VersionUser[32];
-    ULONG64 KdDebuggerDataBlock;
-    union {
-        _PHYSICAL_MEMORY_DESCRIPTOR64 PhysicalMemoryBlock;
-        UCHAR PhysicalMemoryBlockBuffer[700];
-    };
-    UCHAR ContextRecord[3000];
-    EXCEPTION_RECORD64 ExceptionRecord;
-    ULONG DumpType;
-    LARGE_INTEGER RequiredDumpSpace;
-    FILETIME SystemTime;
-    CHAR Comment[0x80]; // May not be present.
-    FILETIME SystemUpTime;
-    ULONG MiniDumpFields;
-    ULONG SecondaryDataState;
-    ULONG ProductType;
-    ULONG SuiteMask;
-    ULONG WriterStatus;
-    UCHAR Unused1;
-    UCHAR KdSecondaryVersion; // Present only for W2K3 SP1 and better
-    UCHAR Unused[2];
-    UCHAR _reserved0[4016];
+	ULONG Signature;					// 0x0000
+	ULONG ValidDump;					// 0x0004
+	ULONG MajorVersion;					// 0x0008
+	ULONG MinorVersion;					// 0x000c
+	ULONG64 DirectoryTableBase;			// 0x0010
+	ULONG64 PfnDataBase;				// 0x0018
+	ULONG64 PsLoadedModuleList;			// 0x0020
+	ULONG64 PsActiveProcessHead;		// 0x0028
+	ULONG MachineImageType;				// 0x0030
+	ULONG NumberProcessors;				// 0x0034
+	ULONG BugCheckCode;					// 0x0038
+	ULONG64 BugCheckParameter1;			// 0x0040
+	ULONG64 BugCheckParameter2;			// 0x0048
+	ULONG64 BugCheckParameter3;			// 0x0050
+	ULONG64 BugCheckParameter4;			// 0x0058
+	CHAR VersionUser[32];				// 0x0060
+	ULONG64 KdDebuggerDataBlock;		// 0x0080
+	union {								// 0x0088
+		_PHYSICAL_MEMORY_DESCRIPTOR64 PhysicalMemoryBlock;
+		UCHAR PhysicalMemoryBlockBuffer[700];
+	};
+	UCHAR ContextRecord[3000];			// 0x0348
+	EXCEPTION_RECORD64 ExceptionRecord;	// 0x0F00
+	ULONG DumpType;						// 0x0F98
+	LARGE_INTEGER RequiredDumpSpace;	// 0x0FA0
+	FILETIME SystemTime;				// 0x0FA8 
+	CHAR Comment[0x80];					// 0x0FB0 May not be present.
+	FILETIME SystemUpTime;				// 0x1030
+	ULONG MiniDumpFields;				// 0x1038
+	ULONG SecondaryDataState;			// 0x103c
+	ULONG ProductType;					// 0x1040
+	ULONG SuiteMask;					// 0x1044
+	ULONG WriterStatus;					// 0x1048
+	UCHAR Unused1;						// 0x104c
+	UCHAR KdSecondaryVersion;			// 0x104d Present only for W2K3 SP1 and better
+	UCHAR Unused[2];					// 0x104e
+	UCHAR _reserved0[4016];				// 0x1050
 } DUMP_HEADER64, *PDUMP_HEADER64;
 
 typedef struct tdDEVICE_CONTEXT_FILE {
