@@ -279,7 +279,7 @@ DLLEXPORT BOOL LeechCore_GetOption(_In_ ULONG64 fOption, _Out_ PULONG64 pqwValue
         result = LeechCore_GetOption_Core(fOption, pqwValue);
         LeechCore_StatisticsCallEnd(LEECHCORE_STATISTICS_ID_GETOPTION, tmCallStart);
     } else {
-        if(!ctxDeviceMain->hDevice || !ctxDeviceMain->pfnSetOption) { return FALSE; }
+        if(!ctxDeviceMain->hDevice || !ctxDeviceMain->pfnGetOption) { return FALSE; }
         tmCallStart = LeechCore_StatisticsCallStart();
         LeechCore_LockAcquire();
         result = ctxDeviceMain->pfnGetOption(fOption, pqwValue);
