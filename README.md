@@ -106,3 +106,6 @@ v1.2
 * Release of the LeechAgent - remote memory acquisition and remote physical memory analysis.
 * LeechCore Windows x86 support. Now Windows x86/x64 and Linux x64 is supported.
 * Bug fixes and additional functionality to support LeechAgent.
+
+Latest
+* Bug fixes.

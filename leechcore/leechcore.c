@@ -72,14 +72,15 @@ QWORD LeechCore_StatisticsCallStart()
     return tmNow;
 }
 
-VOID LeechCore_StatisticsCallEnd(_In_ DWORD fId, QWORD tmCallStart)
+QWORD LeechCore_StatisticsCallEnd(_In_ DWORD fId, QWORD tmCallStart)
 {
     QWORD tmNow;
-    if(!ctxDeviceMain) { return; }
-    if(!ctxDeviceMain || !tmCallStart || (fId > LEECHCORE_STATISTICS_ID_MAX)) { return; }
+    if(!ctxDeviceMain) { return 0; }
+    if(!ctxDeviceMain || !tmCallStart || (fId > LEECHCORE_STATISTICS_ID_MAX)) { return 0; }
     QueryPerformanceCounter((PLARGE_INTEGER)&tmNow);
     InterlockedIncrement64(&ctxDeviceMain->Statistics.Call[fId].c);
     InterlockedAdd64(&ctxDeviceMain->Statistics.Call[fId].tm, tmNow - tmCallStart);
+    return tmNow - tmCallStart;
 }
 
 _Success_(return)
@@ -109,13 +110,16 @@ DLLEXPORT BOOL LeechCore_AllocScatterEmpty(_In_ DWORD cMEMs, _Out_ PPMEM_IO_SCAT
 
 DLLEXPORT VOID LeechCore_ReadScatter(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_ DWORD cpMEMs)
 {
-    QWORD tmCallStart;
+    QWORD tmCallStart, tmCall;
     if(!ctxDeviceMain || !ctxDeviceMain->hDevice || !ctxDeviceMain->pfnReadScatterMEM) { return; }
     tmCallStart = LeechCore_StatisticsCallStart();
     LeechCore_LockAcquire();
     ctxDeviceMain->pfnReadScatterMEM(ppMEMs, cpMEMs);
     LeechCore_LockRelease();
-    LeechCore_StatisticsCallEnd(LEECHCORE_STATISTICS_ID_READSCATTER, tmCallStart);
+    tmCall = LeechCore_StatisticsCallEnd(LEECHCORE_STATISTICS_ID_READSCATTER, tmCallStart);
+    if(DEVICE_DISPLAY_READCOUNT) {
+        printf("  STATISTIC::ReadScatter %16lli %8i %12lli\n", InterlockedIncrement64(&ctxDeviceMain->cReadScatterMEM), cpMEMs, tmCall);
+    }
 }
 
 _Success_(return)
@@ -274,7 +278,7 @@ DLLEXPORT BOOL LeechCore_GetOption(_In_ ULONG64 fOption, _Out_ PULONG64 pqwValue
     BOOL result;
     QWORD tmCallStart;
     if(!ctxDeviceMain) { return FALSE; }
-    if(fOption & 0x81000000) {
+    if((fOption & 0x80000000) || ((fOption & 0xff000000) ==  0x01000000)) {
         tmCallStart = LeechCore_StatisticsCallStart();
         result = LeechCore_GetOption_Core(fOption, pqwValue);
         LeechCore_StatisticsCallEnd(LEECHCORE_STATISTICS_ID_GETOPTION, tmCallStart);
@@ -295,7 +299,7 @@ DLLEXPORT BOOL LeechCore_SetOption(_In_ ULONG64 fOption, _In_ ULONG64 qwValue)
     BOOL result;
     QWORD tmCallStart;
     if(!ctxDeviceMain) { return FALSE; }
-    if(fOption & 0x81000000) {
+    if((fOption & 0x80000000) || ((fOption & 0xff000000) ==  0x01000000)) {
         tmCallStart = LeechCore_StatisticsCallStart();
         result = LeechCore_SetOption_Core(fOption, qwValue);
         LeechCore_StatisticsCallEnd(LEECHCORE_STATISTICS_ID_SETOPTION, tmCallStart);

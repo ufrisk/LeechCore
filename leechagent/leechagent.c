@@ -36,12 +36,12 @@ LEECHAGENT_REMOTE_ENTRY g_REMOTE_FILES_OPTIONAL[] = {
     {.f32 = FALSE,.f64 = TRUE,.wsz = L"vmmpy.py"},
     // 32-bit winpmem
     {.f32 = TRUE,.f64 = FALSE,.wsz = L"att_winpmem_32.sys"},
-    {.f32 = TRUE,.f64 = FALSE,.wsz = L"winpmem_32.py"},
-    {.f32 = TRUE,.f64 = FALSE,.wsz = L"winpmem_x86.py"},
+    {.f32 = TRUE,.f64 = FALSE,.wsz = L"winpmem_32.sys"},
+    {.f32 = TRUE,.f64 = FALSE,.wsz = L"winpmem_x86.sys"},
     // 64-bit winpmem
     {.f32 = FALSE,.f64 = TRUE,.wsz = L"att_winpmem_64.sys"},
-    {.f32 = FALSE,.f64 = TRUE,.wsz = L"winpmem_64.py"},
-    {.f32 = FALSE,.f64 = TRUE,.wsz = L"winpmem_x64.py"},
+    {.f32 = FALSE,.f64 = TRUE,.wsz = L"winpmem_64.sys"},
+    {.f32 = FALSE,.f64 = TRUE,.wsz = L"winpmem_x64.sys"},
     // 64-bit HyperV saved state
     {.f32 = FALSE,.f64 = TRUE,.wsz = L"vmsavedstatedumpprovider.dll"},
     // 32/64-bit FTDI driver (PCIe DMA FPGA)

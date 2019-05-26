@@ -9,6 +9,7 @@
 #include "leechcore.h"
 #include "oscompatibility.h"
 
+#define DEVICE_DISPLAY_READCOUNT        FALSE
 #define DEVICE_PHYSMEMMAP_MAX_ENTRIES   0x100
 
 typedef struct tdDEVICE_PHYSMEMMAP_ENTRY {
@@ -36,6 +37,7 @@ typedef struct tdLEECHCORE_CONTEXT {
     BOOL fDeviceMultiThread;
     BOOL fDeviceLock;
     QWORD paMaxUserInput;
+    QWORD cReadScatterMEM;
     HANDLE hDevice;
     VOID(*pfnReadScatterMEM)(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_ DWORD cpMEMs);
     BOOL(*pfnWriteMEM)(_In_ QWORD pa, _In_reads_(cb) PBYTE pb, _In_ DWORD cb);
