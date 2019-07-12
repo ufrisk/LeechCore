@@ -12,8 +12,8 @@
 #include "util.h"
 #include <stdio.h>
 
-#define PROCPARENT_STDOUT_SIZE  0x00100000      // 1MB
-#define PROCPARENT_STDERR_SIZE  0x00020000      // 128kB
+#define PROCPARENT_STDOUT_SIZE  0x00400000      // 4MB
+#define PROCPARENT_STDERR_SIZE  0x00040000      // 256kB
 
 typedef struct tdPROCPARENT_CONTEXT {
     PROCESS_INFORMATION ChildProcessInfo;

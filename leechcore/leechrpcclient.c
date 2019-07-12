@@ -609,8 +609,8 @@ BOOL LeechRPC_Open(_In_ BOOL fIsRpc)
     memcpy(&ctxDeviceMain->cfg, &pMsgRsp->cfg, sizeof(LEECHCORE_CONFIG));
     ctxDeviceMain->cfg.pfn_printf_opt = pfn_printf_opt_tmp;
     ctxDeviceMain->cfg.fRemote = TRUE;
-    ctxDeviceMain->cfg.cbMaxSizeMemIo = 0x01000000; // 16MB
-    ctxDeviceMain->fDeviceMultiThread = TRUE;
+    ctxDeviceMain->cfg.cbMaxSizeMemIo = 0x01000000;     // 16MB
+    ctxDeviceMain->fDeviceMultiThread = ctx->fIsRpc;    // RPC = multi-thread, PIPE = single-thread access
     if(pMsgRsp->flags & LEECHRPC_FLAG_FNEXIST_ReadScatterMEM) {
         ctxDeviceMain->pfnReadScatterMEM = LeechRPC_ReadScatterMEM;
     }
