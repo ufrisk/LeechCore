@@ -1,3 +1,10 @@
+// fpga_libusb.c :
+//     Code to directly communicate with the FT601 without using a kernel driver. Works with :
+//     - Xilinx SP605 dev board flashed with PCILeech bitstream and FTDI UMFT601X-B addon-board.
+//     - Xilinx AC701 dev board flashed with PCILeech bitstream and FTDI UMFT601X-B addon-board.
+//     - PCIeScreamer board flashed with PCILeech bitstream.
+//
+// Contribution by Jérémie Boutoille from Synacktiv - www.synacktiv.com
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
