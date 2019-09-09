@@ -18,6 +18,7 @@ VOID usleep(_In_ DWORD us)
 #ifdef LINUX
 
 #include "oscompatibility.h"
+#include "fpga_libusb.h"
 #include <fcntl.h>
 #include <sys/ioctl.h>
 
@@ -179,42 +180,39 @@ BOOL IsWow64Process(HANDLE hProcess, PBOOL Wow64Process)
 
 // ----------------------------------------------------------------------------
 // Facade implementation of FTDI functions using functionality provided by
-// kernel driver ft60x by @key2fr in the backend. NB! functionality below
-// is by no way complete - only minimal functionality required by PCILeech
-// use is implemented ...
+// a basic implmentation of FTDI library
+// NB! functionality below is by no way complete - only minimal functionality
+// required by PCILeech use is implemented ...
 // ----------------------------------------------------------------------------
 
 ULONG FT60x_FT_Create(PVOID pvArg, DWORD dwFlags, HANDLE *pftHandle)
 {
-    int i, result;
-    // NB! underlying driver will create a device object at /dev/ft60x[0-3]
-    //     when loaded. Iterate through possible combinations at load time.
-    CHAR szDevice[12] = { '/', 'd', 'e', 'v', '/', 'f', 't', '6', '0', 'x', '0', 0 };
-    for(i = 0; i < 4; i++) {
-        szDevice[10] = '0' + i;
-        result = open(szDevice, O_RDWR | O_CLOEXEC);
-        if(result > 0) {
-            *pftHandle = (HANDLE)(QWORD)result;
-            return 0;
-        }
+    int rc;
+
+    rc = fpga_open();
+    if(rc == -1) {
+        return 0x20;
     }
-    return 0x20;
+
+    // this value is not used, but must not be 0
+    *pftHandle = (HANDLE) 0x1337;
+    return 0;
 }
 
 ULONG FT60x_FT_Close(HANDLE ftHandle)
 {
-    close((int)(QWORD)ftHandle);
+    fpga_close();
     return 0;
 }
 
 ULONG FT60x_FT_GetChipConfiguration(HANDLE ftHandle, PVOID pvConfiguration)
 {
-    return ioctl((int)(QWORD)ftHandle, 0, pvConfiguration) ? 0x20 : 0;
+    return fpga_get_chip_configuration(pvConfiguration) == -1 ? 0x20 : 0;
 }
 
 ULONG FT60x_FT_SetChipConfiguration(HANDLE ftHandle, PVOID pvConfiguration)
 {
-    return ioctl((int)(QWORD)ftHandle, 1, pvConfiguration) ? 0x20 : 0;
+    return fpga_set_chip_configuration(pvConfiguration) == -1 ? 0x20 : 0;
 }
 
 ULONG FT60x_FT_SetSuspendTimeout(HANDLE ftHandle, ULONG Timeout)
@@ -231,44 +229,20 @@ ULONG FT60x_FT_AbortPipe(HANDLE ftHandle, UCHAR ucPipeID)
 
 ULONG FT60x_FT_WritePipe(HANDLE ftHandle, UCHAR ucPipeID, PUCHAR pucBuffer, ULONG ulBufferLength, PULONG pulBytesTransferred, PVOID pOverlapped)
 {
-    int result, cbTxTotal = 0;
-    // NB! underlying ft60x driver cannot handle more than 0x800 bytes per write,
-    //     split larger writes into smaller writes if required.
-    while(cbTxTotal < ulBufferLength) {
-        result = write((int)(QWORD)ftHandle, pucBuffer + cbTxTotal, min(0x800, ulBufferLength - cbTxTotal));
-        if(!result) { return 0x20; } // no bytes transmitted -> error
-        cbTxTotal += result;
+    if(fpga_write(pucBuffer, ulBufferLength, pulBytesTransferred) == -1) {
+        return 0x20;
     }
-    *pulBytesTransferred = cbTxTotal;
-    return 0;
-}
 
-ULONG FT60x_FT_ReadPipe2(HANDLE ftHandle, UCHAR ucPipeID, PUCHAR pucBuffer, ULONG ulBufferLength, PULONG pulBytesTransferred, PVOID pOverlapped)
-{
-    int result;
-    *pulBytesTransferred = 0;
-    // NB! underlying driver have a max tranfer size in one go, multiple reads may be
-    //     required to retrieve all data - hence the loop.
-    do {
-        result = read((int)(QWORD)ftHandle, pucBuffer + *pulBytesTransferred, ulBufferLength - *pulBytesTransferred);
-        if(result > 0) {
-            *pulBytesTransferred += result;
-        }
-    } while((result > 0) && (0 == (result % 0x1000)) && (ulBufferLength > *pulBytesTransferred));
-    return (result > 0) ? 0 : 0x20;
+    return 0;
 }
 
 ULONG FT60x_FT_ReadPipe(HANDLE ftHandle, UCHAR ucPipeID, PUCHAR pucBuffer, ULONG ulBufferLength, PULONG pulBytesTransferred, PVOID pOverlapped)
 {
-    // NB! underlying driver won't return all data on the USB core queue in first
-    //     read so we have to read two times.
-    ULONG i, result, cbRx, cbRxTotal = 0;
-    for(i = 0; i < 2; i++) {
-        result = FT60x_FT_ReadPipe2(ftHandle, ucPipeID, pucBuffer + cbRxTotal, ulBufferLength - cbRxTotal, &cbRx, pOverlapped);
-        cbRxTotal += cbRx;
+    if(fpga_read(pucBuffer, ulBufferLength, pulBytesTransferred) == -1) {
+        return 0x20;
     }
-    *pulBytesTransferred = cbRxTotal;
-    return result;
+
+    return 0;
 }
 
 // ----------------------------------------------------------------------------
