@@ -10,6 +10,7 @@
 * Open a connection to the SP605/MicroBlaze PCILeech flashed device.
 * -- result
 */
+_Success_(return)
 BOOL Device605_TCP_Open();
 
 #endif /* __DEVICE_SP605TCP_H__ */

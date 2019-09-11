@@ -11,6 +11,7 @@
 * Open a connection to the "total meltdown" memory acquisition "device" (if exploitable).
 * -- result
 */
+_Success_(return)
 BOOL DeviceTMD_Open();
 
 #endif /* __DEVICE_TMD_H__ */

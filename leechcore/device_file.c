@@ -242,6 +242,7 @@ BOOL DeviceFile_MsCrashDumpInitialize()
     return TRUE;
 }
 
+_Success_(return)
 BOOL DeviceFile_GetOption(_In_ QWORD fOption, _Out_ PQWORD pqwValue)
 {
     PDEVICE_CONTEXT_FILE ctx = (PDEVICE_CONTEXT_FILE)ctxDeviceMain->hDevice;
@@ -311,11 +312,12 @@ VOID DeviceFile_Close()
     ctxDeviceMain->hDevice = 0;
 }
 
+_Success_(return)
 BOOL DeviceFile_Open()
 {
     PDEVICE_CONTEXT_FILE ctx;
-    ctx = (PDEVICE_CONTEXT_FILE)LocalAlloc(LMEM_ZEROINIT, sizeof(DEVICE_CONTEXT_FILE));
-    if(!ctx) { return FALSE; }
+    if(!ctxDeviceMain) { return FALSE; }
+    if(!(ctx = (PDEVICE_CONTEXT_FILE)LocalAlloc(LMEM_ZEROINIT, sizeof(DEVICE_CONTEXT_FILE)))) { return FALSE; }
     if(0 == _strnicmp("file://", ctxDeviceMain->cfg.szDevice, 7)) {
         strncpy_s(ctx->szFileName, _countof(ctx->szFileName), ctxDeviceMain->cfg.szDevice + 7, _countof(ctxDeviceMain->cfg.szDevice) - 7);
     } else if(0 == _stricmp(ctxDeviceMain->cfg.szDevice, "dumpit")) {

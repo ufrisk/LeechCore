@@ -40,6 +40,7 @@ typedef struct tdDEVICE_CONTEXT_TMD {
 * Memory map retrieval is a must, since we cannot read memory belonging to memory mapped
 * devices without risking of bluescreening the system. Memory map retrieval fixes this.
 */
+_Success_(return)
 BOOL DeviceTMD_MemoryMapRetrieve(PDEVICE_CONTEXT_TMD ctxTMd)
 {
     LSTATUS status;
@@ -94,6 +95,7 @@ fail:
 * Verify that the previously set up "fake" page table required to read physical
 * memory is still intact for the physical address specified in the pa parameter.
 */
+_Success_(return)
 BOOL DeviceTMD_VerifyPageTableIntegrity(_In_ PDEVICE_CONTEXT_TMD ctxTMd, _In_ QWORD pa)
 {
     QWORD qwPDPTe, qwPDe, iPDPTe, iPDe, vaPDPTe, vaPDe;
@@ -168,6 +170,7 @@ VOID DeviceTMD_SetupPageTable(_Inout_ PDEVICE_CONTEXT_TMD ctxTMd)
     }
 }
 
+_Success_(return)
 BOOL DeviceTMD_Identify()
 {
     __try {
@@ -190,6 +193,7 @@ VOID DeviceTMD_ReadScatterMEM(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_ DWORD
     }
 }
 
+_Success_(return)
 BOOL DeviceTMD_WriteMEM(_In_ QWORD pa, _In_reads_(cb) PBYTE pb, _In_ DWORD cb)
 {
     PDEVICE_CONTEXT_TMD ctxTMd = (PDEVICE_CONTEXT_TMD)ctxDeviceMain->hDevice;
@@ -211,10 +215,12 @@ VOID DeviceTMD_Close()
     ctxDeviceMain->hDevice = 0;
 }
 
+_Success_(return)
 BOOL DeviceTMD_Open()
 {
-    PDEVICE_CONTEXT_TMD ctxTMd = (PDEVICE_CONTEXT_TMD)LocalAlloc(LMEM_ZEROINIT, sizeof(DEVICE_CONTEXT_TMD));
-    if(!ctxTMd) { return FALSE; }
+    PDEVICE_CONTEXT_TMD ctxTMd = NULL;
+    if(!ctxDeviceMain) { return FALSE; }
+    if(!(ctxTMd = (PDEVICE_CONTEXT_TMD)LocalAlloc(LMEM_ZEROINIT, sizeof(DEVICE_CONTEXT_TMD)))) { return FALSE; }
     // 1: Test for vulnerability and set up page tables using for virtual2physical mappings
     if(!DeviceTMD_Identify()) {
         vprintf(
@@ -250,6 +256,7 @@ fail:
 #ifdef LINUX
 #include "device.h"
 
+_Success_(return)
 BOOL DeviceTMD_Open()
 {
     vprintf(

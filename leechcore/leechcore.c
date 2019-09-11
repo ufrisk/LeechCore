@@ -351,8 +351,7 @@ DLLEXPORT BOOL LeechCore_CommandData(_In_ ULONG64 fOption, _In_reads_(cbDataIn) 
     return result;
 }
 
-_Success_(return)
-DWORD LeechCore_Read_DoWork_Scatter(_In_ QWORD qwAddr, _Out_ PBYTE pb, _In_ DWORD cb, _In_opt_ PLEECHCORE_PAGESTAT_MINIMAL pPageStat)
+DWORD LeechCore_Read_DoWork_Scatter(_In_ QWORD qwAddr, _Out_writes_(cb) PBYTE pb, _In_ DWORD cb, _In_opt_ PLEECHCORE_PAGESTAT_MINIMAL pPageStat)
 {
     PBYTE pbBuffer;
     PMEM_IO_SCATTER_HEADER pDMAs, *ppDMAs;

@@ -11,6 +11,7 @@
 * Open a "connection" to the file.
 * -- result
 */
+_Success_(return)
 BOOL DeviceFile_Open();
 
 #endif /* __DEVICE_FILE_H__ */

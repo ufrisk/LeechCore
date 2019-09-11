@@ -148,6 +148,7 @@ VOID Device605_TCP_Close()
     ctxDeviceMain->hDevice = 0;
 }
 
+_Success_(return)
 BOOL Device605_TCP_TxTlp(_In_ PDEVICE_CONTEXT_SP605_TCP ctx, _In_reads_(cbTlp) PBYTE pbTlp, _In_ DWORD cbTlp, BOOL fFlush)
 {
     PBYTE pbTx;
@@ -229,7 +230,8 @@ VOID Device605_TCP_RxTlpSynchronous(_In_ PDEVICE_CONTEXT_SP605_TCP ctx)
     }
 }
 
-BOOL Device605_TCP_ReadDMA(_In_ QWORD qwAddr, _Out_ PBYTE pb, _In_ DWORD cb)
+_Success_(return)
+BOOL Device605_TCP_ReadDMA(_In_ QWORD qwAddr, _Out_writes_(cb) PBYTE pb, _In_ DWORD cb)
 {
     PDEVICE_CONTEXT_SP605_TCP ctx = (PDEVICE_CONTEXT_SP605_TCP)ctxDeviceMain->hDevice;
     TLP_CALLBACK_BUF_MRd rxbuf;
@@ -354,6 +356,7 @@ VOID Device605_TCP_ProbeDMA(_In_ QWORD qwAddr, _In_ DWORD cPages, _Out_ __bcount
 }
 
 // write max 128 byte packets.
+_Success_(return)
 BOOL Device605_TCP_WriteDMA_TXP(_Inout_ PDEVICE_CONTEXT_SP605_TCP ctx, _In_ QWORD qwA, _In_ BYTE bFirstBE, _In_ BYTE bLastBE, _In_ PBYTE pb, _In_ DWORD cb)
 {
     DWORD txbuf[36], i, cbTlp;
@@ -390,6 +393,7 @@ BOOL Device605_TCP_WriteDMA_TXP(_Inout_ PDEVICE_CONTEXT_SP605_TCP ctx, _In_ QWOR
     return Device605_TCP_TxTlp(ctx, pbTlp, cbTlp, FALSE);
 }
 
+_Success_(return)
 BOOL Device605_TCP_WriteDMA(_In_ QWORD qwA, _In_ PBYTE pb, _In_ DWORD cb)
 {
     PDEVICE_CONTEXT_SP605_TCP ctx = (PDEVICE_CONTEXT_SP605_TCP)ctxDeviceMain->hDevice;
@@ -421,6 +425,7 @@ BOOL Device605_TCP_WriteDMA(_In_ QWORD qwA, _In_ PBYTE pb, _In_ DWORD cb)
     return Device605_TCP_TxTlp(ctx, NULL, 0, TRUE) && result; // Flush and Return.
 }
 
+_Success_(return)
 BOOL Device605_TCP_ListenTlp(_In_ DWORD dwTime)
 {
     PDEVICE_CONTEXT_SP605_TCP ctx = (PDEVICE_CONTEXT_SP605_TCP)ctxDeviceMain->hDevice;
@@ -435,14 +440,17 @@ BOOL Device605_TCP_ListenTlp(_In_ DWORD dwTime)
     return TRUE;
 }
 
+_Success_(return)
 BOOL Device605_TCP_WriteTlp(_In_ PBYTE pbTlp, _In_ DWORD cbTlp)
 {
     PDEVICE_CONTEXT_SP605_TCP ctx = (PDEVICE_CONTEXT_SP605_TCP)ctxDeviceMain->hDevice;
     return Device605_TCP_TxTlp(ctx, pbTlp, cbTlp, TRUE);
 }
 
+_Success_(return)
 BOOL Device605_TCP_CommandData(_In_ ULONG64 fOption, _In_reads_(cbDataIn) PBYTE pbDataIn, _In_ DWORD cbDataIn, _Out_writes_opt_(cbDataOut) PBYTE pbDataOut, _In_ DWORD cbDataOut, _Out_opt_ PDWORD pcbDataOut)
 {
+    if(pcbDataOut) { *pcbDataOut = 0; }
     switch(fOption) {
         case LEECHCORE_COMMANDDATA_FPGA_WRITE_TLP:
             return Device605_TCP_WriteTlp(pbDataIn, cbDataIn);
@@ -452,6 +460,7 @@ BOOL Device605_TCP_CommandData(_In_ ULONG64 fOption, _In_reads_(cbDataIn) PBYTE 
     return FALSE;
 }
 
+_Success_(return)
 BOOL Device605_TCP_Open()
 {
     PDEVICE_CONTEXT_SP605_TCP ctx;
@@ -460,7 +469,7 @@ BOOL Device605_TCP_Open()
 #ifdef _WIN32
 
     WSADATA WsaData;
-    WSAStartup(MAKEWORD(2, 2), &WsaData);
+    if(WSAStartup(MAKEWORD(2, 2), &WsaData)) { return FALSE; }
 
 #endif /* _WIN32 */
     ctx = LocalAlloc(LMEM_ZEROINIT, sizeof(DEVICE_CONTEXT_SP605_TCP));

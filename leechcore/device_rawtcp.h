@@ -9,6 +9,7 @@
 #define __DEVICE_RAWTCP_H__
 #include "leechcore.h"
 
+_Success_(return)
 BOOL DeviceRawTCP_Open();
 
 typedef enum tdRawTCPCmd {

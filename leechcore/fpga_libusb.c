@@ -10,6 +10,7 @@
 #include <string.h>
 #include <libusb.h>
 
+#include "device.h"
 #include "fpga_libusb.h"
 
 static libusb_context *usb_ctx = NULL;
@@ -68,7 +69,7 @@ int fpga_get_chip_configuration(void *config) {
     err = ftdi_GetChipConfiguration(device_handle, config);
 
     if(err != sizeof(struct FT_60XCONFIGURATION)) {
-        printf("[-] cannot get chip config: %s\n", libusb_strerror(err));
+        vprintfv("[-] cannot get chip config: %s\n", libusb_strerror(err));
         rc = -1;
     }
 
@@ -106,7 +107,7 @@ int fpga_open(void)
 
     device_count = libusb_get_device_list(usb_ctx, &device_list);
     if(device_count < 0) {
-        printf("[-] Cannot get device list: %s\n", libusb_strerror(device_count));
+        vprintfv("[-] Cannot get device list: %s\n", libusb_strerror(device_count));
         rc = -1;
         goto out;
     }
@@ -117,13 +118,13 @@ int fpga_open(void)
 
         err = libusb_get_device_descriptor(device, &desc);
         if(err != 0) {
-            printf("[-] Cannot get device descriptor: %s\n", libusb_strerror(err));
+            vprintfv("[-] Cannot get device descriptor: %s\n", libusb_strerror(err));
             rc = -1;
             goto out_free;
         }
 
         if(desc.idVendor == FTDI_VENDOR_ID && desc.idProduct == FTDI_FT60X_PRODUCT_ID) {
-            printf("[+] using FTDI device: %04x:%04x (bus %d, device %d)\n", 
+            vprintfv("[+] using FTDI device: %04x:%04x (bus %d, device %d)\n", 
                 desc.idVendor,
                 desc.idProduct,
                 libusb_get_bus_number(device),
@@ -141,14 +142,14 @@ int fpga_open(void)
 
     err = libusb_open(device, &device_handle);
     if(err != 0) {
-        printf("[-] Cannot get device: %s\n", libusb_strerror(err));
+        vprintfv("[-] Cannot get device: %s\n", libusb_strerror(err));
         rc = -1;
         goto out_free;
     }
 
     err = libusb_reset_device(device_handle);
     if(err != 0) {
-        printf("[-] Cannot reset device: %s\n", libusb_strerror(err));
+        vprintfv("[-] Cannot reset device: %s\n", libusb_strerror(err));
         rc = -1;
         goto out_free;
     }
@@ -172,11 +173,11 @@ int fpga_open(void)
         snprintf(description + strlen(description), sizeof(description), " - serialNumber %s", string);
     }
 
-    printf("[+] %s\n", description);
+    vprintfv("[+] %s\n", description);
 
     err = ftdi_GetChipConfiguration(device_handle, &chip_configuration);
     if(err != sizeof(chip_configuration)) {
-        printf("[-] Cannot get chio configuration: %s\n", libusb_strerror(err));
+        vprintfv("[-] Cannot get chio configuration: %s\n", libusb_strerror(err));
         rc = -1;
         goto out_free;
     }
@@ -186,7 +187,7 @@ int fpga_open(void)
         chip_configuration.ChannelConfig != CONFIGURATION_CHANNEL_CONFIG_1 ||
         chip_configuration.OptionalFeatureSupport != CONFIGURATION_OPTIONAL_FEATURE_DISABLEALL
       ) {
-        printf("[!] Bad FTDI configuration... setting chip config to fifo 245 && 1 channel, no feature support\n");
+        vprintfv("[!] Bad FTDI configuration... setting chip config to fifo 245 && 1 channel, no feature support\n");
 
         chip_configuration.FIFOMode = CONFIGURATION_FIFO_MODE_245;
         chip_configuration.ChannelConfig = CONFIGURATION_CHANNEL_CONFIG_1;
@@ -194,7 +195,7 @@ int fpga_open(void)
 
         err = ftdi_SetChipConfiguration(device_handle, &chip_configuration);
         if(err != sizeof(chip_configuration)) {
-            printf("[-] Cannot set chip configuration: %s\n", libusb_strerror(err));
+            vprintfv("[-] Cannot set chip configuration: %s\n", libusb_strerror(err));
             rc = -1;
             goto out_free;
         }
@@ -203,40 +204,40 @@ int fpga_open(void)
 
     err = libusb_kernel_driver_active(device_handle, FTDI_COMMUNICATION_INTERFACE);
     if(err < 0) {
-        printf("[-] Cannot get kernel driver status for FTDI_COMMUNICATION_INTERFACE: %s\n", libusb_strerror(err));
+        vprintfv("[-] Cannot get kernel driver status for FTDI_COMMUNICATION_INTERFACE: %s\n", libusb_strerror(err));
         rc = -1;
         goto out_free;
     }
 
     if(err) {
-        printf("[-] driver is active on FTDI_COMMUNICATION_INTERFACE = %d\n", err);
+        vprintfv("[-] driver is active on FTDI_COMMUNICATION_INTERFACE = %d\n", err);
         rc = -1;
         goto out_free;
     }
 
     err = libusb_kernel_driver_active(device_handle, FTDI_DATA_INTERFACE);
     if(err < 0) {
-        printf("[-] Cannot get kernel driver status for FTDI_DATA_INTERFACE: %s\n", libusb_strerror(err));
+        vprintfv("[-] Cannot get kernel driver status for FTDI_DATA_INTERFACE: %s\n", libusb_strerror(err));
         rc = -1;
         goto out_free;
     }
 
     if(err) {
-        printf("[-] driver is active on FTDI_DATA_INTERFACE = %d\n", err);
+        vprintfv("[-] driver is active on FTDI_DATA_INTERFACE = %d\n", err);
         rc = -1;
         goto out_free;
     }
 
     err = libusb_claim_interface(device_handle, FTDI_COMMUNICATION_INTERFACE);
     if(err != 0) {
-        printf("[-] Cannot claim interface FTDI_COMMUNICATION_INTERFACE: %s\n", libusb_strerror(err));
+        vprintfv("[-] Cannot claim interface FTDI_COMMUNICATION_INTERFACE: %s\n", libusb_strerror(err));
         rc = -1;
         goto out_free;
     }
 
     err = libusb_claim_interface(device_handle, FTDI_DATA_INTERFACE);
     if(err != 0) {
-        printf("[-] Cannot claim interface FTDI_DATA_INTERFACE: %s\n", libusb_strerror(err));
+        vprintfv("[-] Cannot claim interface FTDI_DATA_INTERFACE: %s\n", libusb_strerror(err));
         rc = -1;
         goto out_free;
     }
@@ -266,14 +267,14 @@ int fpga_read(void *data, int size, int *transferred)
 
     err = ftdi_SendCmdRead(device_handle, size);
     if(err) {
-        printf("[-] cannot send CmdRead ftdi: %s", libusb_strerror(err));
+        vprintfv("[-] cannot send CmdRead ftdi: %s", libusb_strerror(err));
         return -1;
     }
 
     *transferred = 0;
     err = libusb_bulk_transfer(device_handle, FTDI_ENDPOINT_IN, data, size, transferred, 0);
     if(err < 0) {
-        printf("[-] bulk transfer error: %s", libusb_strerror(err));
+        vprintfv("[-] bulk transfer error: %s", libusb_strerror(err));
         return -1;
     }
 
@@ -295,12 +296,12 @@ int fpga_write(void *data, int size, int *transferred)
     err = libusb_bulk_transfer(device_handle, FTDI_ENDPOINT_OUT, data, size, transferred, 1000);
 
     if(err < 0) {
-        printf("[-] bulk transfer error: %s", libusb_strerror(err));
+        vprintfv("[-] bulk transfer error: %s", libusb_strerror(err));
         return -1;
     }
 
     if(*transferred != size) {
-        printf("[-] only %d bytes transferred\n", *transferred);
+        vprintfv("[-] only %d bytes transferred\n", *transferred);
         return -1;
     }
 

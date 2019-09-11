@@ -14,6 +14,20 @@
 #include <Windows.h>
 #include "leechcore.h"
 
+inline int PyDict_SetItemString_DECREF(PyObject *dp, const char *key, PyObject *item)
+{
+    int i = PyDict_SetItemString(dp, key, item);
+    Py_XDECREF(item);
+    return i;
+}
+
+inline int PyList_Append_DECREF(PyObject *dp, PyObject *item)
+{
+    int i = PyList_Append(dp, item);
+    Py_XDECREF(item);
+    return i;
+}
+
 //-----------------------------------------------------------------------------
 // LEECHCORE PYTHON API BELOW:
 //-----------------------------------------------------------------------------
@@ -46,20 +60,20 @@ LEECHCOREPYC_Open(PyObject *self, PyObject *args)
         return PyErr_Format(PyExc_RuntimeError, "LEECHCOREPYC_Open: Failed.");
     }
     if(!(pyDict = PyDict_New())) { return PyErr_NoMemory(); }
-    PyDict_SetItemString(pyDict, "flags", PyLong_FromLong((long)cfg.flags));
-    PyDict_SetItemString(pyDict, "paMax", PyLong_FromUnsignedLongLong(cfg.paMax));
-    PyDict_SetItemString(pyDict, "cbMaxSizeMemIo", PyLong_FromUnsignedLongLong(cfg.cbMaxSizeMemIo));
-    PyDict_SetItemString(pyDict, "paMaxNative", PyLong_FromUnsignedLongLong(cfg.paMaxNative));
-    PyDict_SetItemString(pyDict, "tpDevice", PyLong_FromLong((long)cfg.tpDevice));
-    PyDict_SetItemString(pyDict, "fWritable", PyBool_FromLong(cfg.fWritable ? 1 : 0));
-    PyDict_SetItemString(pyDict, "fVolatile", PyBool_FromLong(cfg.fVolatile ? 1 : 0));
-    PyDict_SetItemString(pyDict, "fVolatileMaxAddress", PyBool_FromLong(cfg.fVolatileMaxAddress ? 1 : 0));
-    PyDict_SetItemString(pyDict, "fRemote", PyBool_FromLong(cfg.fRemote ? 1 : 0));
-    PyDict_SetItemString(pyDict, "VersionMajor", PyLong_FromLong((long)cfg.VersionMajor));
-    PyDict_SetItemString(pyDict, "VersionMinor", PyLong_FromLong((long)cfg.VersionMinor));
-    PyDict_SetItemString(pyDict, "VersionRevision", PyLong_FromLong((long)cfg.VersionRevision));
-    PyDict_SetItemString(pyDict, "device", PyUnicode_FromFormat("%s", cfg.szDevice));
-    PyDict_SetItemString(pyDict, "remote", PyUnicode_FromFormat("%s", cfg.szRemote));
+    PyDict_SetItemString_DECREF(pyDict, "flags", PyLong_FromLong((long)cfg.flags));
+    PyDict_SetItemString_DECREF(pyDict, "paMax", PyLong_FromUnsignedLongLong(cfg.paMax));
+    PyDict_SetItemString_DECREF(pyDict, "cbMaxSizeMemIo", PyLong_FromUnsignedLongLong(cfg.cbMaxSizeMemIo));
+    PyDict_SetItemString_DECREF(pyDict, "paMaxNative", PyLong_FromUnsignedLongLong(cfg.paMaxNative));
+    PyDict_SetItemString_DECREF(pyDict, "tpDevice", PyLong_FromLong((long)cfg.tpDevice));
+    PyDict_SetItemString_DECREF(pyDict, "fWritable", PyBool_FromLong(cfg.fWritable ? 1 : 0));
+    PyDict_SetItemString_DECREF(pyDict, "fVolatile", PyBool_FromLong(cfg.fVolatile ? 1 : 0));
+    PyDict_SetItemString_DECREF(pyDict, "fVolatileMaxAddress", PyBool_FromLong(cfg.fVolatileMaxAddress ? 1 : 0));
+    PyDict_SetItemString_DECREF(pyDict, "fRemote", PyBool_FromLong(cfg.fRemote ? 1 : 0));
+    PyDict_SetItemString_DECREF(pyDict, "VersionMajor", PyLong_FromLong((long)cfg.VersionMajor));
+    PyDict_SetItemString_DECREF(pyDict, "VersionMinor", PyLong_FromLong((long)cfg.VersionMinor));
+    PyDict_SetItemString_DECREF(pyDict, "VersionRevision", PyLong_FromLong((long)cfg.VersionRevision));
+    PyDict_SetItemString_DECREF(pyDict, "device", PyUnicode_FromFormat("%s", cfg.szDevice));
+    PyDict_SetItemString_DECREF(pyDict, "remote", PyUnicode_FromFormat("%s", cfg.szRemote));
     return pyDict;
 }
 
@@ -112,9 +126,9 @@ LEECHCOREPYC_ReadScatter(PyObject *self, PyObject *args)
     for(i = 0; i < cMEMs; i++) {
         pMEM = ppMEMs[i];
         if((pyDict = PyDict_New())) {
-            PyDict_SetItemString(pyDict, "addr", PyLong_FromUnsignedLongLong(pMEM->qwA));
-            PyDict_SetItemString(pyDict, "data", PyBytes_FromStringAndSize(pMEM->pb, pMEM->cb));
-            PyList_Append(pyListDst, pyDict);
+            PyDict_SetItemString_DECREF(pyDict, "addr", PyLong_FromUnsignedLongLong(pMEM->qwA));
+            PyDict_SetItemString_DECREF(pyDict, "data", PyBytes_FromStringAndSize(pMEM->pb, pMEM->cb));
+            PyList_Append_DECREF(pyListDst, pyDict);
         }
     }
     LocalFree(ppMEMs);

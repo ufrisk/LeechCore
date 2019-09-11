@@ -105,6 +105,7 @@ VOID DevicePMEM_ReadScatterMEM(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_ DWOR
     }
 }
 
+_Success_(return)
 BOOL DevicePMEM_GetOption(_In_ QWORD fOption, _Out_ PQWORD pqwValue)
 {
     PDEVICE_CONTEXT_PMEM ctx = (PDEVICE_CONTEXT_PMEM)ctxDeviceMain->hDevice;
@@ -174,6 +175,7 @@ VOID DevicePMEM_SvcClose()
 * Create the winpmem kernel driver loader service and load the kernel driver
 * into the kernel. Upon fail it's guaranteed that no lingering service exists.
 */
+_Success_(return)
 BOOL DevicePMEM_SvcStart()
 {
     PDEVICE_CONTEXT_PMEM ctx = (PDEVICE_CONTEXT_PMEM)ctxDeviceMain->hDevice;
@@ -285,6 +287,7 @@ VOID DevicePMEM_Close()
     ctxDeviceMain->hDevice = 0;
 }
 
+_Success_(return)
 BOOL DevicePMEM_GetMemoryInformation()
 {
     PDEVICE_CONTEXT_PMEM ctx = (PDEVICE_CONTEXT_PMEM)ctxDeviceMain->hDevice;
@@ -311,6 +314,7 @@ BOOL DevicePMEM_GetMemoryInformation()
     return TRUE;
 }
 
+_Success_(return)
 BOOL DevicePMEM_Open()
 {
     BOOL result;
@@ -345,6 +349,7 @@ BOOL DevicePMEM_Open()
 #if defined(LINUX) || defined(ANDROID)
 #include "device.h"
 
+_Success_(return)
 BOOL DevicePMEM_Open()
 {
     vprintfv("DEVICE: FAIL: 'pmem' memory acquisition only supported on Windows.\n");

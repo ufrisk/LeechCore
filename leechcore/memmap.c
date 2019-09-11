@@ -1,4 +1,4 @@
-// memmap.h : implementation of the physical memory map.
+// memmap.c : implementation of the physical memory map.
 //
 // (c) Ulf Frisk, 2018-2019
 // Author: Ulf Frisk, pcileech@frizk.net
@@ -47,7 +47,12 @@ _Success_(return)
 BOOL MemMap_VerifyTranslateRange(_In_ QWORD pa, _In_ QWORD cb, _Out_opt_ PQWORD ppaDevice)
 {
     DWORD i = ctxDeviceMain->MemMap.iLastEntry;
-    if(!ctxDeviceMain->MemMap.fValid) { return TRUE; }
+    if(!ctxDeviceMain->MemMap.fValid) {
+        if(ppaDevice) {
+            *ppaDevice = pa;
+        }
+        return TRUE;
+    }
     if((pa >= ctxDeviceMain->MemMap.Runs[i].paBase) && (pa + cb <= ctxDeviceMain->MemMap.Runs[i].paBase + ctxDeviceMain->MemMap.Runs[i].cbSize)) {
         if(ppaDevice) {
             *ppaDevice = pa + ctxDeviceMain->MemMap.Runs[i].paRemapBase - ctxDeviceMain->MemMap.Runs[i].paBase;

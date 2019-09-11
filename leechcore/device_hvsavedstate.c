@@ -344,6 +344,7 @@ VOID DeviceHvSavedState_Close()
     ctxDeviceMain->hDevice = 0;
 }
 
+_Success_(return)
 BOOL DeviceHvSavedState_Open_OpenHvHandle(PHVSAVEDSTATE_CONTEXT ctx)
 {
     HRESULT hr;
@@ -358,6 +359,7 @@ BOOL DeviceHvSavedState_Open_OpenHvHandle(PHVSAVEDSTATE_CONTEXT ctx)
     return TRUE;
 }
 
+_Success_(return)
 BOOL DeviceHvSavedState_Open_MemMap(PHVSAVEDSTATE_CONTEXT ctx)
 {
     HRESULT hr;
@@ -388,6 +390,7 @@ BOOL DeviceHvSavedState_Open_MemMap(PHVSAVEDSTATE_CONTEXT ctx)
     return TRUE;
 }
 
+_Success_(return)
 BOOL DeviceHvSavedState_Init(PHVSAVEDSTATE_CONTEXT ctx) {
     VIRTUAL_PROCESSOR_REGISTER reg;
 
@@ -439,6 +442,7 @@ BOOL DeviceHvSavedState_Init(PHVSAVEDSTATE_CONTEXT ctx) {
     return TRUE;
 }
 
+_Success_(return)
 BOOL DeviceHvSavedState_Open_InitializeDll(PHVSAVEDSTATE_CONTEXT ctx)
 {
     const LPSTR FN_LIST[] = { "ApplyPendingSavedStateFileReplayLog", "GetArchitecture", "GetGuestPhysicalMemoryChunks", "GetGuestRawSavedMemorySize", "GetPagingMode", "GetRegisterValue", "GetVpCount", "GuestPhysicalAddressToRawSavedMemoryOffset", "GuestVirtualAddressToPhysicalAddress", "LoadSavedStateFile", "LoadSavedStateFiles", "LocateSavedStateFiles", "ReadGuestPhysicalAddress", "ReadGuestRawSavedMemory", "ReleaseSavedStateFiles" };
@@ -478,10 +482,12 @@ BOOL DeviceHvSavedState_GetOption(_In_ QWORD fOption, _Out_ PQWORD pqwValue)
     return FALSE;
 }
 
+_Success_(return)
 BOOL DeviceHvSavedState_Open()
 {
-    PHVSAVEDSTATE_CONTEXT ctx = (PHVSAVEDSTATE_CONTEXT)LocalAlloc(LMEM_ZEROINIT, sizeof(HVSAVEDSTATE_CONTEXT));
-    if(!ctx) { return FALSE; }
+    PHVSAVEDSTATE_CONTEXT ctx = NULL;
+    if(!ctxDeviceMain) { return FALSE; }
+    if(!(ctx = (PHVSAVEDSTATE_CONTEXT)LocalAlloc(LMEM_ZEROINIT, sizeof(HVSAVEDSTATE_CONTEXT)))) { return FALSE; }
     if(!DeviceHvSavedState_Open_InitializeDll(ctx)) { 
         vprintf(
             "DEVICE: FAILED: Hyper-V Saved State API DLL 'vmsavedstatedumpprovider.dll' was \n" \

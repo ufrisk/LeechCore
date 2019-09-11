@@ -99,6 +99,7 @@ DEVICE_MEMORY_RANGE CDEVICE_RESERVED_MEMORY_RANGES[NUMBER_OF_DEVICE_RESERVED_MEM
     {.BaseAddress = 0xF0000000,.TopAddress = 0xFFFFFFFF }, // PCI SPACE
 };
 
+_Success_(return)
 BOOL Device3380_WriteCsr(_In_ WORD wRegAddr, _In_ DWORD dwRegValue, _In_ BYTE fCSR)
 {
     PDEVICE_DATA ctx = (PDEVICE_DATA)ctxDeviceMain->hDevice;
@@ -108,6 +109,7 @@ BOOL Device3380_WriteCsr(_In_ WORD wRegAddr, _In_ DWORD dwRegValue, _In_ BYTE fC
     return WinUsb_WritePipe(ctx->WinusbHandle, USB_EP_CSROUT, (PUCHAR)&ps, sizeof(ps), &cbTransferred, NULL);
 }
 
+_Success_(return)
 BOOL Device3380_ReadCsr(_In_ WORD wRegAddr, _Out_ PDWORD pdwRegValue, _In_ BYTE fCSR)
 {
     PDEVICE_DATA ctx = (PDEVICE_DATA)ctxDeviceMain->hDevice;
@@ -119,6 +121,7 @@ BOOL Device3380_ReadCsr(_In_ WORD wRegAddr, _Out_ PDWORD pdwRegValue, _In_ BYTE 
         WinUsb_ReadPipe(ctx->WinusbHandle, USB_EP_CSRIN, (PUCHAR)pdwRegValue, 4, &cbTransferred, NULL);
 }
 
+_Success_(return)
 BOOL Device3380_ReadDMA_Retry(PTHREAD_DATA_READ_EP ptd)
 {
     PDEVICE_DATA ctx = (PDEVICE_DATA)ctxDeviceMain->hDevice;
@@ -216,7 +219,7 @@ VOID ReadScatterGather_Thread3(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_ DWOR
                 paBase = (DWORD)pMEM->qwA;
                 cbCurrent = pMEM->cbMax;
             }
-        } else if((paBase + cbCurrent == pMEM->qwA) && (cbCurrent < cbThreadLimit)) {
+        } else if(((QWORD)paBase + cbCurrent == pMEM->qwA) && (cbCurrent < cbThreadLimit)) {
             c++;
             cbCurrent += pMEM->cbMax;
         } else {
@@ -273,7 +276,7 @@ VOID ReadScatterGather_Thread1(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_ DWOR
                 paBase = (DWORD)pMEM->qwA;
                 cbCurrent = pMEM->cbMax;
             }
-        } else if((paBase + cbCurrent == pMEM->qwA) && (cbCurrent + pMEM->cbMax <= 0x00800000)) {
+        } else if(((QWORD)paBase + cbCurrent == pMEM->qwA) && (cbCurrent + pMEM->cbMax <= 0x00800000)) {
             c++;
             cbCurrent += pMEM->cbMax;
         } else {
@@ -313,6 +316,7 @@ VOID Device3380_ReadScatterGather(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_ D
     }
 }
 
+_Success_(return)
 BOOL Device3380_WriteDMA(_In_ QWORD pa, _In_reads_(cb) PBYTE pb, _In_ DWORD cb)
 {
     PDEVICE_DATA ctx = (PDEVICE_DATA)ctxDeviceMain->hDevice;
@@ -330,7 +334,7 @@ BOOL Device3380_WriteDMA(_In_ QWORD pa, _In_reads_(cb) PBYTE pb, _In_ DWORD cb)
     return result;
 }
 
-BOOL Device3380_Open2();
+_Success_(return) BOOL Device3380_Open2();
 
 VOID Device3380_Close()
 {
@@ -344,11 +348,13 @@ VOID Device3380_Close()
     ctxDeviceMain->hDevice = 0;
 }
 
+_Success_(return)
 BOOL Device3380_Open()
 {
     BOOL result;
     DWORD dwReg;
     QWORD paMax;
+    if(!ctxDeviceMain) { return FALSE; }
     result = Device3380_Open2();
     if(!result) { return FALSE; }
     Device3380_ReadCsr(REG_USBSTAT, &dwReg, CSR_CONFIGSPACE_MEMM | CSR_BYTEALL);
@@ -394,6 +400,7 @@ BOOL Device3380_Open()
 // F72FE0D4-CBCB-407d-8814-9ED673D0DD6B
 DEFINE_GUID(GUID_DEVINTERFACE_android, 0xF72FE0D4, 0xCBCB, 0x407d, 0x88, 0x14, 0x9E, 0xD6, 0x73, 0xD0, 0xDD, 0x6B);
 
+_Success_(return)
 BOOL Device3380_RetrievePath(_Out_bytecap_(BufLen) LPWSTR wszDevicePath, _In_ ULONG BufLen)
 {
     BOOL result;
@@ -449,6 +456,7 @@ VOID Device3380_Open_SetPipePolicy(_In_ PDEVICE_DATA pDeviceData)
     WinUsb_SetPipePolicy(pDeviceData->WinusbHandle, USB_EP_DMAIN3, PIPE_TRANSFER_TIMEOUT, (ULONG)sizeof(BOOL), &ulTIMEOUT);
 }
 
+_Success_(return)
 BOOL Device3380_Open2()
 {
     BOOL result;
@@ -484,6 +492,7 @@ BOOL Device3380_Open2()
 #endif /* _WIN32 */
 #ifdef LINUX
 
+_Success_(return)
 BOOL Device3380_Open2()
 {
     PDEVICE_DATA pDeviceData;

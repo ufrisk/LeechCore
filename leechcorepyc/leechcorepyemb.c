@@ -49,7 +49,6 @@ BOOL LeechCorePyC_EmbPythonInitialize(_In_ HMODULE hDllPython)
     // 0: fixup python zip version
     wszPythonLib[6] = (WCHAR)Py_GetVersion()[0];
     wszPythonLib[7] = (WCHAR)Py_GetVersion()[2];
-    WCHAR ZZZ = (WCHAR)Py_GetVersion()[2];
     // 1: Construct Python Path
     Util_GetPathDll(wszPathExe, NULL);
     Util_GetPathDll(wszPathBasePython, hDllPython);

@@ -1,4 +1,4 @@
-// oscompatibility.h : pcileech windows/linux compatibility layer.
+// oscompatibility.h : LeechCore Windows/Linux compatibility layer.
 //
 // (c) Ulf Frisk, 2017-2019
 // Author: Ulf Frisk, pcileech@frizk.net
@@ -29,7 +29,7 @@ VOID usleep(_In_ DWORD us);
 #ifdef LINUX
 #define _GNU_SOURCE
 
-#include <libusb-1.0/libusb.h>
+#include <libusb.h>
 #include <byteswap.h>
 #include <ctype.h>
 #include <dirent.h>

@@ -1,3 +1,8 @@
+// oscompatibility.c : LeechCore Windows/Linux compatibility layer.
+//
+// (c) Ulf Frisk, 2017-2019
+// Author: Ulf Frisk, pcileech@frizk.net
+//
 #ifdef _WIN32
 
 #include "oscompatibility.h"
@@ -180,7 +185,7 @@ BOOL IsWow64Process(HANDLE hProcess, PBOOL Wow64Process)
 
 // ----------------------------------------------------------------------------
 // Facade implementation of FTDI functions using functionality provided by
-// a basic implmentation of FTDI library
+// a basic implmentation of FTDI library.
 // NB! functionality below is by no way complete - only minimal functionality
 // required by PCILeech use is implemented ...
 // ----------------------------------------------------------------------------
@@ -207,12 +212,12 @@ ULONG FT60x_FT_Close(HANDLE ftHandle)
 
 ULONG FT60x_FT_GetChipConfiguration(HANDLE ftHandle, PVOID pvConfiguration)
 {
-    return fpga_get_chip_configuration(pvConfiguration) == -1 ? 0x20 : 0;
+    return (fpga_get_chip_configuration(pvConfiguration) == -1) ? 0x20 : 0;
 }
 
 ULONG FT60x_FT_SetChipConfiguration(HANDLE ftHandle, PVOID pvConfiguration)
 {
-    return fpga_set_chip_configuration(pvConfiguration) == -1 ? 0x20 : 0;
+    return (fpga_set_chip_configuration(pvConfiguration) == -1) ? 0x20 : 0;
 }
 
 ULONG FT60x_FT_SetSuspendTimeout(HANDLE ftHandle, ULONG Timeout)
@@ -229,20 +234,12 @@ ULONG FT60x_FT_AbortPipe(HANDLE ftHandle, UCHAR ucPipeID)
 
 ULONG FT60x_FT_WritePipe(HANDLE ftHandle, UCHAR ucPipeID, PUCHAR pucBuffer, ULONG ulBufferLength, PULONG pulBytesTransferred, PVOID pOverlapped)
 {
-    if(fpga_write(pucBuffer, ulBufferLength, pulBytesTransferred) == -1) {
-        return 0x20;
-    }
-
-    return 0;
+    return (fpga_write(pucBuffer, ulBufferLength, pulBytesTransferred) == -1) ? 0x20 : 0;
 }
 
 ULONG FT60x_FT_ReadPipe(HANDLE ftHandle, UCHAR ucPipeID, PUCHAR pucBuffer, ULONG ulBufferLength, PULONG pulBytesTransferred, PVOID pOverlapped)
 {
-    if(fpga_read(pucBuffer, ulBufferLength, pulBytesTransferred) == -1) {
-        return 0x20;
-    }
-
-    return 0;
+    return (fpga_read(pucBuffer, ulBufferLength, pulBytesTransferred) == -1) ? 0x20 : 0;
 }
 
 // ----------------------------------------------------------------------------
@@ -285,23 +282,27 @@ BOOL GetExitCodeThread(HANDLE hThread, PDWORD lpExitCode)
 // CRITICAL_SECTION functionality below:
 // ----------------------------------------------------------------------------
 
-VOID InitializeCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
+VOID InitializeCriticalSection(LPCRITICAL_SECTION lpCriticalSection)
+{
     memset(lpCriticalSection, 0, sizeof(CRITICAL_SECTION));
     pthread_mutexattr_init(&lpCriticalSection->mta);
     pthread_mutexattr_settype(&lpCriticalSection->mta, PTHREAD_MUTEX_RECURSIVE);
     pthread_mutex_init(&lpCriticalSection->mutex, &lpCriticalSection->mta);
 }
 
-VOID DeleteCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
+VOID DeleteCriticalSection(LPCRITICAL_SECTION lpCriticalSection)
+{
     pthread_mutex_destroy(&lpCriticalSection->mutex);
     memset(lpCriticalSection, 0, sizeof(CRITICAL_SECTION));
 }
 
-VOID EnterCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
+VOID EnterCriticalSection(LPCRITICAL_SECTION lpCriticalSection)
+{
     pthread_mutex_lock(&lpCriticalSection->mutex);
 }
 
-VOID LeaveCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
+VOID LeaveCriticalSection(LPCRITICAL_SECTION lpCriticalSection)
+{
     pthread_mutex_unlock(&lpCriticalSection->mutex);
 }
 

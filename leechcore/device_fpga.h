@@ -14,6 +14,7 @@
 * Open a connection to the PCILeech flashed FPGA device.
 * -- result
 */
+_Success_(return)
 BOOL DeviceFPGA_Open();
 
 #endif /* __DEVICE_FPGA_H__ */

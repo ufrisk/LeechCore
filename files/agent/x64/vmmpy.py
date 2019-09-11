@@ -12,7 +12,7 @@
 # (c) Ulf Frisk, 2018-2019
 # Author: Ulf Frisk, pcileech@frizk.net
 #
-# Header Version: 2.7
+# Header Version: 2.8
 #
 
 import atexit
@@ -48,6 +48,20 @@ VMMPY_MEMORYMODEL_X64 =                 0x0003
 # occuring in the native plugin manager / vmm / memory process file system.
 VMMPY_PLUGIN_EVENT_VERBOSITYCHANGE =    0x01
 VMMPY_PLUGIN_EVENT_TOTALREFRESH =       0x02
+
+# WINDOWS REGISTRY contants below:
+VMMPY_WINREG_NONE =                     0x00
+VMMPY_WINREG_SZ =                       0x01
+VMMPY_WINREG_EXPAND_SZ =                0x02
+VMMPY_WINREG_BINARY =                   0x03
+VMMPY_WINREG_DWORD =                    0x04
+VMMPY_WINREG_DWORD_BIG_ENDIAN =         0x05
+VMMPY_WINREG_LINK =                     0x06
+VMMPY_WINREG_MULTI_SZ =                 0x07
+VMMPY_WINREG_RESOURCE_LIST =            0x08
+VMMPY_WINREG_FULL_RESOURCE_DESCRIPTOR = 0x09
+VMMPY_WINREG_RESOURCE_REQUIREMENTS_LIST = 0x0A
+VMMPY_WINREG_QWORD =                    0x0B
 
 #------------------------------------------------------------------------------
 # VmmPy INITIALIZATION FUNCTIONALITY BELOW:
@@ -136,6 +150,10 @@ VMMPY_OPT_CONFIG_VMM_VERSION_MAJOR            = 0x40000007  # R
 VMMPY_OPT_CONFIG_VMM_VERSION_MINOR            = 0x40000008  # R
 VMMPY_OPT_CONFIG_VMM_VERSION_REVISION         = 0x40000009  # R
 VMMPY_OPT_CONFIG_STATISTICS_FUNCTIONCALL      = 0x4000000A  # RW - enable function call statistics (.status/statistics_fncall file)
+
+VMMDLL_OPT_WIN_VERSION_MAJOR                  = 0x40000101  # R
+VMMDLL_OPT_WIN_VERSION_MINOR                  = 0x40000102  # R
+VMMDLL_OPT_WIN_VERSION_BUILD                  = 0x40000103  # R
 
 
 def VmmPy_ConfigGet(vmmpy_opt_id):
@@ -492,6 +510,36 @@ def VmmPy_WinReg_HiveWrite(va_hive, address, bytes_data):
 
 
 
+def VmmPy_WinReg_KeyList(key):
+    """Retrieve sub-keys and associated values with the specified registry key.
+
+    Keyword arguments:
+    key -- str: path of registry key to list. May start with address of CMHIVE
+                in 0xhexadecimal format or HKLM.
+    return -- dict: of list of subkeys and list of values.
+    
+    Example:
+    VmmPy_WinReg_KeyList('HKLM\\HARDWARE') --> {'subkeys': [{'name': 'DEVICEMAP', 'time': 131877368614156304, 'time-str': '2018-11-26 20:14:21 UTC'}, ...], 'values': [...]}
+    """
+    return VMMPYC_WinReg_EnumKey(key)
+
+
+
+def VmmPy_WinReg_ValueRead(keyvalue):
+    """Read a registry value.
+
+    Keyword arguments:
+    keyvalue -- str: path of registry value to read. May start with address of
+                 CMHIVE in 0xhexadecimal format or HKLM.
+    return -- dict: of 'type' (value type as in VMMPY_WINREG_*) and 'data' (value data).
+    
+    Example:
+    VmmPy_WinReg_ValueRead('HKLM\\SYSTEM\\Setup\\SystemPartition') --> {'type': 1, 'data': b'\\\x00D\x00e\x00v\x00i\x00c\x00e\x00\\\x00H...'}
+    """
+    return VMMPYC_WinReg_QueryValue(keyvalue)
+
+
+
 #------------------------------------------------------------------------------
 # VmmPy NETWORK FUNCTIONALITY BELOW:
 #------------------------------------------------------------------------------
@@ -595,21 +643,6 @@ def VmmPy_WinGetThunkInfoIAT(pid, module_name, imported_module_name, imported_mo
     VmmPy_WinGetThunkInfoIAT(4, 'ntoskrnl.exe', 'hal.dll', 'HalSendNMI') --> {'32': False, 'vaFunction': 18446735288149190896, 'vaNameFunction': 18446735288143568050, 'vaNameModule': 18446735288143568362, 'vaThunk': 18446735288143561136}
     """
     return VMMPYC_WinGetThunkInfoIAT(pid, module_name, imported_module_name, imported_module_function)
-
-
-
-def VmmPy_WinDecompressPage(va_compressed, len_compressed = 0):
-    """Decompress a page stored in the MemCompression process in Windows 10.
-
-    Keyword arguments:
-    va_compressed -- int: the virtual address inside 'MemCompression' where the compressed buffer starts.
-    len_compressed -- int: optional length of the compressed buffer (leave out for auto-detect).
-    return -- dict: containing decompressed data and size of compressed buffer.
-
-    Example:
-    VmmPy_WinDecompressPage(0x00000210bfb40000) --> {'c': 456, 'b': b'...'}
-    """
-    return VMMPYC_WinMemCompression_DecompressPage(va_compressed, len_compressed)
 
 
 

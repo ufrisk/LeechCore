@@ -11,6 +11,7 @@
 * Open a "connection" to the winpmem memory acquisition device.
 * -- result
 */
+_Success_(return)
 BOOL DevicePMEM_Open();
 
 #endif /* __DEVICE_PMEM_H__ */

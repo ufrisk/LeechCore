@@ -14,6 +14,7 @@
 * Open a connection to the USB3380 PCILeech flashed device.
 * -- result
 */
+_Success_(return)
 BOOL DeviceHvSavedState_Open();
 
 #endif /* __DEVICE_HVSAVEDSTATE_H__ */

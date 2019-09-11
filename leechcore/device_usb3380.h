@@ -11,6 +11,7 @@
 * Open a connection to the USB3380 PCILeech flashed device.
 * -- result
 */
+_Success_(return)
 BOOL Device3380_Open();
 
 #endif /* __DEVICE_USB3380_H__ */

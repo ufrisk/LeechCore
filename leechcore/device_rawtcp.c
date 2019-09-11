@@ -76,6 +76,7 @@ SOCKET DeviceRawTCP_Connect(_In_ DWORD Addr, _In_ WORD Port)
 	return 0;
 }
 
+_Success_(return)
 BOOL DeviceRawTCP_Status(_In_ PDEVICE_CONTEXT_RAWTCP ctxrawtcp)
 {
 	RAWTCP_PROTO_PACKET Rx = {0}, Tx = {0};
@@ -124,7 +125,8 @@ VOID DeviceRawTCP_Close()
     ctxDeviceMain->hDevice = 0;
 }
 
-BOOL DeviceRawTCP_ReadDMA(_In_ QWORD qwAddr, _Out_ PBYTE pb, _In_ DWORD cb)
+_Success_(return)
+BOOL DeviceRawTCP_ReadDMA(_In_ QWORD qwAddr, _Out_writes_(cb) PBYTE pb, _In_ DWORD cb)
 {
     PDEVICE_CONTEXT_RAWTCP ctxrawtcp = (PDEVICE_CONTEXT_RAWTCP)ctxDeviceMain->hDevice;
 	RAWTCP_PROTO_PACKET Rx = {0}, Tx = {0};
@@ -225,6 +227,7 @@ VOID DeviceRawTCP_ReadScatterGather(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_
     }
 }
 
+_Success_(return)
 BOOL DeviceRawTCP_WriteDMA(_In_ QWORD qwAddr, _In_ PBYTE pb, _In_ DWORD cb)
 {
 	PDEVICE_CONTEXT_RAWTCP ctxrawtcp = (PDEVICE_CONTEXT_RAWTCP)ctxDeviceMain->hDevice;
@@ -278,6 +281,7 @@ BOOL DeviceRawTCP_WriteDMA(_In_ QWORD qwAddr, _In_ PBYTE pb, _In_ DWORD cb)
 	return cbWritten >= cb;
 }
 
+_Success_(return)
 BOOL DeviceRawTCP_Open()
 {
     PDEVICE_CONTEXT_RAWTCP ctx;
@@ -286,7 +290,7 @@ BOOL DeviceRawTCP_Open()
 #ifdef _WIN32
 
     WSADATA WsaData;
-    WSAStartup(MAKEWORD(2, 2), &WsaData);
+    if(WSAStartup(MAKEWORD(2, 2), &WsaData)) { return FALSE; }
 
 #endif /* _WIN32 */
     ctx = LocalAlloc(LMEM_ZEROINIT, sizeof(DEVICE_CONTEXT_RAWTCP));

@@ -50,7 +50,7 @@ The LeechAgent authenticates all incoming connections against membership in the 
 
 There is also a possibility to run the LeechAgent in interactive mode (as a normal program). If run in interactive mode a user may also start the LeechAgent in "insecure" mode - which means no authentication or logging at all.
 
-The LeechAgent listens on the port `28473` - please ensure network connectivity for this port in the firewall. Also, if doing live capture ensure that LeechAgent (if running in interactive mode) is started as an administrator.
+The LeechAgent listens on the port `tcp/28473` - please ensure network connectivity for this port in the firewall. Also, if doing live capture ensure that LeechAgent (if running in interactive mode) is started as an administrator.
 
 For more information please check the [LeechCore wiki](https://github.com/ufrisk/LeechCore/wiki) and the [blog entry](http://blog.frizk.net/2019/04/LeechAgent.html) about remote live memory capture with the LeechAgent.
 
@@ -83,7 +83,9 @@ Start the LeechAgent in interactive mode with DumpIt LIVEKD to allow connecting 
 Start the LeevhAgent in interactive mode with DumpIt LIVEKD to allow connecting clients to access live memory. Start as elevated administrator. Accept connections from all clients with access to port `tcp/28473` without any form of authentication.
 * `DumpIt.exe /LIVEKD /A LeechAgent.exe /C "-interactive -insecure"`
 
-
+Building:
+=========
+Pre-built binaries are found together with other supporting files in the files folder. Build instructions are found in the [Wiki](https://github.com/ufrisk/LeechCore/wiki) in the [Building](https://github.com/ufrisk/LeechCore/wiki/Dev_Building) section.
 
 Links:
 ======
@@ -107,5 +109,6 @@ v1.2
 * LeechCore Windows x86 support. Now Windows x86/x64 and Linux x64 is supported.
 * Bug fixes and additional functionality to support LeechAgent.
 
-Latest
+v1.3
 * Bug fixes.
+* Use libusb for FPGA USB access. Contribution by: [Jérémie Boutoille / Synacktiv](https://github.com/tlk-synacktiv).

@@ -325,6 +325,7 @@ VOID DeviceFPGA_Close()
     ctxDeviceMain->hDevice = 0;
 }
 
+_Success_(return)
 BOOL DeviceFPGA_GetSetPHY(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ BOOL isUpdate)
 {
     DWORD status;
@@ -472,6 +473,7 @@ VOID DeviceFPGA_SetPerformanceProfile(_Inout_ PDEVICE_CONTEXT_FPGA ctx)
 // TLP handling functionality below:
 //-------------------------------------------------------------------------------
 
+_Success_(return)
 BOOL DeviceFPGA_TxTlp(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_reads_(cbTlp) PBYTE pbTlp, _In_ DWORD cbTlp, BOOL fRdKeepalive, BOOL fFlush)
 {
     DWORD status;
@@ -680,7 +682,7 @@ VOID DeviceFPGA_ProbeMEM_Impl(_In_ QWORD qwAddr, _In_ DWORD cPages, _Inout_updat
         DeviceFPGA_ProbeMEM_Impl(qwAddr, ctx->perf.PROBE_MAXPAGES, pbResultMap);
         cPages -= ctx->perf.PROBE_MAXPAGES;
         pbResultMap += ctx->perf.PROBE_MAXPAGES;
-        qwAddr += ctx->perf.PROBE_MAXPAGES << 12;
+        qwAddr += (QWORD)ctx->perf.PROBE_MAXPAGES << 12;
     }
     // prepare
     bufMRd.cb = 0;
@@ -746,6 +748,7 @@ VOID DeviceFPGA_ProbeMEM(_In_ QWORD qwAddr, _In_ DWORD cPages, _Inout_updates_by
 }
 
 // write max 128 byte packets.
+_Success_(return)
 BOOL DeviceFPGA_WriteMEM_TXP(_Inout_ PDEVICE_CONTEXT_FPGA ctx, _In_ QWORD pa, _In_ BYTE bFirstBE, _In_ BYTE bLastBE, _In_ PBYTE pb, _In_ DWORD cb)
 {
     DWORD txbuf[36], i, cbTlp;
@@ -782,6 +785,7 @@ BOOL DeviceFPGA_WriteMEM_TXP(_Inout_ PDEVICE_CONTEXT_FPGA ctx, _In_ QWORD pa, _I
     return DeviceFPGA_TxTlp(ctx, pbTlp, cbTlp, FALSE, FALSE);
 }
 
+_Success_(return)
 BOOL DeviceFPGA_WriteMEM(_In_ QWORD pa, _In_reads_(cb) PBYTE pb, _In_ DWORD cb)
 {
     PDEVICE_CONTEXT_FPGA ctx = (PDEVICE_CONTEXT_FPGA)ctxDeviceMain->hDevice;
@@ -813,6 +817,7 @@ BOOL DeviceFPGA_WriteMEM(_In_ QWORD pa, _In_reads_(cb) PBYTE pb, _In_ DWORD cb)
     return DeviceFPGA_TxTlp(ctx, NULL, 0, FALSE, TRUE) && result; // Flush and Return.
 }
 
+_Success_(return)
 BOOL DeviceFPGA_ListenTlp(_In_ DWORD dwTime)
 {
     PDEVICE_CONTEXT_FPGA ctx = (PDEVICE_CONTEXT_FPGA)ctxDeviceMain->hDevice;
@@ -826,12 +831,14 @@ BOOL DeviceFPGA_ListenTlp(_In_ DWORD dwTime)
     return TRUE;
 }
 
+_Success_(return)
 BOOL DeviceFPGA_WriteTlp(_In_ PBYTE pbTlp, _In_ DWORD cbTlp)
 {
     PDEVICE_CONTEXT_FPGA ctx = (PDEVICE_CONTEXT_FPGA)ctxDeviceMain->hDevice;
     return DeviceFPGA_TxTlp(ctx, pbTlp, cbTlp, FALSE, TRUE);
 }
 
+_Success_(return)
 BOOL DeviceFPGA_GetOption(_In_ QWORD fOption, _Out_ PQWORD pqwValue)
 {
     PDEVICE_CONTEXT_FPGA ctx = (PDEVICE_CONTEXT_FPGA)ctxDeviceMain->hDevice;
@@ -881,6 +888,7 @@ BOOL DeviceFPGA_GetOption(_In_ QWORD fOption, _Out_ PQWORD pqwValue)
     return FALSE;
 }
 
+_Success_(return)
 BOOL DeviceFPGA_SetOption(_In_ QWORD fOption, _In_ QWORD qwValue)
 {
     PDEVICE_CONTEXT_FPGA ctx = (PDEVICE_CONTEXT_FPGA)ctxDeviceMain->hDevice;
@@ -917,8 +925,10 @@ BOOL DeviceFPGA_SetOption(_In_ QWORD fOption, _In_ QWORD qwValue)
     return FALSE;
 }
 
+_Success_(return)
 BOOL DeviceFPGA_CommandData(_In_ ULONG64 fOption, _In_reads_(cbDataIn) PBYTE pbDataIn, _In_ DWORD cbDataIn, _Out_writes_opt_(cbDataOut) PBYTE pbDataOut, _In_ DWORD cbDataOut, _Out_opt_ PDWORD pcbDataOut)
 {
+    if(pcbDataOut) { *pcbDataOut = 0; }
     switch(fOption) {
         case LEECHCORE_COMMANDDATA_FPGA_WRITE_TLP:
             return (cbDataIn >= 12) && pbDataIn && DeviceFPGA_WriteTlp(pbDataIn, cbDataIn);
@@ -933,11 +943,11 @@ VOID DeviceFPGA_Open_ParseParams(_Out_writes_(4) PDWORD dwOptions)
     CHAR _szBuf[MAX_PATH];
     DWORD i, j;
     LPSTR sz;
+    ZeroMemory(dwOptions, 4 * sizeof(DWORD));
     if(0 == _strnicmp("fpga://", ctxDeviceMain->cfg.szDevice, 7)) {
         strcpy_s(_szBuf, _countof(_szBuf), ctxDeviceMain->cfg.szDevice);
         sz = _szBuf + 7;
         for(i = 7, j = 0; i < _countof(_szBuf); i++) {
-
             if(':' == _szBuf[i]) {
                 _szBuf[i] = 0;
                 dwOptions[j] = atoi(sz);
@@ -945,12 +955,10 @@ VOID DeviceFPGA_Open_ParseParams(_Out_writes_(4) PDWORD dwOptions)
                 sz = _szBuf + i + 1;
                 continue;
             }
-
             if('\0' == _szBuf[i]) {
                 dwOptions[j] = atoi(sz);
                 return;
             }
-
         }
     }
 }
@@ -960,6 +968,7 @@ VOID DeviceFPGA_Open_ParseParams(_Out_writes_(4) PDWORD dwOptions)
 #define OPTION_DELAY_WRITE      2
 #define OPTION_DELAY_PROBE      3
 
+_Success_(return)
 BOOL DeviceFPGA_Open()
 {
     LPSTR szDeviceError;
