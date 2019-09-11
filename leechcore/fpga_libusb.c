@@ -98,7 +98,6 @@ int fpga_open(void)
     int found;
     struct FT_60XCONFIGURATION chip_configuration;
     unsigned char string[255] = {0};
-    char description[255] = {0};
 
     if(libusb_init(&usb_ctx)) {
         rc = -1;
@@ -156,24 +155,18 @@ int fpga_open(void)
 
     err = libusb_get_string_descriptor_ascii(device_handle, desc.iManufacturer, string, sizeof(string));
     if(err > 0) {
-        snprintf(description, sizeof(description), "%s - ", string);
-    } else {
-        snprintf(description, sizeof(description), "%04X - ", desc.idVendor);
+        vprintfv("[+] Manufacturer: %s\n", string);
     }
 
     err = libusb_get_string_descriptor_ascii(device_handle, desc.iProduct, string, sizeof(string));
     if(err > 0) {
-        snprintf(description + strlen(description), sizeof(description), "%s", string);
-    } else {
-        snprintf(description + strlen(description), sizeof(description), "%04X", desc.idProduct);
+        vprintfv("[+] Product: %s\n", string);
     }
 
     err = libusb_get_string_descriptor_ascii(device_handle, desc.iSerialNumber, string, sizeof(string));
     if(err > 0) {
-        snprintf(description + strlen(description), sizeof(description), " - serialNumber %s", string);
+        vprintfv("[+] SerialNumber: %s\n", string);
     }
-
-    vprintfv("[+] %s\n", description);
 
     err = ftdi_GetChipConfiguration(device_handle, &chip_configuration);
     if(err != sizeof(chip_configuration)) {
