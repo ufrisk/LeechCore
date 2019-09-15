@@ -187,6 +187,7 @@ PTHREAD_DATA_READ_EP ReadScatterGather_Thread3_Collect(_In_ BOOL fAll)
 
 VOID ReadScatterGather_Thread3_Queue(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_ DWORD cpMEMs, _In_ DWORD pa, _In_ DWORD cb)
 {
+    HANDLE hThread;
     PTHREAD_DATA_READ_EP ptd = ReadScatterGather_Thread3_Collect(FALSE);
     ptd->isFinished = FALSE;
     ptd->result = FALSE;
@@ -194,7 +195,8 @@ VOID ReadScatterGather_Thread3_Queue(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In
     ptd->cb = cb;
     ptd->ppMEMs = ppMEMs;
     ptd->cpMEMs = cpMEMs;
-    CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)Device3380_ReadDMA2, ptd, 0, NULL);
+    hThread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)Device3380_ReadDMA2, ptd, 0, NULL);
+    if(hThread) { CloseHandle(hThread); }
 }
 
 VOID ReadScatterGather_Thread3(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_ DWORD cpMEMs, _In_ DWORD cbThreadLimit)

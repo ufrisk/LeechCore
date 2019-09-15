@@ -517,6 +517,7 @@ BOOL LeechRPC_Open(_In_ BOOL fIsRpc)
     LPSTR szArg1, szArg2, szArg3;
     LPSTR szOpt[3];
     DWORD i, dwPort = 0;
+    HANDLE hThread;
     int(*pfn_printf_opt_tmp)(_In_z_ _Printf_format_string_ char const* const _Format, ...);
     ctx = (PLEECHRPC_CLIENT_CONTEXT)LocalAlloc(LMEM_ZEROINIT, sizeof(LEECHRPC_CLIENT_CONTEXT));
     if(!ctx) { return FALSE; }
@@ -603,7 +604,8 @@ BOOL LeechRPC_Open(_In_ BOOL fIsRpc)
         vprintfv("RPC: INFO: Compression disabled.\n");
     }
     // all ok - initialize this rpc device stub.
-    CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)LeechRPC_KeepaliveThreadClient, NULL, 0, NULL);
+    hThread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)LeechRPC_KeepaliveThreadClient, NULL, 0, NULL);
+    if(hThread) { CloseHandle(hThread); hThread = 0; }
     strncpy_s(pMsgRsp->cfg.szRemote, sizeof(pMsgRsp->cfg.szRemote), ctxDeviceMain->cfg.szRemote, _TRUNCATE); // ctx from remote doesn't contain remote info ...
     pfn_printf_opt_tmp = ctxDeviceMain->cfg.pfn_printf_opt;
     memcpy(&ctxDeviceMain->cfg, &pMsgRsp->cfg, sizeof(LEECHCORE_CONFIG));
