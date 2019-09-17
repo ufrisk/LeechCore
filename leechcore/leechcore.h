@@ -155,6 +155,7 @@ typedef void                                *HANDLE, **PHANDLE;
 typedef uint32_t                            BOOL, *PBOOL;
 typedef uint8_t                             BYTE, *PBYTE;
 typedef char                                CHAR, *PCHAR, *PSTR, *LPSTR;
+typedef const CHAR*                         LPCSTR;
 typedef uint16_t                            WORD, *PWORD, USHORT, *PUSHORT;
 typedef uint32_t                            DWORD, *PDWORD;
 typedef long long unsigned int              QWORD, *PQWORD, ULONG64, *PULONG64;
@@ -478,7 +479,7 @@ DLLEXPORT BOOL LeechCore_SetOption(_In_ ULONG64 fOption, _In_ ULONG64 qwValue);
 #define LEECHCORE_STATISTICS_ID_COMMANDSVC                    0x07
 #define LEECHCORE_STATISTICS_ID_MAX                           0x07
 
-static const LPSTR LEECHCORE_STATISTICS_NAME[] = {
+static LPCSTR LEECHCORE_STATISTICS_NAME[] = {
     "LeechCore_Open",
     "LeechCore_ReadScatter",
     "LeechCore_Write",
