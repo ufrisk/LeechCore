@@ -40,14 +40,14 @@ typedef struct {
 } _PHYSICAL_MEMORY_DESCRIPTOR32;
 
 typedef struct tdDUMP_HEADER32 {
-    ULONG Signature;
-    ULONG ValidDump;
-    ULONG MajorVersion;
-    ULONG MinorVersion;
-    ULONG DirectoryTableBase;
-    ULONG PfnDataBase;
-    ULONG PsLoadedModuleList;
-    ULONG PsActiveProcessHead;
+    ULONG Signature;                    // 0x0000
+    ULONG ValidDump;                    // 0x0004
+    ULONG MajorVersion;                 // 0x0008
+    ULONG MinorVersion;                 // 0x000c
+    ULONG DirectoryTableBase;           // 0x0010
+    ULONG PfnDataBase;                  // 0x0014
+    ULONG PsLoadedModuleList;           // 0x0018
+    ULONG PsActiveProcessHead;          // 0x001c
     ULONG MachineImageType;
     ULONG NumberProcessors;
     ULONG BugCheckCode;
@@ -77,10 +77,10 @@ typedef struct tdDUMP_HEADER32 {
     ULONG ProductType;
     ULONG SuiteMask;
     UCHAR reserved1[4];
-    LARGE_INTEGER RequiredDumpSpace;
+    ULONG64 RequiredDumpSpace;
     UCHAR reserved2[16];
-    FILETIME SystemUpTime;
-    FILETIME SystemTime;
+    ULONG64 SystemUpTime;
+    ULONG64 SystemTime;
     UCHAR reserved3[56];
 } DUMP_HEADER32, *PDUMP_HEADER32;
 
@@ -109,10 +109,10 @@ typedef struct tdDUMP_HEADER64 {
 	UCHAR ContextRecord[3000];			// 0x0348
 	EXCEPTION_RECORD64 ExceptionRecord;	// 0x0F00
 	ULONG DumpType;						// 0x0F98
-	LARGE_INTEGER RequiredDumpSpace;	// 0x0FA0
-	FILETIME SystemTime;				// 0x0FA8 
+    ULONG64 RequiredDumpSpace;	        // 0x0FA0
+    ULONG64 SystemTime;				    // 0x0FA8 
 	CHAR Comment[0x80];					// 0x0FB0 May not be present.
-	FILETIME SystemUpTime;				// 0x1030
+    ULONG64 SystemUpTime;				// 0x1030
 	ULONG MiniDumpFields;				// 0x1038
 	ULONG SecondaryDataState;			// 0x103c
 	ULONG ProductType;					// 0x1040
@@ -294,8 +294,26 @@ BOOL DeviceFile_GetOption(_In_ QWORD fOption, _Out_ PQWORD pqwValue)
         case LEECHCORE_OPT_MEMORYINFO_OS_UPTIME:
             *pqwValue = ctx->CrashDump.f32 ? *(PQWORD)&ctx->CrashDump.Hdr32.SystemUpTime : *(PQWORD)&ctx->CrashDump.Hdr64.SystemUpTime;
             return TRUE;
+        case LEECHCORE_OPT_MEMORYINFO_OS_KdDebuggerDataBlock:
+            *pqwValue = ctx->CrashDump.f32 ? ctx->CrashDump.Hdr32.KdDebuggerDataBlock : ctx->CrashDump.Hdr64.KdDebuggerDataBlock;
+            return TRUE;
     }
     *pqwValue = 0;
+    return FALSE;
+}
+
+_Success_(return)
+BOOL DeviceFile_CommandData(_In_ ULONG64 fOption, _In_reads_(cbDataIn) PBYTE pbDataIn, _In_ DWORD cbDataIn, _Out_writes_opt_(cbDataOut) PBYTE pbDataOut, _In_ DWORD cbDataOut, _Out_opt_ PDWORD pcbDataOut)
+{
+    PDEVICE_CONTEXT_FILE ctx = (PDEVICE_CONTEXT_FILE)ctxDeviceMain->hDevice;
+    if(fOption == LEECHCORE_COMMANDDATA_FILE_DUMPHEADER_GET) {
+        if(!ctx->CrashDump.fValid || !pbDataOut || (cbDataOut < (ctx->CrashDump.f32 ? 0x1000UL : 0x2000UL))) { return FALSE; }
+        if(pcbDataOut) {
+            *pcbDataOut = ctx->CrashDump.f32 ? 0x1000 : 0x2000;
+        }
+        memcpy(pbDataOut, ctx->CrashDump.pbHdr, (ctx->CrashDump.f32 ? 0x1000 : 0x2000));
+        return TRUE;
+    }
     return FALSE;
 }
 
@@ -341,6 +359,7 @@ BOOL DeviceFile_Open()
     ctxDeviceMain->pfnClose = DeviceFile_Close;
     ctxDeviceMain->pfnReadScatterMEM = DeviceFile_ReadScatterMEM;
     ctxDeviceMain->pfnGetOption = DeviceFile_GetOption;
+    ctxDeviceMain->pfnCommandData = DeviceFile_CommandData;
     if(!DeviceFile_MsCrashDumpInitialize()) { goto fail; }
     if(ctx->CrashDump.fValid) {
         ctxDeviceMain->cfg.paMaxNative = ctx->CrashDump.paMax;

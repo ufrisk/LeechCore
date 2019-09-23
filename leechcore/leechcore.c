@@ -83,6 +83,11 @@ QWORD LeechCore_StatisticsCallEnd(_In_ DWORD fId, QWORD tmCallStart)
     return tmNow - tmCallStart;
 }
 
+DLLEXPORT VOID LeechCore_MemFree(_Frees_ptr_opt_ PVOID pvMem)
+{
+    LocalFree(pvMem);
+}
+
 _Success_(return)
 DLLEXPORT BOOL LeechCore_AllocScatterEmpty(_In_ DWORD cMEMs, _Out_ PPMEM_IO_SCATTER_HEADER *pppMEMs)
 {

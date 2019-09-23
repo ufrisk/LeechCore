@@ -112,3 +112,6 @@ v1.2
 v1.3
 * Bug fixes.
 * Use libusb for FPGA USB access. Contribution by: [Jérémie Boutoille / Synacktiv](https://github.com/tlk-synacktiv).
+
+v1.4
+* Minor API fixes and additions to allow extended MemProcFS dump file functionality.
