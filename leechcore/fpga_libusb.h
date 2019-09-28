@@ -5,6 +5,7 @@
 //     - PCIeScreamer board flashed with PCILeech bitstream.
 //
 // Contribution by Jérémie Boutoille from Synacktiv - www.synacktiv.com
+// Based in part on PCIeScreamer kernel driver from LambdaConcept.
 #ifndef __FPGA_LIBUSB_H__
 #define __FPGA_LIBUSB_H__
 

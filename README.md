@@ -85,7 +85,7 @@ Start the LeevhAgent in interactive mode with DumpIt LIVEKD to allow connecting 
 
 Building:
 =========
-Pre-built binaries are found together with other supporting files in the files folder. Build instructions are found in the [Wiki](https://github.com/ufrisk/LeechCore/wiki) in the [Building](https://github.com/ufrisk/LeechCore/wiki/Dev_Building) section.
+<b>Pre-built [binaries, modules and configuration files](https://github.com/ufrisk/MemProcFS-dev/releases/latest) are found in the latest release.</b> Build instructions are found in the [Wiki](https://github.com/ufrisk/LeechCore/wiki) in the [Building](https://github.com/ufrisk/LeechCore/wiki/Dev_Building) section.
 
 Links:
 ======
@@ -111,7 +111,11 @@ v1.2
 
 v1.3
 * Bug fixes.
-* Use libusb for FPGA USB access. Contribution by: [Jérémie Boutoille / Synacktiv](https://github.com/tlk-synacktiv).
+* Use libusb for FPGA USB access on Linux. Contribution by: [Jérémie Boutoille / Synacktiv](https://github.com/tlk-synacktiv). Based in part on PCIeScreamer kernel driver from [LambdaConcept](https://github.com/enjoy-digital/pcie_screamer/tree/master/drivers/ft60x).
 
-v1.4
+[v1.4](https://github.com/ufrisk/LeechCore/releases/tag/v1.4)
 * Minor API fixes and additions to allow extended MemProcFS dump file functionality.
+
+Latest
+* Bug fixes.
+* Move binaries into releases section.
