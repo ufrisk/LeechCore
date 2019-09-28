@@ -85,7 +85,7 @@ Start the LeevhAgent in interactive mode with DumpIt LIVEKD to allow connecting 
 
 Building:
 =========
-<b>Pre-built [binaries, modules and configuration files](https://github.com/ufrisk/MemProcFS-dev/releases/latest) are found in the latest release.</b> Build instructions are found in the [Wiki](https://github.com/ufrisk/LeechCore/wiki) in the [Building](https://github.com/ufrisk/LeechCore/wiki/Dev_Building) section.
+<b>Pre-built [binaries, modules and configuration files](https://github.com/ufrisk/LeechCore/releases/latest) are found in the latest release.</b> Build instructions are found in the [Wiki](https://github.com/ufrisk/LeechCore/wiki) in the [Building](https://github.com/ufrisk/LeechCore/wiki/Dev_Building) section.
 
 Links:
 ======
