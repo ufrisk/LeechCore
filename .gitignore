@@ -4,6 +4,10 @@
 *.iobj
 *.ipdb
 *.lastcodeanalysissucceeded
+*.exe
+*.dll
+*.pyd
+*.so
 /.vs
 leechrpc_h.h
 leechrpc_c.c
