@@ -291,7 +291,7 @@ BOOL LeechRPC_RpcInitialize(PLEECHRPC_CLIENT_CONTEXT ctx)
 // GENERAL FUNCTIONALITY BELOW:
 //-----------------------------------------------------------------------------
 
-VOID LeechRPC_ReadScatterMEM(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_ DWORD cpMEMs)
+VOID LeechRPC_ReadScatterMEM_Impl(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_ DWORD cpMEMs)
 {
     BOOL result, fOK;
     DWORD i;
@@ -349,6 +349,17 @@ VOID LeechRPC_ReadScatterMEM(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_ DWORD 
 fail:
     LocalFree(pMsgReq);
     LocalFree(pMsgRsp);
+}
+
+VOID LeechRPC_ReadScatterMEM(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_ DWORD cpMEMs)
+{
+    DWORD cpMEMsChunk;
+    while(cpMEMs) {     // read max 16MB at a time.
+        cpMEMsChunk = min(cpMEMs, 0x1000);
+        LeechRPC_ReadScatterMEM_Impl(ppMEMs, cpMEMsChunk);
+        ppMEMs += cpMEMsChunk;
+        cpMEMs -= cpMEMsChunk;
+    }
 }
 
 _Success_(return)
@@ -611,8 +622,7 @@ BOOL LeechRPC_Open(_In_ BOOL fIsRpc)
     memcpy(&ctxDeviceMain->cfg, &pMsgRsp->cfg, sizeof(LEECHCORE_CONFIG));
     ctxDeviceMain->cfg.pfn_printf_opt = pfn_printf_opt_tmp;
     ctxDeviceMain->cfg.fRemote = TRUE;
-    ctxDeviceMain->cfg.cbMaxSizeMemIo = 0x01000000;     // 16MB
-    ctxDeviceMain->fDeviceMultiThread = ctx->fIsRpc;    // RPC = multi-thread, PIPE = single-thread access
+    ctxDeviceMain->fDeviceMultiThread = ctx->fIsRpc;        // RPC = multi-thread, PIPE = single-thread access
     if(pMsgRsp->flags & LEECHRPC_FLAG_FNEXIST_ReadScatterMEM) {
         ctxDeviceMain->pfnReadScatterMEM = LeechRPC_ReadScatterMEM;
     }

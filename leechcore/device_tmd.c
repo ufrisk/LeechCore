@@ -239,7 +239,6 @@ BOOL DeviceTMD_Open()
     ctxDeviceMain->hDevice = (HANDLE)ctxTMd;
     ctxDeviceMain->cfg.tpDevice = LEECHCORE_DEVICE_TOTALMELTDOWN;
     ctxDeviceMain->cfg.fVolatile = TRUE;
-    ctxDeviceMain->cfg.cbMaxSizeMemIo = ctxDeviceMain->cfg.cbMaxSizeMemIo ? min(ctxDeviceMain->cfg.cbMaxSizeMemIo, 0x01000000) : 0x01000000; // 16MB (or lower user-value)
     ctxDeviceMain->cfg.paMaxNative = ctxTMd->paMax;
     ctxDeviceMain->pfnClose = DeviceTMD_Close;
     ctxDeviceMain->pfnReadScatterMEM = DeviceTMD_ReadScatterMEM;

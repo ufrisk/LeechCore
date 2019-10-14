@@ -6,6 +6,8 @@
 #include "device.h"
 #include "memmap.h"
 
+#define USB3380_MAX_PAGES_READ              0x1000
+
 #define CSR_BYTE0                           0x01
 #define CSR_BYTE1                           0x02
 #define CSR_BYTE2                           0x04
@@ -300,13 +302,12 @@ VOID ReadScatterGather_Thread1(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_ DWOR
 VOID Device3380_ReadScatterGather(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_ DWORD cpMEMs)
 {
     PDEVICE_DATA ctx = (PDEVICE_DATA)ctxDeviceMain->hDevice;
-    DWORD cbThreadLimit, cpMEMsMax;
-    cpMEMsMax = max(1, (DWORD)(ctxDeviceMain->cfg.cbMaxSizeMemIo >> 12));
-    if(cpMEMs > cpMEMsMax) {
+    DWORD cbThreadLimit;
+    if(cpMEMs > USB3380_MAX_PAGES_READ) {
         while(TRUE) {
-            Device3380_ReadScatterGather(ppMEMs, min(cpMEMsMax, cpMEMs));
-            ppMEMs = ppMEMs + min(cpMEMsMax, cpMEMs);
-            cpMEMs = cpMEMs - min(cpMEMsMax, cpMEMs);
+            Device3380_ReadScatterGather(ppMEMs, min(USB3380_MAX_PAGES_READ, cpMEMs));
+            ppMEMs = ppMEMs + min(USB3380_MAX_PAGES_READ, cpMEMs);
+            cpMEMs = cpMEMs - min(USB3380_MAX_PAGES_READ, cpMEMs);
             if(cpMEMs == 0) { return; }
         }
     }
@@ -379,7 +380,6 @@ BOOL Device3380_Open()
     // set callback functions and fix up config
     ctxDeviceMain->cfg.tpDevice = LEECHCORE_DEVICE_USB3380;
     ctxDeviceMain->cfg.fVolatile = TRUE;
-    ctxDeviceMain->cfg.cbMaxSizeMemIo = ctxDeviceMain->cfg.cbMaxSizeMemIo ? min(ctxDeviceMain->cfg.cbMaxSizeMemIo, 0x01000000) : 0x01000000; // 16MB (or lower user-value)
     ctxDeviceMain->cfg.paMaxNative = 0x00000000ffffffff;
     ctxDeviceMain->pfnClose = Device3380_Close;
     ctxDeviceMain->pfnReadScatterMEM = Device3380_ReadScatterGather;

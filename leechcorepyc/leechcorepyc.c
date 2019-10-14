@@ -39,10 +39,10 @@ LEECHCOREPYC_Open(PyObject *self, PyObject *args)
     PyObject *pyDict;
     BOOL result;
     DWORD dwFlags = 0;
-    QWORD paMax = 0, cbMaxSizeMemIo = 0;
+    QWORD paMax = 0;
     LPSTR szDevice = NULL, szRemote = NULL;
     LEECHCORE_CONFIG cfg = { 0 };
-    if(!PyArg_ParseTuple(args, "ss|kKK", &szDevice, &szRemote, &dwFlags, &paMax, &cbMaxSizeMemIo)) { return NULL; }
+    if(!PyArg_ParseTuple(args, "ss|kKK", &szDevice, &szRemote, &dwFlags, &paMax)) { return NULL; }
     if(!szDevice || !szDevice[0]) {
         return PyErr_Format(PyExc_RuntimeError, "LEECHCOREPYC_Open: Required argument 'device' is missing.");
     }
@@ -51,7 +51,6 @@ LEECHCOREPYC_Open(PyObject *self, PyObject *args)
     cfg.version = LEECHCORE_CONFIG_VERSION;
     cfg.flags = (WORD)dwFlags;
     cfg.paMax = paMax;
-    cfg.cbMaxSizeMemIo = cbMaxSizeMemIo;
     strncpy_s(cfg.szDevice, sizeof(cfg.szDevice), szDevice, _TRUNCATE);
     if(szRemote) { strncpy_s(cfg.szRemote, sizeof(cfg.szRemote), szRemote, _TRUNCATE); }
     result = LeechCore_Open(&cfg);
@@ -62,7 +61,6 @@ LEECHCOREPYC_Open(PyObject *self, PyObject *args)
     if(!(pyDict = PyDict_New())) { return PyErr_NoMemory(); }
     PyDict_SetItemString_DECREF(pyDict, "flags", PyLong_FromLong((long)cfg.flags));
     PyDict_SetItemString_DECREF(pyDict, "paMax", PyLong_FromUnsignedLongLong(cfg.paMax));
-    PyDict_SetItemString_DECREF(pyDict, "cbMaxSizeMemIo", PyLong_FromUnsignedLongLong(cfg.cbMaxSizeMemIo));
     PyDict_SetItemString_DECREF(pyDict, "paMaxNative", PyLong_FromUnsignedLongLong(cfg.paMaxNative));
     PyDict_SetItemString_DECREF(pyDict, "tpDevice", PyLong_FromLong((long)cfg.tpDevice));
     PyDict_SetItemString_DECREF(pyDict, "fWritable", PyBool_FromLong(cfg.fWritable ? 1 : 0));
@@ -131,7 +129,7 @@ LEECHCOREPYC_ReadScatter(PyObject *self, PyObject *args)
             PyList_Append_DECREF(pyListDst, pyDict);
         }
     }
-    LocalFree(ppMEMs);
+    LeechCore_MemFree(ppMEMs);
     return pyListDst;
 }
 

@@ -13,18 +13,6 @@
 #pragma comment(lib, "ws2_32.lib")
 
 #endif /* _WIN32 */
-#ifdef LINUX
-
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#define SOCKET int
-#define closesocket(_s_) close((_s_))
-#define INVALID_SOCKET	-1
-#define SOCKET_ERROR	-1
-
-#endif /* LINUX */
 
 #include "device_rawtcp.h"
 #include "device.h"
@@ -320,7 +308,6 @@ BOOL DeviceRawTCP_Open()
 	// set callback functions and fix up config
     ctxDeviceMain->cfg.tpDevice = LEECHCORE_DEVICE_RAWTCP;
     ctxDeviceMain->cfg.fVolatile = TRUE;
-    ctxDeviceMain->cfg.cbMaxSizeMemIo = ctxDeviceMain->cfg.cbMaxSizeMemIo ? min(ctxDeviceMain->cfg.cbMaxSizeMemIo, RAWTCP_MAX_SIZE_RX) : RAWTCP_MAX_SIZE_RX; // RAWTCP_MAX_SIZE_RX (or lower user-value)
     ctxDeviceMain->cfg.paMaxNative = 0x0000ffffffffffff;
     ctxDeviceMain->pfnClose = DeviceRawTCP_Close;
     ctxDeviceMain->pfnReadScatterMEM = DeviceRawTCP_ReadScatterGather;

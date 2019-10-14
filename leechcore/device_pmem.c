@@ -328,7 +328,6 @@ BOOL DevicePMEM_Open()
     // set callback functions and fix up config
     ctxDeviceMain->cfg.tpDevice = LEECHCORE_DEVICE_PMEM;
     ctxDeviceMain->cfg.fVolatile = TRUE;
-    ctxDeviceMain->cfg.cbMaxSizeMemIo = ctxDeviceMain->cfg.cbMaxSizeMemIo ? min(ctxDeviceMain->cfg.cbMaxSizeMemIo, 0x01000000) : 0x01000000; // 16MB (or lower user-value)
     ctxDeviceMain->pfnClose = DevicePMEM_Close;
     ctxDeviceMain->pfnReadScatterMEM = DevicePMEM_ReadScatterMEM;
     ctxDeviceMain->pfnGetOption = DevicePMEM_GetOption;

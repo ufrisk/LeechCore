@@ -11,20 +11,6 @@
 #pragma comment(lib, "ws2_32.lib")
 
 #endif /* _WIN32 */
-#ifdef LINUX
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-
-#define SOCKET int
-
-#define closesocket(_s_) close((_s_))
-
-#define INVALID_SOCKET    -1
-#define SOCKET_ERROR    -1
-
-#endif /* LINUX */
 
 #ifdef _WIN32
 #include <PshPack1.h>
@@ -501,7 +487,6 @@ BOOL Device605_TCP_Open()
     // set callback functions and fix up config
     ctxDeviceMain->cfg.tpDevice = LEECHCORE_DEVICE_SP605_TCP;
     ctxDeviceMain->cfg.fVolatile = TRUE;
-    ctxDeviceMain->cfg.cbMaxSizeMemIo = ctxDeviceMain->cfg.cbMaxSizeMemIo ? min(ctxDeviceMain->cfg.cbMaxSizeMemIo, 0x1e000) : 0x1e000; // 0x1e000 (or lower user-value)
     ctxDeviceMain->cfg.paMaxNative = 0x0000ffffffffffff;
     ctxDeviceMain->pfnClose = Device605_TCP_Close;
     ctxDeviceMain->pfnProbeMEM = Device605_TCP_ProbeDMA;

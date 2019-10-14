@@ -515,7 +515,6 @@ BOOL DeviceHvSavedState_Open()
     ctxDeviceMain->hDevice = (HANDLE)ctx;
     ctxDeviceMain->cfg.tpDevice = LEECHCORE_DEVICE_HVSAVEDSTATE;
     ctxDeviceMain->cfg.fVolatile = FALSE;
-    ctxDeviceMain->cfg.cbMaxSizeMemIo = ctxDeviceMain->cfg.cbMaxSizeMemIo ? min(ctxDeviceMain->cfg.cbMaxSizeMemIo, 0x01000000) : 0x01000000; // 16MB (or lower user-value)
     ctxDeviceMain->cfg.paMaxNative = ctx->paMax;
     ctxDeviceMain->pfnClose = DeviceHvSavedState_Close;
     ctxDeviceMain->pfnReadScatterMEM = DeviceHvSavedState_ReadScatterMEM;

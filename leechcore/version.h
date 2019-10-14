@@ -2,9 +2,9 @@
 #define STRINGIZE(s) STRINGIZE2(s)
 
 #define VERSION_MAJOR               1
-#define VERSION_MINOR               4
-#define VERSION_REVISION            1
-#define VERSION_BUILD               1
+#define VERSION_MINOR               5
+#define VERSION_REVISION            0
+#define VERSION_BUILD               2
 
 #define VER_FILE_DESCRIPTION_STR    "LeechCore Memory Acquisition Library"
 #define VER_FILE_VERSION            VERSION_MAJOR, VERSION_MINOR, VERSION_REVISION, VERSION_BUILD

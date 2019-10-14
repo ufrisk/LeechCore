@@ -356,75 +356,82 @@ DLLEXPORT BOOL LeechCore_CommandData(_In_ ULONG64 fOption, _In_reads_(cbDataIn) 
     return result;
 }
 
-DWORD LeechCore_Read_DoWork_Scatter(_In_ QWORD qwAddr, _Out_writes_(cb) PBYTE pb, _In_ DWORD cb, _In_opt_ PLEECHCORE_PAGESTAT_MINIMAL pPageStat)
+VOID LeechCore_ReadEx_Impl(_In_ QWORD qwA, _Out_writes_(cb) PBYTE pb, _In_ DWORD cb, _Out_opt_ PDWORD pcbReadOpt, _In_opt_ PLEECHCORE_PAGESTAT_MINIMAL pPageStat)
 {
+    DWORD cbP, cMEMs, cbRead = 0;
     PBYTE pbBuffer;
-    PMEM_IO_SCATTER_HEADER pDMAs, *ppDMAs;
-    DWORD i, o, cDMAs, cbReadTotal = 0;
-    cDMAs = (cb + 0xfff) >> 12;
-    pbBuffer = (PBYTE)LocalAlloc(LMEM_ZEROINIT, cDMAs * (sizeof(PMEM_IO_SCATTER_HEADER) + sizeof(MEM_IO_SCATTER_HEADER)));
-    if(!pbBuffer) { return 0; }
-    ppDMAs = (PMEM_IO_SCATTER_HEADER*)pbBuffer;
-    pDMAs = (PMEM_IO_SCATTER_HEADER)(pbBuffer + cDMAs * sizeof(PMEM_IO_SCATTER_HEADER));
-    for(i = 0, o = 0; i < cDMAs; i++, o += 0x1000) {
-        ppDMAs[i] = pDMAs + i;
-        pDMAs[i].magic = MEM_IO_SCATTER_HEADER_MAGIC;
-        pDMAs[i].version = MEM_IO_SCATTER_HEADER_VERSION;
-        pDMAs[i].qwA = qwAddr + o;
-        pDMAs[i].cbMax = min(0x1000, cb - o);
-        pDMAs[i].pb = pb + o;
+    PMEM_IO_SCATTER_HEADER pMEMs, * ppMEMs;
+    QWORD i, oA;
+    if(pcbReadOpt) { *pcbReadOpt = 0; }
+    if(!pb || !cb) { return; }
+    cMEMs = (DWORD)(((qwA & 0xfff) + cb + 0xfff) >> 12);
+    pbBuffer = (PBYTE)LocalAlloc(LMEM_ZEROINIT, 0x2000 + cMEMs * (sizeof(MEM_IO_SCATTER_HEADER) + sizeof(PMEM_IO_SCATTER_HEADER)));
+    if(!pbBuffer) {
+        ZeroMemory(pb, cb);
+        return;
     }
-    LeechCore_ReadScatter(ppDMAs, cDMAs);
-    for(i = 0; i < cDMAs; i++) {
-        if(pDMAs[i].cb == pDMAs[i].cbMax) {
-            if(pPageStat && (pDMAs[i].cbMax == 0x1000)) {
-                pPageStat->pfnPageStatUpdate(pPageStat->h, pDMAs[i].qwA + 0x1000, 1, 0);
+    pMEMs = (PMEM_IO_SCATTER_HEADER)(pbBuffer + 0x2000);
+    ppMEMs = (PPMEM_IO_SCATTER_HEADER)(pbBuffer + 0x2000 + cMEMs * sizeof(MEM_IO_SCATTER_HEADER));
+    oA = qwA & 0xfff;
+    // prepare "middle" pages
+    for(i = 0; i < cMEMs; i++) {
+        ppMEMs[i] = &pMEMs[i];
+        pMEMs[i].magic = MEM_IO_SCATTER_HEADER_MAGIC;
+        pMEMs[i].version = MEM_IO_SCATTER_HEADER_VERSION;
+        pMEMs[i].qwA = qwA - oA + (i << 12);
+        pMEMs[i].cbMax = 0x1000;
+        pMEMs[i].pb = pb - oA + (i << 12);
+    }
+    // fixup "first/last" pages
+    pMEMs[0].pb = pbBuffer;
+    if(cMEMs > 1) {
+        pMEMs[cMEMs - 1].pb = pbBuffer + 0x1000;
+    }
+    // Read memory and handle result
+    LeechCore_ReadScatter(ppMEMs, cMEMs);
+    for(i = 0; i < cMEMs; i++) {
+        if(pMEMs[i].cb == 0x1000) {
+            cbRead += 0x1000;
+            if(pPageStat) {
+                pPageStat->pfnPageStatUpdate(pPageStat->h, pMEMs[i].qwA + 0x1000, 1, 0);
             }
-            cbReadTotal += pDMAs[i].cbMax;
         } else {
-            if(pPageStat && (pDMAs[i].cbMax == 0x1000)) {
-                pPageStat->pfnPageStatUpdate(pPageStat->h, pDMAs[i].qwA + 0x1000, 0, 1);
+            ZeroMemory(pMEMs[i].pb, 0x1000);
+            if(pPageStat) {
+                pPageStat->pfnPageStatUpdate(pPageStat->h, pMEMs[i].qwA + 0x1000, 0, 1);
             }
-            ZeroMemory(pDMAs[i].pb, pDMAs[i].cbMax);
         }
     }
-    LocalFree(pbBuffer);
-    return cbReadTotal;
-}
-
-DWORD LeechCore_Read_DoWork(_In_ QWORD qwAddr, _Out_ PBYTE pb, _In_ DWORD cb, _In_opt_ PLEECHCORE_PAGESTAT_MINIMAL pPageStat, _In_ DWORD cbMaxSizeIo)
-{
-    DWORD cbRd, cbRdOff;
-    DWORD cbChunk, cChunkTotal, cChunkSuccess = 0;
-    DWORD i, cbSuccess = 0;
-    // calculate current chunk sizes
-    cbChunk = ~0xfff & min(cb + 0xfff, cbMaxSizeIo);
-    cChunkTotal = (cb / cbChunk) + ((cb % cbChunk) ? 1 : 0);
-    // try read memory
-    memset(pb, 0, cb);
-    for(i = 0; i < cChunkTotal; i++) {
-        cbRdOff = i * cbChunk;
-        cbRd = ((i == cChunkTotal - 1) && (cb % cbChunk)) ? (cb % cbChunk) : cbChunk; // (last chunk may be smaller)
-        cbSuccess += LeechCore_Read_DoWork_Scatter(qwAddr + cbRdOff, pb + cbRdOff, cbRd, pPageStat);
+    cbRead -= (pMEMs[0].cb == 0x1000) ? 0x1000 : 0;                             // adjust byte count for first page (if needed)
+    cbRead -= ((cMEMs > 1) && (pMEMs[cMEMs - 1].cb == 0x1000)) ? 0x1000 : 0;    // adjust byte count for last page (if needed)
+    // Handle first page
+    cbP = (DWORD)min(cb, 0x1000 - oA);
+    if(pMEMs[0].cb == 0x1000) {
+        memcpy(pb, pMEMs[0].pb + oA, cbP);
+        cbRead += cbP;
+    } else {
+        ZeroMemory(pb, cbP);
     }
-    return cbSuccess;
+    // Handle last page
+    if(cMEMs > 1) {
+        cbP = (((qwA + cb) & 0xfff) ? ((qwA + cb) & 0xfff) : 0x1000);
+        if(pMEMs[cMEMs - 1].cb == 0x1000) {
+            memcpy(pb + ((QWORD)cMEMs << 12) - oA - 0x1000, pMEMs[cMEMs - 1].pb, cbP);
+            cbRead += cbP;
+        } else {
+            ZeroMemory(pb + ((QWORD)cMEMs << 12) - oA - 0x1000, cbP);
+        }
+    }
+    if(pcbReadOpt) { *pcbReadOpt = cbRead; }
+    LocalFree(pbBuffer);
 }
 
 DLLEXPORT DWORD LeechCore_ReadEx(_In_ ULONG64 pa, _Out_writes_(cb) PBYTE pb, _In_ DWORD cb, _In_ DWORD flags, _In_opt_ PLEECHCORE_PAGESTAT_MINIMAL pPageStat)
 {
-    BYTE pbWorkaround[4096];
     DWORD cbDataRead;
-    if(!pb || !cb) { return 0; }
-    // read memory (with strange workaround for 1-page reads...)
-    if(cb > 0x1000) {
-        cbDataRead = LeechCore_Read_DoWork(pa, pb, cb, pPageStat, (DWORD)ctxDeviceMain->cfg.cbMaxSizeMemIo);
-    } else {
-        // why is this working ??? if not here console is screwed up... (threading issue?)
-        cbDataRead = LeechCore_Read_DoWork(pa, pbWorkaround, cb, pPageStat, (DWORD)ctxDeviceMain->cfg.cbMaxSizeMemIo);
-        memcpy(pb, pbWorkaround, cb);
-    }
+    LeechCore_ReadEx_Impl(pa, pb, cb, &cbDataRead, pPageStat);
     if((flags & LEECHCORE_FLAG_READ_RETRY) && (cb != cbDataRead)) {
-        return LeechCore_ReadEx(pa, pb, cb, (flags & ~LEECHCORE_FLAG_READ_RETRY), pPageStat);
+        LeechCore_ReadEx_Impl(pa, pb, cb, &cbDataRead, NULL);
     }
     return cbDataRead;
 }
@@ -508,6 +515,8 @@ DLLEXPORT BOOL LeechCore_Open(_Inout_ PLEECHCORE_CONFIG pConfig)
         }
     } else if(0 == _strnicmp("fpga", ctxDeviceMain->cfg.szDevice, 4)) {
         result = DeviceFPGA_Open();
+    } else if(0 == _strnicmp("rawudp://", ctxDeviceMain->cfg.szDevice, 9)) {
+        result = DeviceFPGA_Open();     // RawUDP device handled by FPGA as well.
     } else if(0 == _strnicmp("usb3380", ctxDeviceMain->cfg.szDevice, 7)) {
         result = Device3380_Open();
     } else if(0 == _strnicmp("sp605tcp://", ctxDeviceMain->cfg.szDevice, 11)) {

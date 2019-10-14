@@ -190,34 +190,62 @@ BOOL IsWow64Process(HANDLE hProcess, PBOOL Wow64Process)
 // required by PCILeech use is implemented ...
 // ----------------------------------------------------------------------------
 
+#define FT601_HANDLE_LIBUSB         (HANDLE)-2
+
 ULONG FT60x_FT_Create(PVOID pvArg, DWORD dwFlags, HANDLE *pftHandle)
 {
-    int rc;
-
-    rc = fpga_open();
-    if(rc == -1) {
-        return 0x20;
+    int i, rc;
+    // first try kernel driver
+    {
+        // NB! underlying driver will create a device object at /dev/ft60x[0-3]
+        //     when loaded. Iterate through possible combinations at load time.
+        CHAR szDevice[12] = { '/', 'd', 'e', 'v', '/', 'f', 't', '6', '0', 'x', '0', 0 };
+        for(i = 0; i < 4; i++) {
+            szDevice[10] = '0' + i;
+            rc = open(szDevice, O_RDWR | O_CLOEXEC);
+            if(rc > 0) {
+                *pftHandle = (HANDLE)(QWORD)rc;
+                return 0;
+            }
+        }
     }
-
-    // this value is not used, but must not be 0
-    *pftHandle = (HANDLE) 0x1337;
-    return 0;
+    // try libusb built-in driver
+    {
+        rc = fpga_open();
+        if(rc != -1) {
+            *pftHandle = FT601_HANDLE_LIBUSB;
+            return 0;
+        }
+    }
+    return 0x20;
 }
 
 ULONG FT60x_FT_Close(HANDLE ftHandle)
 {
-    fpga_close();
+    if(ftHandle == FT601_HANDLE_LIBUSB) {
+        fpga_close();
+    } else {
+        close((int)(QWORD)ftHandle);
+    }
     return 0;
 }
 
 ULONG FT60x_FT_GetChipConfiguration(HANDLE ftHandle, PVOID pvConfiguration)
 {
-    return (fpga_get_chip_configuration(pvConfiguration) == -1) ? 0x20 : 0;
+    if(ftHandle == FT601_HANDLE_LIBUSB) {
+        return (fpga_get_chip_configuration(pvConfiguration) == -1) ? 0x20 : 0;
+    } else {
+        return ioctl((int)(QWORD)ftHandle, 0, pvConfiguration) ? 0x20 : 0;
+    }
 }
 
 ULONG FT60x_FT_SetChipConfiguration(HANDLE ftHandle, PVOID pvConfiguration)
 {
-    return (fpga_set_chip_configuration(pvConfiguration) == -1) ? 0x20 : 0;
+    if(ftHandle == FT601_HANDLE_LIBUSB) {
+        return ioctl((int)(QWORD)ftHandle, 1, pvConfiguration) ? 0x20 : 0;
+    } else {
+        return (fpga_set_chip_configuration(pvConfiguration) == -1) ? 0x20 : 0;
+    }
 }
 
 ULONG FT60x_FT_SetSuspendTimeout(HANDLE ftHandle, ULONG Timeout)
@@ -234,12 +262,52 @@ ULONG FT60x_FT_AbortPipe(HANDLE ftHandle, UCHAR ucPipeID)
 
 ULONG FT60x_FT_WritePipe(HANDLE ftHandle, UCHAR ucPipeID, PUCHAR pucBuffer, ULONG ulBufferLength, PULONG pulBytesTransferred, PVOID pOverlapped)
 {
-    return (fpga_write(pucBuffer, ulBufferLength, pulBytesTransferred) == -1) ? 0x20 : 0;
+    int result, cbTxTotal = 0;
+    if(ftHandle == FT601_HANDLE_LIBUSB) {
+        return (fpga_write(pucBuffer, ulBufferLength, pulBytesTransferred) == -1) ? 0x20 : 0;
+    } else {
+        // NB! underlying ft60x driver cannot handle more than 0x800 bytes per write,
+        //     split larger writes into smaller writes if required.
+        while(cbTxTotal < ulBufferLength) {
+            result = write((int)(QWORD)ftHandle, pucBuffer + cbTxTotal, min(0x800, ulBufferLength - cbTxTotal));
+            if(!result) { return 0x20; } // no bytes transmitted -> error
+            cbTxTotal += result;
+        }
+        *pulBytesTransferred = cbTxTotal;
+        return 0;
+    }
+}
+
+ULONG FT60x_FT_ReadPipe2_KernelDriver(HANDLE ftHandle, UCHAR ucPipeID, PUCHAR pucBuffer, ULONG ulBufferLength, PULONG pulBytesTransferred, PVOID pOverlapped)
+{
+    int result;
+    *pulBytesTransferred = 0;
+    // NB! underlying driver have a max tranfer size in one go, multiple reads may be
+    //     required to retrieve all data - hence the loop.
+    do {
+        result = read((int)(QWORD)ftHandle, pucBuffer + *pulBytesTransferred, ulBufferLength - *pulBytesTransferred);
+        if(result > 0) {
+            *pulBytesTransferred += result;
+        }
+    } while((result > 0) && (0 == (result % 0x1000)) && (ulBufferLength > * pulBytesTransferred));
+    return (result > 0) ? 0 : 0x20;
 }
 
 ULONG FT60x_FT_ReadPipe(HANDLE ftHandle, UCHAR ucPipeID, PUCHAR pucBuffer, ULONG ulBufferLength, PULONG pulBytesTransferred, PVOID pOverlapped)
 {
-    return (fpga_read(pucBuffer, ulBufferLength, pulBytesTransferred) == -1) ? 0x20 : 0;
+    ULONG i, result, cbRx, cbRxTotal = 0;
+    if(ftHandle == FT601_HANDLE_LIBUSB) {
+        return (fpga_read(pucBuffer, ulBufferLength, pulBytesTransferred) == -1) ? 0x20 : 0;
+    } else {
+        // NB! underlying driver won't return all data on the USB core queue in first
+        //     read so we have to read two times.
+        for(i = 0; i < 2; i++) {
+            result = FT60x_FT_ReadPipe2_KernelDriver(ftHandle, ucPipeID, pucBuffer + cbRxTotal, ulBufferLength - cbRxTotal, &cbRx, pOverlapped);
+            cbRxTotal += cbRx;
+        }
+        *pulBytesTransferred = cbRxTotal;
+        return result;
+    }
 }
 
 // ----------------------------------------------------------------------------

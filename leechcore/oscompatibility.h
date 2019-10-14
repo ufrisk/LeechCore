@@ -20,6 +20,7 @@
 #pragma comment (lib, "bcrypt.lib")
 
 typedef unsigned __int64                    QWORD, *PQWORD;
+#define SOCK_NONBLOCK                       0
 
 #pragma warning( disable : 4477)
 
@@ -41,6 +42,10 @@ VOID usleep(_In_ DWORD us);
 #include <pthread.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
 typedef void                                VOID, *PVOID;
 typedef void                                *HANDLE, **PHANDLE;
@@ -82,6 +87,10 @@ typedef struct tdEXCEPTION_RECORD64         { CHAR sz[152]; } EXCEPTION_RECORD64
 #define WINUSB_INTERFACE_HANDLE             libusb_device_handle*
 #define PIPE_TRANSFER_TIMEOUT               0x03
 #define CONSOLE_SCREEN_BUFFER_INFO          PVOID    // TODO: remove this dummy
+#define SOCKET                              int
+#define INVALID_SOCKET	                    -1
+#define SOCKET_ERROR	                    -1
+#define WSAEWOULDBLOCK                      10035L
 
 #define _In_
 #define _Out_
@@ -97,6 +106,7 @@ typedef struct tdEXCEPTION_RECORD64         { CHAR sz[152]; } EXCEPTION_RECORD64
 
 #define max(a, b)                           (((a) > (b)) ? (a) : (b))
 #define min(a, b)                           (((a) < (b)) ? (a) : (b))
+#define _byteswap_ushort(v)                 (bswap_16(v))
 #define _byteswap_ulong(v)                  (bswap_32(v))
 #define _byteswap_uint64(v)                 (bswap_64(v))
 #define _countof(_Array)                    (sizeof(_Array) / sizeof(_Array[0]))
@@ -117,6 +127,7 @@ typedef struct tdEXCEPTION_RECORD64         { CHAR sz[152]; } EXCEPTION_RECORD64
 #define ZeroMemory(pb, cb)                  (memset(pb, 0, cb))
 #define WinUsb_SetPipePolicy(h, p, t, cb, pb)   // TODO: implement this for better USB2 performance.
 #define CloseHandle(h)                          // TODO: remove this dummy implementation & replace with WARN.
+#define WSAGetLastError()                   (WSAEWOULDBLOCK)    // TODO: remove this dummy when possible.
 #define _ftelli64(f)                        (ftello(f))
 #define _fseeki64(f, o, w)                  (fseeko(f, o, w))
 #define _chsize_s(fd, cb)                   (ftruncate64(fd, cb))
@@ -124,6 +135,7 @@ typedef struct tdEXCEPTION_RECORD64         { CHAR sz[152]; } EXCEPTION_RECORD64
 #define InterlockedAdd64(p, v)              (__sync_fetch_and_add(p, v))
 #define InterlockedIncrement64(p)           (__sync_fetch_and_add(p, 1))
 #define GetCurrentProcess()					((HANDLE)-1)
+#define closesocket(s)                      close(s)
 
 typedef struct tdCRITICAL_SECTION {
     pthread_mutex_t mutex;
