@@ -122,3 +122,6 @@ v1.3
 * Move binaries into releases section.
 * [RawUDP](https://github.com/ufrisk/LeechCore/wiki/Device_RawUDP) device ([NeTV2 FPGA](https://github.com/ufrisk/pcileech-fpga) over UDP).
 * ELF Core Dump support (VirtualBox VBoxManage debugvm dumpvmcore).
+
+Latest
+* Bug fixes.

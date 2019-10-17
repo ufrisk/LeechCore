@@ -366,10 +366,7 @@ VOID LeechCore_ReadEx_Impl(_In_ QWORD qwA, _Out_writes_(cb) PBYTE pb, _In_ DWORD
     if(!pb || !cb) { return; }
     cMEMs = (DWORD)(((qwA & 0xfff) + cb + 0xfff) >> 12);
     pbBuffer = (PBYTE)LocalAlloc(LMEM_ZEROINIT, 0x2000 + cMEMs * (sizeof(MEM_IO_SCATTER_HEADER) + sizeof(PMEM_IO_SCATTER_HEADER)));
-    if(!pbBuffer) {
-        ZeroMemory(pb, cb);
-        return;
-    }
+    if(!pbBuffer) { return; }
     pMEMs = (PMEM_IO_SCATTER_HEADER)(pbBuffer + 0x2000);
     ppMEMs = (PPMEM_IO_SCATTER_HEADER)(pbBuffer + 0x2000 + cMEMs * sizeof(MEM_IO_SCATTER_HEADER));
     oA = qwA & 0xfff;
@@ -396,7 +393,6 @@ VOID LeechCore_ReadEx_Impl(_In_ QWORD qwA, _Out_writes_(cb) PBYTE pb, _In_ DWORD
                 pPageStat->pfnPageStatUpdate(pPageStat->h, pMEMs[i].qwA + 0x1000, 1, 0);
             }
         } else {
-            ZeroMemory(pMEMs[i].pb, 0x1000);
             if(pPageStat) {
                 pPageStat->pfnPageStatUpdate(pPageStat->h, pMEMs[i].qwA + 0x1000, 0, 1);
             }
@@ -409,8 +405,6 @@ VOID LeechCore_ReadEx_Impl(_In_ QWORD qwA, _Out_writes_(cb) PBYTE pb, _In_ DWORD
     if(pMEMs[0].cb == 0x1000) {
         memcpy(pb, pMEMs[0].pb + oA, cbP);
         cbRead += cbP;
-    } else {
-        ZeroMemory(pb, cbP);
     }
     // Handle last page
     if(cMEMs > 1) {
@@ -418,8 +412,6 @@ VOID LeechCore_ReadEx_Impl(_In_ QWORD qwA, _Out_writes_(cb) PBYTE pb, _In_ DWORD
         if(pMEMs[cMEMs - 1].cb == 0x1000) {
             memcpy(pb + ((QWORD)cMEMs << 12) - oA - 0x1000, pMEMs[cMEMs - 1].pb, cbP);
             cbRead += cbP;
-        } else {
-            ZeroMemory(pb + ((QWORD)cMEMs << 12) - oA - 0x1000, cbP);
         }
     }
     if(pcbReadOpt) { *pcbReadOpt = cbRead; }
