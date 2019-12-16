@@ -125,3 +125,4 @@ v1.3
 
 Latest
 * Bug fixes.
+* FPGA: Examples: PCIe Configuration Space & Dynamic Reconfiguration Port Interface.
