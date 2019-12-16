@@ -631,7 +631,7 @@ VOID DeviceFPGA_PCIeCfgSpaceRead(_In_ PDEVICE_CONTEXT_FPGA ctx, _Out_writes_(0x2
     BYTE oAddr, pbRxTx[0x1000];
     DWORD i, j, status, dwStatus, dwData, cbRxTx;
     PDWORD pdwData;
-    WORD wDWordAddr, oDWord, wAddr;
+    WORD wDWordAddr, oDWord, wAddr = 0;
     ZeroMemory(pb, 0x200);
     for(wDWordAddr = 0; wDWordAddr < 0x200; wDWordAddr += 32) {
         // enable read/write lock (instruction serialization)
