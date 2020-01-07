@@ -1,6 +1,6 @@
 // device_physmemmap.h : definitions related to the physical memory map.
 //
-// (c) Ulf Frisk, 2018-2019
+// (c) Ulf Frisk, 2018-2020
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #ifndef __DEVICE_PHYSMEMMAP_H__

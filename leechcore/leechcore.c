@@ -1,7 +1,7 @@
 // vmmdevice.c : implementation of the device control layer responsible for
 // keeping track of devices, reading and writing physical memory.
 //
-// (c) Ulf Frisk, 2018-2019
+// (c) Ulf Frisk, 2018-2020
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include "leechcore.h"

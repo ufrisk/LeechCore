@@ -4,7 +4,7 @@
 // 'leechcore.dll' libray.
 // Hyper-V Saved State is the former name for Microsoft Hyper-V  Runtime State (.VMRS)
 //
-// (c) Ulf Frisk, 2019
+// (c) Ulf Frisk, 2020
 // Author: Ulf Frisk, pcileech@frizk.net
 // (c) Matt Suiche, 2019
 // Author: Matt Suiche, msuiche@comae.com

@@ -3,7 +3,7 @@
 // of the file 'vmsavedstatedumpprovider.dll' being placed in the same folder as the
 // 'leechcore.dll' libray.
 //
-// (c) Ulf Frisk, 2018-2019
+// (c) Ulf Frisk, 2018-2020
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #ifndef __DEVICE_HVSAVEDSTATE_H__

@@ -3,7 +3,7 @@
 //     - Xilinx AC701 dev board flashed with PCILeech bitstream and FTDI UMFT601X-B addon-board.
 //     - PCIeScreamer board flashed with PCILeech bitstream.
 //
-// (c) Ulf Frisk, 2017-2019
+// (c) Ulf Frisk, 2017-2020
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #ifndef __DEVICE_FPGA_H__

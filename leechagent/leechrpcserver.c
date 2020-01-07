@@ -1,6 +1,6 @@
 // leechrpc.c : implementation of RPC server-side functionality.
 //
-// (c) Ulf Frisk, 2018-2019
+// (c) Ulf Frisk, 2018-2020
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include "leechagent.h"

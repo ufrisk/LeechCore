@@ -1,6 +1,6 @@
 // memmap.c : implementation of the physical memory map.
 //
-// (c) Ulf Frisk, 2018-2019
+// (c) Ulf Frisk, 2018-2020
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include "device.h"

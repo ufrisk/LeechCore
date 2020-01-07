@@ -2,7 +2,7 @@
 //               Also known as: CVE-2018-1038. Please see Microsoft advisory for more information:
 //               https://portal.msrc.microsoft.com/en-US/security-guidance/advisory/CVE-2018-1038
 //
-// (c) Ulf Frisk, 2019
+// (c) Ulf Frisk, 2020
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #ifdef _WIN32

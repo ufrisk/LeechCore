@@ -3,7 +3,7 @@
 //                     from the LeechAgent. This is in a separate file to avoid
 //                     issues with missing python environments at process creation.
 //
-// (c) Ulf Frisk, 2019
+// (c) Ulf Frisk, 2020
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #define Py_LIMITED_API 0x03060000

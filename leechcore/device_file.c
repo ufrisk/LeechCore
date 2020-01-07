@@ -1,6 +1,6 @@
 // device_file.c : implementation related to file backed memory acquisition device.
 //
-// (c) Ulf Frisk, 2018-2019
+// (c) Ulf Frisk, 2018-2020
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include "device.h"

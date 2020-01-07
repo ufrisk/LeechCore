@@ -4,7 +4,7 @@
 //     - PCIeScreamer board flashed with PCILeech bitstream.
 //     - RawUDP protocol - access FPGA over raw UDP packet stream (NeTV2 ETH)
 //
-// (c) Ulf Frisk, 2017-2019
+// (c) Ulf Frisk, 2017-2020
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 
@@ -135,7 +135,7 @@ const DEVICE_PERFORMANCE PERFORMANCE_PROFILES[DEVICE_ID_MAX + 1] = {
         .DELAY_READ = 400,
         .RETRY_ON_ERROR = FALSE
     }, {
-        .SZ_DEVICE_NAME = "PCIeScreamer M2",
+        .SZ_DEVICE_NAME = "ScreamerM2",
         .PROBE_MAXPAGES = 0x400,
         .RX_FLUSH_LIMIT = 0xfffff000,
         .MAX_SIZE_RX = 0x1c000,
@@ -403,14 +403,16 @@ LPSTR DeviceFPGA_InitializeFTDI(_In_ PDEVICE_CONTEXT_FPGA ctx)
     ctx->dev.pfnFT_Close = (ULONG(*)(HANDLE))
         GetProcAddress(ctx->dev.hModule, "FT_Close");
     ctx->dev.pfnFT_ReadPipe = (ULONG(*)(HANDLE, UCHAR, PUCHAR, ULONG, PULONG, LPOVERLAPPED))
-        GetProcAddress(ctx->dev.hModule, "FT_ReadPipe");
+        GetProcAddress(ctx->dev.hModule, "FT_ReadPipeEx");
     ctx->dev.pfnFT_WritePipe = (ULONG(*)(HANDLE, UCHAR, PUCHAR, ULONG, PULONG, LPOVERLAPPED))
-        GetProcAddress(ctx->dev.hModule, "FT_WritePipe");
+        GetProcAddress(ctx->dev.hModule, "FT_WritePipeEx");
     pfnFT_GetChipConfiguration = (ULONG(*)(HANDLE, PVOID))GetProcAddress(ctx->dev.hModule, "FT_GetChipConfiguration");
     pfnFT_SetChipConfiguration = (ULONG(*)(HANDLE, PVOID))GetProcAddress(ctx->dev.hModule, "FT_SetChipConfiguration");
     pfnFT_SetSuspendTimeout = (ULONG(*)(HANDLE, ULONG))GetProcAddress(ctx->dev.hModule, "FT_SetSuspendTimeout");
-    if(!ctx->dev.pfnFT_Create) {
-        szErrorReason = "Unable to retrieve required functions from FTD3XX.dll";
+    if(!ctx->dev.pfnFT_Create || !ctx->dev.pfnFT_ReadPipe || !ctx->dev.pfnFT_WritePipe) {
+        szErrorReason = ctx->dev.pfnFT_ReadPipe ?
+            "Unable to retrieve required functions from FTD3XX.dll" :
+            "Unable to retrieve required functions from FTD3XX.dll v1.3.0.2 or later";
         goto fail;
     }
     // Open FTDI
@@ -597,7 +599,7 @@ _Success_(return)
 BOOL DeviceFPGA_ConfigWrite(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ WORD wBaseAddr, _In_reads_(cb) PBYTE pb, _In_ WORD cb, _In_ WORD flags)
 {
     BOOL fReturn = FALSE;
-    BYTE pbTx[0x400];
+    BYTE pbTx[0x800];
     DWORD status, cbTx = 0;
     WORD i, wAddr;
     if(!cb || (cb > 0x200) || (wBaseAddr > 0x1000)) { return FALSE; }
@@ -618,7 +620,49 @@ BOOL DeviceFPGA_ConfigWrite(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ WORD wBaseAddr, 
     return (status == 0);
 }
 
-VOID DeviceFPGA_PCIeCfgSpaceRead(_In_ PDEVICE_CONTEXT_FPGA ctx, _Out_writes_(0x200) PBYTE pb)
+/*
+* Write a single DWORD to the FPGA bistream v4.2 "shadow" PCIe configuration space.
+* -- ctx
+* -- wBaseAddr
+* -- pb
+* -- cb
+* -- return
+*/
+_Success_(return)
+BOOL DeviceFPGA_PCIeCfgSpaceWrite(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ WORD wBaseAddr, _In_ PBYTE pb, _In_ DWORD cb)
+{
+    BOOL fReturn = FALSE;
+    BYTE pbTx[0x2000];
+    DWORD status, cbTx = 0;
+    WORD i, wAddr;
+    if(!cb || (cb > 0x1000) || (wBaseAddr > 0x1000)) { return FALSE; }
+    // WRITE requests
+    for(i = 0; i < cb - 3; i += 4) {
+        wAddr = wBaseAddr + i;
+        pbTx[cbTx + 0] = pb[i + 0];                     // [0] = byte_value_addr
+        pbTx[cbTx + 1] = pb[i + 1];                     // [1] = byte_value_addr+1
+        pbTx[cbTx + 2] = pb[i + 2];                     // [2] = byte_value_addr+2
+        pbTx[cbTx + 3] = pb[i + 3];                     // [3] = byte_value_addr+3
+        pbTx[cbTx + 4] = wAddr >> 8;                    // [4] = addr_high
+        pbTx[cbTx + 5] = wAddr & 0xff;                  // [5] = addr_low
+        pbTx[cbTx + 6] = 0x21;                          // [6] = target
+        pbTx[cbTx + 7] = 0x77;                          // [7] = MAGIC 0x77
+        cbTx += 8;
+    }
+    status = ctx->dev.pfnFT_WritePipe(ctx->dev.hFTDI, 0x02, pbTx, cbTx, &cbTx, NULL);
+    return (status == 0);
+}
+
+/*
+* Read from the device PCIe configuration space. Only the values used by the
+* xilinx ip core itself is read. Custom "shadow" user-provided configuration
+* space is not readable from USB-side of things. Please use "lspci" on target
+* system to read any custom user-provided "shadow" configuration space.
+* -- ctx
+* -- pb = only the 1st 0x200 bytes are read
+*/
+_Success_(return)
+BOOL DeviceFPGA_PCIeCfgSpaceRead(_In_ PDEVICE_CONTEXT_FPGA ctx, _Out_writes_(0x200) PBYTE pb)
 {
     BYTE pbTxLockEnable[]   = { 0x04, 0x00, 0x04, 0x00, 0x80, 0x02, 0x21, 0x77 };
     BYTE pbTxLockDisable[]  = { 0x00, 0x00, 0x04, 0x00, 0x80, 0x02, 0x21, 0x77 };
@@ -653,15 +697,15 @@ VOID DeviceFPGA_PCIeCfgSpaceRead(_In_ PDEVICE_CONTEXT_FPGA ctx, _Out_writes_(0x2
         memcpy(pbRxTx + cbRxTx, pbTxLockDisable, 8); cbRxTx += 8;
         // WRITE TxData
         status = ctx->dev.pfnFT_WritePipe(ctx->dev.hFTDI, 0x02, pbRxTx, cbRxTx, &cbRxTx, NULL);
-        if(status) { return; }
+        if(status) { return FALSE; }
         Sleep(10);
         // READ and interpret result
         status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, pbRxTx, 0x1000, &cbRxTx, NULL);
-        if(status) { return; }
+        if(status) { return FALSE; }
         for(i = 0; i < cbRxTx; i += 32) {
             while(*(PDWORD)(pbRxTx + i) == 0x55556666) { // skip over ftdi workaround dummy fillers
                 i += 4;
-                if(i + 32 > cbRxTx) { return; }
+                if(i + 32 > cbRxTx) { return FALSE; }
             }
             dwStatus = *(PDWORD)(pbRxTx + i);
             pdwData = (PDWORD)(pbRxTx + i + 4);
@@ -679,11 +723,13 @@ VOID DeviceFPGA_PCIeCfgSpaceRead(_In_ PDEVICE_CONTEXT_FPGA ctx, _Out_writes_(0x2
                 oAddr = (BYTE)(dwData >> 8);
                 if((oAddr != 0x2c) && (oAddr != 0x2e)) { continue; }
                 oAddr -= 0x2c;
-                *(PBYTE)(pb + wAddr + oAddr + 0) = (dwData >> 24) & 0xff;
-                *(PBYTE)(pb + wAddr + oAddr + 1) = (dwData >> 16) & 0xff;
+                if(wAddr + oAddr + 1 >= 0x200) { continue; }
+                *(PBYTE)(pb + wAddr + oAddr + 1) = (dwData >> 24) & 0xff;
+                *(PBYTE)(pb + wAddr + oAddr + 0) = (dwData >> 16) & 0xff;
             }
         }
     }
+    return TRUE;
 }
 
 /*
@@ -692,7 +738,8 @@ VOID DeviceFPGA_PCIeCfgSpaceRead(_In_ PDEVICE_CONTEXT_FPGA ctx, _Out_writes_(0x2
 * Xilinx manual for further info. Also please not that each DRP address is
 * 16-bits wide - hence the need for 0x100 bytes to hold the 0x80 DRP address space.
 */
-VOID DeviceFPGA_PCIeDrpRead(_In_ PDEVICE_CONTEXT_FPGA ctx, _Out_writes_(0x100) PBYTE pb)
+_Success_(return)
+BOOL DeviceFPGA_PCIeDrpRead(_In_ PDEVICE_CONTEXT_FPGA ctx, _Out_writes_(0x100) PBYTE pb)
 {
     // 64-bit data is as follows:
     // [63:48] : DATA (little endian)
@@ -709,7 +756,7 @@ VOID DeviceFPGA_PCIeDrpRead(_In_ PDEVICE_CONTEXT_FPGA ctx, _Out_writes_(0x100) P
     BYTE pbRxTx[0x1000];
     DWORD i, j, status, dwStatus, dwData, cbRxTx;
     PDWORD pdwData;
-    WORD wDWordAddr, oDWord, wAddr;
+    WORD wDWordAddr, oDWord, wAddr = 0;
     ZeroMemory(pb, 0x100);
     /*
     {
@@ -745,15 +792,15 @@ VOID DeviceFPGA_PCIeDrpRead(_In_ PDEVICE_CONTEXT_FPGA ctx, _Out_writes_(0x100) P
         }
         // WRITE TxData
         status = ctx->dev.pfnFT_WritePipe(ctx->dev.hFTDI, 0x02, pbRxTx, cbRxTx, &cbRxTx, NULL);
-        if(status) { return; }
+        if(status) { return FALSE; }
         Sleep(10);
         // READ and interpret result
         status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, pbRxTx, 0x1000, &cbRxTx, NULL);
-        if(status) { return; }
+        if(status) { return FALSE; }
         for(i = 0; i < cbRxTx; i += 32) {
             while(*(PDWORD)(pbRxTx + i) == 0x55556666) { // skip over ftdi workaround dummy fillers
                 i += 4;
-                if(i + 32 > cbRxTx) { return; }
+                if(i + 32 > cbRxTx) { return FALSE; }
             }
             dwStatus = *(PDWORD)(pbRxTx + i);
             pdwData = (PDWORD)(pbRxTx + i + 4);
@@ -775,6 +822,7 @@ VOID DeviceFPGA_PCIeDrpRead(_In_ PDEVICE_CONTEXT_FPGA ctx, _Out_writes_(0x100) P
             }
         }
     }
+    return TRUE;
 }
 
 VOID DeviceFPGA_ConfigPrint(_In_ PDEVICE_CONTEXT_FPGA ctx)
@@ -795,12 +843,14 @@ VOID DeviceFPGA_ConfigPrint(_In_ PDEVICE_CONTEXT_FPGA ctx)
             Util_PrintHexAscii(pb, cb, 0);
         }
     }
-    DeviceFPGA_PCIeDrpRead(ctx, pb);
-    vprintf("\n----- PCIe CORE Dynamic Reconfiguration Port (DRP)  SIZE: 0x100 BYTES -----\n");
-    Util_PrintHexAscii(pb, 0x100, 0);
-    DeviceFPGA_PCIeCfgSpaceRead(ctx, pb);
-    vprintf("\n------------ PCIe CONFIGURATION SPACE  ----  SIZE: 0x200 BYTES ------------\n");
-    Util_PrintHexAscii(pb, 0x200, 0);
+    if(DeviceFPGA_PCIeDrpRead(ctx, pb)) {
+        vprintf("\n----- PCIe CORE Dynamic Reconfiguration Port (DRP)  SIZE: 0x100 BYTES -----\n");
+        Util_PrintHexAscii(pb, 0x100, 0);
+    }
+    if(DeviceFPGA_PCIeCfgSpaceRead(ctx, pb)) {
+        vprintf("\n----- PCIe CONFIGURATION SPACE (no user set values) SIZE: 0x200 BYTES -----\n");
+        Util_PrintHexAscii(pb, 0x200, 0);
+    }
     vprintf("\n");
 }
 
@@ -1498,9 +1548,9 @@ BOOL DeviceFPGA_CommandData(_In_ ULONG64 fOption, _In_reads_(cbDataIn) PBYTE pbD
     fOptionLo = fOption & 0xffffffff;
     switch(fOptionLo) {
         case LEECHCORE_COMMANDDATA_FPGA_WRITE_TLP:
-            return (cbDataIn >= 12) && pbDataIn && DeviceFPGA_WriteTlp(pbDataIn, cbDataIn);
+            return (cbDataIn >= 12) && !(cbDataIn % 4) && pbDataIn && DeviceFPGA_WriteTlp(pbDataIn, cbDataIn);
         case LEECHCORE_COMMANDDATA_FPGA_LISTEN_TLP:
-            return (cbDataIn == 4) && pbDataIn && DeviceFPGA_ListenTlp(*(PDWORD)pbDataIn);
+            return (cbDataIn == 4) && !(cbDataIn % 4) && pbDataIn && DeviceFPGA_ListenTlp(*(PDWORD)pbDataIn);
         case LEECHCORE_COMMANDDATA_FPGA_PCIECFGSPACE:
             if(!pbDataOut || (cbDataOut < 0x1000) || (ctx->wFpgaVersionMajor < 4)) { return FALSE; }
             if(pcbDataOut) { *pcbDataOut = 0x1000; };
@@ -1513,12 +1563,34 @@ BOOL DeviceFPGA_CommandData(_In_ ULONG64 fOption, _In_reads_(cbDataIn) PBYTE pbD
                 ((fOptionLo == LEECHCORE_COMMANDDATA_FPGA_CFGREGCFG) ? FPGA_CONFIG_CORE : FPGA_CONFIG_PCIE) |
                 ((fOptionHi & 0x8000) ? FPGA_CONFIG_SPACE_READWRITE : FPGA_CONFIG_SPACE_READONLY);
             if(pbDataIn) {
-                DeviceFPGA_ConfigWrite(ctx, fOptionHi & 0x7fff, pbDataIn, (WORD)cbDataIn, fCfgRegConfig);
+                DeviceFPGA_ConfigWrite(ctx, fOptionHi & 0x3fff, pbDataIn, (WORD)cbDataIn, fCfgRegConfig);
             }
             if(pbDataOut) {
-                DeviceFPGA_ConfigRead(ctx, fOptionHi & 0x7fff, pbDataOut, (WORD)cbDataOut, fCfgRegConfig);
+                DeviceFPGA_ConfigRead(ctx, fOptionHi & 0x3fff, pbDataOut, (WORD)cbDataOut, fCfgRegConfig);
                 if(pcbDataOut) { *pcbDataOut = (WORD)cbDataOut; }
             }
+            return TRUE;
+        case LEECHCORE_COMMANDDATA_FPGA_CFGREGDRP:
+            if(ctx->wFpgaVersionMajor < 4) { return FALSE; }
+            if((cbDataOut != 0x100) || pbDataIn || cbDataIn) { return FALSE; }
+            DeviceFPGA_PCIeDrpRead(ctx, pbDataOut);
+            if(pcbDataOut) { *pcbDataOut = 0x100; }
+            return TRUE;
+        case LEECHCORE_COMMANDDATA_FPGA_CFGREGCFG_MARKWR:
+        case LEECHCORE_COMMANDDATA_FPGA_CFGREGPCIE_MARKWR:
+            if(ctx->wFpgaVersionMajor < 4) { return FALSE; }
+            if(!pbDataIn || (cbDataIn != 4)) { return FALSE; }
+            fCfgRegConfig =
+                ((fOptionLo == LEECHCORE_COMMANDDATA_FPGA_CFGREGCFG_MARKWR) ? FPGA_CONFIG_CORE : FPGA_CONFIG_PCIE) |
+                FPGA_CONFIG_SPACE_READWRITE;
+            return DeviceFPGA_ConfigWriteEx(ctx, fOptionHi & 0x3fff, pbDataIn, pbDataIn + 2, fCfgRegConfig);
+        case LEECHCORE_COMMANDDATA_FPGA_PCIECFGSPACE_WR:
+            if(ctx->wFpgaVersionMajor < 4) { return FALSE; }
+            if((ctx->wFpgaVersionMajor == 4) && (ctx->wFpgaVersionMinor == 2)) { return FALSE; }
+            if(pbDataIn || !cbDataIn || !(cbDataIn % 4) || (cbDataIn > 0x1000)) { return FALSE; }
+            return DeviceFPGA_PCIeCfgSpaceWrite(ctx, fOptionHi & 0x3fff, pbDataIn, cbDataIn);
+        case LEECHCORE_COMMANDDATA_FPGA_CFGREG_DEBUGPRINT:
+            DeviceFPGA_ConfigPrint(ctx);
             return TRUE;
     }
     return FALSE;

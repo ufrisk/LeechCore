@@ -1,6 +1,6 @@
 // oscompatibility.c : LeechCore Windows/Linux compatibility layer.
 //
-// (c) Ulf Frisk, 2017-2019
+// (c) Ulf Frisk, 2017-2020
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #ifdef _WIN32
@@ -333,8 +333,8 @@ FARPROC GetProcAddress(HMODULE hModule, LPSTR lpProcName)
     if(0 == strcmp("FT_GetChipConfiguration", lpProcName))  { return (FARPROC)FT60x_FT_GetChipConfiguration; }
     if(0 == strcmp("FT_SetChipConfiguration", lpProcName))  { return (FARPROC)FT60x_FT_SetChipConfiguration; }
     if(0 == strcmp("FT_SetSuspendTimeout", lpProcName))     { return (FARPROC)FT60x_FT_SetSuspendTimeout; }
-    if(0 == strcmp("FT_ReadPipe", lpProcName))              { return (FARPROC)FT60x_FT_ReadPipe; }
-    if(0 == strcmp("FT_WritePipe", lpProcName))             { return (FARPROC)FT60x_FT_WritePipe; }
+    if(0 == strcmp("FT_ReadPipeEx", lpProcName))            { return (FARPROC)FT60x_FT_ReadPipe; }
+    if(0 == strcmp("FT_WritePipeEx", lpProcName))           { return (FARPROC)FT60x_FT_WritePipe; }
     return NULL;
 }
 

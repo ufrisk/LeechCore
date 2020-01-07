@@ -1,6 +1,6 @@
 //	leechcorepyc.c : Implementation of the LeechCore Python API
 //
-// (c) Ulf Frisk, 2019
+// (c) Ulf Frisk, 2020
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #ifndef __LEECHCOREPYC_H__

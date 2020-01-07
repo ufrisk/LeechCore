@@ -8,7 +8,7 @@ OBJ = fpga_libusb.o oscompatibility.o leechcore.o util.o memmap.o device_file.o 
 	$(CC) -c -o $@ $< $(CFLAGS)
 
 leechcore: $(OBJ)
-	$(CC) -o $@ $^ $(CFLAGS) -o leechcore.so
+	$(CC) -o $@ $^ $(CFLAGS) -o leechcore.so $(LDFLAGS)
 	rm *.o
 	mv leechcore.so ../files/ |true
 

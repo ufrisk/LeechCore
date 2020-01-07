@@ -1,6 +1,6 @@
 // device.h : internal header file containing device-common defines.
 //
-// (c) Ulf Frisk, 2018-2019
+// (c) Ulf Frisk, 2018-2020
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #ifndef __DEVICE_H__

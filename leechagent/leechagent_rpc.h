@@ -1,6 +1,6 @@
 // leechagent_rpc.h : definitions of RPC related functionality.
 //
-// (c) Ulf Frisk, 2018-2019
+// (c) Ulf Frisk, 2018-2020
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #ifndef __LEECHAGENT_RPC_H__

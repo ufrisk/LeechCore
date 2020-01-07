@@ -2,7 +2,7 @@
 //                 Child processes host execution environments such as the
 //                 Python environment which allows for execution of scripts.
 //
-// (c) Ulf Frisk, 2019
+// (c) Ulf Frisk, 2020
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 // In general, this child process is meant to be a temporary host process to
@@ -141,8 +141,10 @@ VOID LeechAgent_ProcChild_Close_ForceTerminateThread(PVOID pv)
 */
 VOID LeechAgent_ProcChild_Close()
 {
+    HANDLE hThread;
     ctxProcChild.fStateRunning = FALSE;
-    CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)LeechAgent_ProcChild_Close_ForceTerminateThread, NULL, 0, NULL);
+    hThread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)LeechAgent_ProcChild_Close_ForceTerminateThread, NULL, 0, NULL);
+    if(hThread) { CloseHandle(hThread); }
     if(ctxProcChild.pfnLeechCorePyC_EmbClose) {
         ctxProcChild.pfnLeechCorePyC_EmbClose();
     }

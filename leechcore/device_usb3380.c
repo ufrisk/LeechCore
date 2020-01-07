@@ -1,6 +1,6 @@
 // device_usb3380.c : implementation related to the USB3380 hardware device.
 //
-// (c) Ulf Frisk, 2017-2019
+// (c) Ulf Frisk, 2017-2020
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include "device.h"

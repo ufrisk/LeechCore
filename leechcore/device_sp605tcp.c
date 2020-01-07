@@ -1,6 +1,6 @@
 // device605_tcp.c : implementation related to the Xilinx SP605 dev board flashed with @d_olex bitstream.
 //
-// (c) Ulf Frisk & @d_olex, 2017-2019
+// (c) Ulf Frisk & @d_olex, 2017-2020
 //
 #ifdef _WIN32
 

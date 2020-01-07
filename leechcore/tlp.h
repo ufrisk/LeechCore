@@ -1,6 +1,6 @@
 // tlp.h : definitions related PCIe TLPs (transaction layper packets).
 //
-// (c) Ulf Frisk, 2017-2019
+// (c) Ulf Frisk, 2017-2020
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #ifndef __TLP_H__

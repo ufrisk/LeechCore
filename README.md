@@ -123,6 +123,7 @@ v1.3
 * [RawUDP](https://github.com/ufrisk/LeechCore/wiki/Device_RawUDP) device ([NeTV2 FPGA](https://github.com/ufrisk/pcileech-fpga) over UDP).
 * ELF Core Dump support (VirtualBox VBoxManage debugvm dumpvmcore).
 
-Latest
-* Bug fixes.
+[v1.6](https://github.com/ufrisk/LeechCore/releases/tag/v1.6)
+* Code Signing.
+* FPGA: Support for writing to custom shadow configuration space.
 * FPGA: Examples: PCIe Configuration Space & Dynamic Reconfiguration Port Interface.
