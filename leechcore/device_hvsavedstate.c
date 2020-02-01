@@ -318,11 +318,11 @@ VOID DeviceHvSavedState_ReadScatterMEM(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _
     DWORD i;
     for(i = 0; i < cpMEMs; i++) {
         pMEM = ppMEMs[i];
-        if((pMEM->cb < pMEM->cbMax) || (pMEM->qwA == (QWORD)-1)) { continue; } // skip already completed pMEMs
+        if((pMEM->cb == pMEM->cbMax) || (pMEM->qwA == (QWORD)-1)) { continue; } // skip already completed pMEMs
         //
         // ReadGuestPhysicalAddress() takes care of the sanity checks.
         //
-        // if(!MemMap_VerifyTranslateMEM(pMEM, NULL)) { continue; }
+        if(!MemMap_VerifyTranslateMEM(pMEM, NULL)) { continue; }
         hr = ctx->fn.ReadGuestPhysicalAddress(ctx->hVmSavedStateDumpHandle, pMEM->qwA, (LPVOID)pMEM->pb, pMEM->cbMax, &pMEM->cb);
         if(FAILED(hr)) {
             pMEM->cb = 0;
@@ -394,25 +394,6 @@ _Success_(return)
 BOOL DeviceHvSavedState_Init(PHVSAVEDSTATE_CONTEXT ctx) {
     VIRTUAL_PROCESSOR_REGISTER reg;
 
-    UINT64 GuestRawSavedMemorySize = 0;
-    UINT32 vpCount;
-
-    if (ctx->fn.GetGuestRawSavedMemorySize(ctx->hVmSavedStateDumpHandle, &GuestRawSavedMemorySize) != S_OK) {
-        wprintf(L"Error: GetGuestRawSavedMemorySize() failed.\n");
-        return FALSE;
-    }
-    vprintfvv(__FUNCTION__ ": GuestRawSavedMemorySize: 0x%I64X\n", GuestRawSavedMemorySize);
-
-    //
-    // This overrides the previous DeviceHvSavedState_Open_MemMap() call.
-    //
-    ctx->paMax = GuestRawSavedMemorySize;
-
-    if (ctx->fn.GetVpCount(ctx->hVmSavedStateDumpHandle, &vpCount) != S_OK) {
-        vprintfvv(__FUNCTION__ ": Error: GetVpCount() failed.\n");
-        return FALSE;
-    }
-
     UINT32 vpId = 0;
     if (ctx->fn.GetArchitecture(ctx->hVmSavedStateDumpHandle, vpId, &ctx->architecture) != S_OK) {
         vprintfvv(__FUNCTION__ ": ERROR: GetPagingMode() failed.\n");
@@ -460,23 +441,13 @@ _Success_(return)
 BOOL DeviceHvSavedState_GetOption(_In_ QWORD fOption, _Out_ PQWORD pqwValue)
 {
     PHVSAVEDSTATE_CONTEXT ctx = (PHVSAVEDSTATE_CONTEXT)ctxDeviceMain->hDevice;
-    if (fOption == LEECHCORE_OPT_MEMORYINFO_VALID) {
-        *pqwValue = 0;
-        return TRUE;
-    }
     switch (fOption) {
-        case LEECHCORE_OPT_MEMORYINFO_ADDR_MAX:
-            *pqwValue = ctx->paMax;
-            return TRUE;
         case LEECHCORE_OPT_MEMORYINFO_OS_DTB:
             *pqwValue = ctx->regCr3;
             return TRUE;
         case LEECHCORE_OPT_MEMORYINFO_OS_KERNELHINT:
             *pqwValue = ctx->regRip;
             return TRUE;
-        default:
-            vprintfvv(__FUNCTION__ ": No option for 0x%I64X\n", fOption);
-            break;
     }
     *pqwValue = 0;
     return FALSE;
