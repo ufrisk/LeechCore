@@ -207,6 +207,7 @@ typedef struct tdDEVICE_CONTEXT_FILE {
     struct {
         BOOL fValidCoreDump;
         BOOL fValidCrashDump;
+        BOOL fValidVMwareDump;
         BOOL f32;
         QWORD paMax;
         union {
@@ -257,20 +258,133 @@ VOID DeviceFile_ReadScatterMEM(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_ DWOR
 }
 
 //-----------------------------------------------------------------------------
-// MICROSOFT CRASH DUMP PARSING BELOW:
+// PARSING OF DUMP FILE FORMATS BELOW:
+// - VMware .vmem + vmss/vmsn Dump Files.
+// - Full Microsoft Crash Dumps (DumpIt).
+// - VirtualBox ELF CORE Dumps.
 //-----------------------------------------------------------------------------
 
+typedef struct tdFILE_VMWARE_HEADER {
+    DWORD magic;
+    DWORD _Filler;
+    DWORD cGroups;
+} FILE_VMWARE_HEADER;
+
+typedef struct tdFILE_VMWARE_GROUP {
+    CHAR szName[64];
+    QWORD cbOffset;
+    QWORD cbSize;
+} FILE_VMWARE_GROUP;
+
+#define FILE_VMWARE_MEMORY_REGIONS_MAX      0x40
+
+typedef struct tdFILE_VMWARE_MEMORY_REGION {
+    BOOL fOffsetFile;
+    BOOL fOffsetMemory;
+    BOOL fSize;
+    QWORD cbOffsetFile;
+    QWORD cbOffsetMemory;
+    QWORD cbSize;
+} FILE_VMWARE_MEMORY_REGION;
+
 /*
-* Try to initialize a Microsoft Crash Dump file (full dump only). This is done
-* by reading the dump header. If this is not a dump file the function will
-* still return TRUE - but not initialize the ctxFile->MsCrashDump struct.
-* On fatal non-recoverable errors FALSE will be returned.
-* -- return
+* Try to initialize a VMware Dump/Save File (.vmem + vmss/vmsn).
 */
-BOOL DeviceFile_MsCrashDumpInitialize()
+VOID DeviceFile_VMwareDumpInitialize()
 {
     PDEVICE_CONTEXT_FILE ctx = (PDEVICE_CONTEXT_FILE)ctxDeviceMain->hDevice;
-    //BYTE pb[0x2000] = { 0 };
+    FILE_VMWARE_HEADER hdr = { 0 };
+    FILE_VMWARE_GROUP grp = { 0 };
+    FILE_VMWARE_MEMORY_REGION regions[FILE_VMWARE_MEMORY_REGIONS_MAX] = { 0 };
+    CHAR szFileName[MAX_PATH];
+    FILE *pFile = NULL;
+    PBYTE pb;
+    QWORD oTag;
+    DWORD iGroup, iMemoryRegion, cbTag, cchTag;
+    BOOL fMemMap = FALSE;
+    strcpy_s(szFileName, _countof(szFileName), ctx->szFileName);
+    // 1: open and verify metadata file
+    memcpy(szFileName + strlen(szFileName) - 5, ".vmss", 5);
+    fopen_s(&pFile, szFileName, "rb");
+    if(!pFile) {
+        memcpy(szFileName + strlen(szFileName) - 5, ".vmsn", 5);
+        fopen_s(&pFile, szFileName, "rb");
+    }
+    if(!pFile) {
+        vprintf("DEVICE: WARN: Unable to open VMWare .vmss or .vmsn file - assuming 1:1 memory space.\n");
+        goto fail;
+    }
+    _fseeki64(pFile, 0, SEEK_SET);
+    fread(&hdr, 1, sizeof(FILE_VMWARE_HEADER), pFile);
+    if((hdr.magic != 0xbed3bed3) && (hdr.magic != 0xbed2bed2) && (hdr.magic != 0xbad1bad1) /* && (hdr.magic != 0xbed2bed0) */) {
+        vprintf("DEVICE: WARN: Unable to verify file '%s'.\n", szFileName);
+        goto fail;
+    }
+    // 2: locate memory group(s) and parse memory regions from group tags.
+    for(iGroup = 0; iGroup < hdr.cGroups; iGroup++) {
+        _fseeki64(pFile, 12 + iGroup * sizeof(FILE_VMWARE_GROUP), SEEK_SET);
+        fread(&grp, 1, sizeof(FILE_VMWARE_GROUP), pFile);
+        if(0 == strcmp("memory", grp.szName)) {
+            if(grp.cbSize > 0x01000000) { continue; }
+            if(_fseeki64(pFile, grp.cbOffset, SEEK_SET)) { continue; }
+            if(!(pb = LocalAlloc(LMEM_ZEROINIT, (SIZE_T)grp.cbSize))) { continue; }
+            if(grp.cbSize != fread(pb, 1, (SIZE_T)grp.cbSize, pFile)) {
+                LocalFree(pb);
+                continue;
+            }
+            oTag = 0;
+            while((oTag + 6 <= grp.cbSize) && *(PBYTE)(pb + oTag)) {
+                cchTag = *(PBYTE)(pb + oTag + 1);
+                cbTag = 2 + cchTag + 4 + 4 * ((*(PBYTE)(pb + oTag) >> 6) & 3ULL);
+                if(!cchTag || (oTag + cbTag >= grp.cbSize)) { break; }
+                if((cchTag == 0x0a) && !memcmp(pb + oTag + 2, "regionSize", 0x0a) && ((iMemoryRegion = *(PDWORD)(pb + oTag + 2 + 0x0a)) < FILE_VMWARE_MEMORY_REGIONS_MAX)) {
+                    regions[iMemoryRegion].fSize = TRUE;
+                    regions[iMemoryRegion].cbSize = *(PDWORD)(pb + oTag + 2 + 0x0a + 4) * 0x1000ULL;
+                }
+                if((cchTag == 0x09) && !memcmp(pb + oTag + 2, "regionPPN", 0x09) && ((iMemoryRegion = *(PDWORD)(pb + oTag + 2 + 0x09)) < FILE_VMWARE_MEMORY_REGIONS_MAX)) {
+                    regions[iMemoryRegion].fOffsetMemory = TRUE;
+                    regions[iMemoryRegion].cbOffsetMemory = *(PDWORD)(pb + oTag + 2 + 0x09 + 4) * 0x1000ULL;
+                }
+                if((cchTag == 0x0d) && !memcmp(pb + oTag + 2, "regionPageNum", 0x0d) && ((iMemoryRegion = *(PDWORD)(pb + oTag + 2 + 0x0d)) < FILE_VMWARE_MEMORY_REGIONS_MAX)) {
+                    regions[iMemoryRegion].fOffsetFile = TRUE;
+                    regions[iMemoryRegion].cbOffsetFile = *(PDWORD)(pb + oTag + 2 + 0x0d + 4) * 0x1000ULL;
+                }
+                oTag += cbTag;
+            }
+            LocalFree(pb);
+            for(iMemoryRegion = 0; iMemoryRegion < FILE_VMWARE_MEMORY_REGIONS_MAX; iMemoryRegion++) {
+                if(regions[iMemoryRegion].fSize && regions[iMemoryRegion].fOffsetMemory && regions[iMemoryRegion].fOffsetFile) {
+                    if(!fMemMap) {
+                        fMemMap = TRUE;
+                        MemMap_Initialize(0x0000ffffffffffff);
+                    }
+                    MemMap_AddRange(regions[iMemoryRegion].cbOffsetMemory, regions[iMemoryRegion].cbSize, regions[iMemoryRegion].cbOffsetFile);
+                }
+            }
+
+        }
+    }
+    if(fMemMap) {
+        MemMap_GetMaxAddress(&ctx->CrashOrCoreDump.paMax);
+        ctx->CrashOrCoreDump.fValidVMwareDump = TRUE;
+    } else {
+        vprintf("DEVICE: WARN: No VMware memory regions located - file will be treated as single-region.\n");
+    }
+fail:
+    if(pFile) { fclose(pFile); }
+}
+
+/*
+* Try to initialize a Microsoft Crash Dump file (full dump only) _or_ a VirtualBox
+* core dump file. This is done by reading the dump header. If this is not a
+* dump file the function will still return TRUE - but not initialize the
+* ctxFile->MsCrashDump struct.On fatal non-recoverable errors FALSE is returned.
+* -- return
+*/
+_Success_(return)
+BOOL DeviceFile_MsCrashCoreDumpInitialize()
+{
+    PDEVICE_CONTEXT_FILE ctx = (PDEVICE_CONTEXT_FILE)ctxDeviceMain->hDevice;
     BOOL f, fElfLoadSegment = FALSE;
     QWORD i, cbFileOffset;
     PDUMP_HEADER64 pDump64 = &ctx->CrashOrCoreDump.Hdr64;
@@ -494,13 +608,21 @@ BOOL DeviceFile_Open()
     ctxDeviceMain->pfnReadScatterMEM = DeviceFile_ReadScatterMEM;
     ctxDeviceMain->pfnGetOption = DeviceFile_GetOption;
     ctxDeviceMain->pfnCommandData = DeviceFile_CommandData;
-    if(!DeviceFile_MsCrashDumpInitialize()) { goto fail; }
+    if((strlen(ctx->szFileName) >= 6) && (0 == _stricmp(".vmem", ctx->szFileName + strlen(ctx->szFileName) - 5))) {
+        DeviceFile_VMwareDumpInitialize();
+    }
+    if(!ctx->CrashOrCoreDump.fValidVMwareDump) {
+        if(!DeviceFile_MsCrashCoreDumpInitialize()) { goto fail; }
+    }    
     if(ctx->CrashOrCoreDump.fValidCrashDump) {
         ctxDeviceMain->cfg.paMaxNative = ctx->CrashOrCoreDump.paMax;
         vprintfv("DEVICE: Successfully opened file: '%s' as Microsoft Crash Dump.\n", ctxDeviceMain->cfg.szDevice);
     } else if(ctx->CrashOrCoreDump.fValidCoreDump) {
         ctxDeviceMain->cfg.paMaxNative = ctx->CrashOrCoreDump.paMax;
         vprintfv("DEVICE: Successfully opened file: '%s' as ELF Core Dump.\n", ctxDeviceMain->cfg.szDevice);
+    } else if(ctx->CrashOrCoreDump.fValidVMwareDump) {
+        ctxDeviceMain->cfg.paMaxNative = ctx->CrashOrCoreDump.paMax;
+        vprintfv("DEVICE: Successfully opened file: '%s' as VMware Dump.\n", ctxDeviceMain->cfg.szDevice);
     } else {
         ctxDeviceMain->cfg.paMaxNative = ctx->cbFile;
         if(!MemMap_Initialize(ctxDeviceMain->cfg.paMaxNative)) { goto fail; }

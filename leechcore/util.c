@@ -149,6 +149,15 @@ VOID Util_GenRandom(_Out_ PBYTE pb, _In_ DWORD cb)
     }
 }
 
+QWORD Util_GetNumericA(_In_ LPSTR sz)
+{
+    if((strlen(sz) > 1) && (sz[0] == '0') && ((sz[1] == 'x') || (sz[1] == 'X'))) {
+        return strtoull(sz, NULL, 16); // Hex (starts with 0x)
+    } else {
+        return strtoull(sz, NULL, 10); // Not Hex -> try Decimal
+    }
+}
+
 BOOL Util_IsPlatformBitness64()
 {
     BOOL f64 = TRUE;

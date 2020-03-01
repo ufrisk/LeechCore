@@ -17,9 +17,9 @@
 // FPGA defines below.
 //-------------------------------------------------------------------------------
 
-#define FPGA_CMD_VERSION_MAJOR  0x01
-#define FPGA_CMD_DEVICE_ID      0x03
-#define FPGA_CMD_VERSION_MINOR  0x05
+#define FPGA_CMD_VERSION_MAJOR          0x01
+#define FPGA_CMD_DEVICE_ID              0x03
+#define FPGA_CMD_VERSION_MINOR          0x05
 
 #define FPGA_CONFIG_CORE                0x0003
 #define FPGA_CONFIG_PCIE                0x0001
@@ -70,7 +70,7 @@ typedef struct tdDEVICE_PERFORMANCE {
     DWORD DELAY_PROBE_WRITE;
     DWORD DELAY_WRITE;
     DWORD DELAY_READ;
-    BOOL RETRY_ON_ERROR;
+    DWORD RETRY_ON_ERROR;
 } DEVICE_PERFORMANCE, *PDEVICE_PERFORMANCE;
 
 typedef union tdFPGA_HANDLESOCKET {
@@ -97,7 +97,7 @@ const DEVICE_PERFORMANCE PERFORMANCE_PROFILES[DEVICE_ID_MAX + 1] = {
         .DELAY_PROBE_WRITE = 0,
         .DELAY_WRITE = 175,
         .DELAY_READ = 400,
-        .RETRY_ON_ERROR = FALSE
+        .RETRY_ON_ERROR = 0
     }, {
         // The PCIeScreamer R1 have a problem with the PCIe link stability
         // which results on lost or delayed TLPS - workarounds are in place
@@ -111,7 +111,7 @@ const DEVICE_PERFORMANCE PERFORMANCE_PROFILES[DEVICE_ID_MAX + 1] = {
         .DELAY_PROBE_WRITE = 150,
         .DELAY_WRITE = 0,
         .DELAY_READ = 500,
-        .RETRY_ON_ERROR = TRUE
+        .RETRY_ON_ERROR = 1
     }, {
         .SZ_DEVICE_NAME = "AC701 / FT601",
         .PROBE_MAXPAGES = 0x400,
@@ -122,7 +122,7 @@ const DEVICE_PERFORMANCE PERFORMANCE_PROFILES[DEVICE_ID_MAX + 1] = {
         .DELAY_PROBE_WRITE = 0,
         .DELAY_WRITE = 0,
         .DELAY_READ = 300,
-        .RETRY_ON_ERROR = FALSE
+        .RETRY_ON_ERROR = 0
     }, {
         .SZ_DEVICE_NAME = "PCIeScreamer R2",
         .PROBE_MAXPAGES = 0x400,
@@ -133,7 +133,7 @@ const DEVICE_PERFORMANCE PERFORMANCE_PROFILES[DEVICE_ID_MAX + 1] = {
         .DELAY_PROBE_WRITE = 150,
         .DELAY_WRITE = 0,
         .DELAY_READ = 400,
-        .RETRY_ON_ERROR = FALSE
+        .RETRY_ON_ERROR = 0
     }, {
         .SZ_DEVICE_NAME = "ScreamerM2",
         .PROBE_MAXPAGES = 0x400,
@@ -144,7 +144,7 @@ const DEVICE_PERFORMANCE PERFORMANCE_PROFILES[DEVICE_ID_MAX + 1] = {
         .DELAY_PROBE_WRITE = 150,
         .DELAY_WRITE = 0,
         .DELAY_READ = 300,
-        .RETRY_ON_ERROR = FALSE
+        .RETRY_ON_ERROR = 0
     }, {
         .SZ_DEVICE_NAME = "NeTV2 RawUDP",
         .PROBE_MAXPAGES = 0x400,
@@ -155,7 +155,7 @@ const DEVICE_PERFORMANCE PERFORMANCE_PROFILES[DEVICE_ID_MAX + 1] = {
         .DELAY_PROBE_WRITE = 0,
         .DELAY_WRITE = 0,
         .DELAY_READ = 0,
-        .RETRY_ON_ERROR = FALSE
+        .RETRY_ON_ERROR = 0
     }
 };
 
@@ -180,6 +180,7 @@ typedef struct tdDEVICE_CONTEXT_FPGA {
     } txbuf;
     struct {
         HMODULE hModule;
+        BOOL fInitialized;
         union {
             HANDLE hFTDI;
             SOCKET SocketUDP;
@@ -374,6 +375,7 @@ LPSTR DeviceFPGA_InitializeUDP(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ DWORD dwIpv4A
     ctx->dev.pfnFT_Close = DeviceFPGA_UDP_FT60x_FT_Close;
     ctx->dev.pfnFT_ReadPipe = DeviceFPGA_UDP_FT60x_FT_ReadPipe;
     ctx->dev.pfnFT_WritePipe = DeviceFPGA_UDP_FT60x_FT_WritePipe;
+    ctx->dev.fInitialized = TRUE;
     return NULL;
 }
 
@@ -381,7 +383,7 @@ LPSTR DeviceFPGA_InitializeUDP(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ DWORD dwIpv4A
 // FPGA implementation below:
 //-------------------------------------------------------------------------------
 
-LPSTR DeviceFPGA_InitializeFTDI(_In_ PDEVICE_CONTEXT_FPGA ctx)
+LPSTR DeviceFPGA_InitializeFTDI(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ QWORD qwDeviceIndex)
 {
     LPSTR szErrorReason;
     CHAR c;
@@ -416,7 +418,7 @@ LPSTR DeviceFPGA_InitializeFTDI(_In_ PDEVICE_CONTEXT_FPGA ctx)
         goto fail;
     }
     // Open FTDI
-    status = ctx->dev.pfnFT_Create(NULL, 0x10 /*FT_OPEN_BY_INDEX*/, &ctx->dev.hFTDI);
+    status = ctx->dev.pfnFT_Create((PVOID)qwDeviceIndex, 0x10 /*FT_OPEN_BY_INDEX*/, &ctx->dev.hFTDI);
     if(status || !ctx->dev.hFTDI) {
         szErrorReason = "Unable to connect to USB/FT601 device";
         goto fail;
@@ -460,8 +462,9 @@ LPSTR DeviceFPGA_InitializeFTDI(_In_ PDEVICE_CONTEXT_FPGA ctx)
         ctx->dev.hModule = NULL;
         ctx->dev.hFTDI = NULL;
         Sleep(3000);
-        return DeviceFPGA_InitializeFTDI(ctx);
+        return DeviceFPGA_InitializeFTDI(ctx, qwDeviceIndex);
     }
+    ctx->dev.fInitialized = TRUE;
     return NULL;
 fail:
     if(ctx->dev.hFTDI && ctx->dev.pfnFT_Close) { ctx->dev.pfnFT_Close(ctx->dev.hFTDI); }
@@ -667,7 +670,7 @@ BOOL DeviceFPGA_PCIeCfgSpaceRead(_In_ PDEVICE_CONTEXT_FPGA ctx, _Out_writes_(0x2
     BYTE pbTxLockEnable[]   = { 0x04, 0x00, 0x04, 0x00, 0x80, 0x02, 0x21, 0x77 };
     BYTE pbTxLockDisable[]  = { 0x00, 0x00, 0x04, 0x00, 0x80, 0x02, 0x21, 0x77 };
     BYTE pbTxReadEnable[]   = { 0x01, 0x00, 0x01, 0x00, 0x80, 0x02, 0x21, 0x77 };
-    BYTE pbTxReadAddress[]  = { 0x00, 0x00, 0xff, 0xff, 0x80, 0x14, 0x21, 0x77 };
+    BYTE pbTxReadAddress[]  = { 0x00, 0x00, 0xff, 0x03, 0x80, 0x14, 0x21, 0x77 };
     BYTE pbTxResultMeta[]   = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x2a, 0x11, 0x77 };
     BYTE pbTxResultDataLo[] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x2c, 0x11, 0x77 };
     BYTE pbTxResultDataHi[] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x2e, 0x11, 0x77 };
@@ -1249,8 +1252,16 @@ VOID DeviceFPGA_ReadScatterMEM_Impl(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_
                 o += cb;
                 bTag++;
             }
-            if(ctx->fAlgorithmReadTiny && ((bTag & 0x3f) < 0x20)) { bTag = 0x20; }
-            if(!(bTag & 0x3f)) { break; }
+            if(ctx->fAlgorithmReadTiny) {
+                if(i % 2) {
+                    i++;
+                    break;
+                }
+                bTag = (ctx->RxEccBit ? 0x80 : 0) + 0x40 + 0x20;
+            } else if(!(bTag & 0x3f)) {
+                i++;
+                break;
+            }
         }
         // Receive TLPs
         DeviceFPGA_TxTlp(ctx, NULL, 0, TRUE, TRUE);
@@ -1264,18 +1275,20 @@ VOID DeviceFPGA_ReadScatterMEM_Impl(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_
 VOID DeviceFPGA_ReadScatterMEM(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_ DWORD cpMEMs)
 {
     PDEVICE_CONTEXT_FPGA ctx = (PDEVICE_CONTEXT_FPGA)ctxDeviceMain->hDevice;
-    DWORD i = 0;
-    BOOL fRetry = FALSE;
+    DWORD iRetry, iMEM;
+    BOOL fRetry;
     DeviceFPGA_ReadScatterMEM_Impl(ppMEMs, cpMEMs);
-    if(ctx->perf.RETRY_ON_ERROR) {
-        while(i < cpMEMs) {
-            if((ppMEMs[i]->cb < ppMEMs[i]->cbMax) && ctx->perf.RETRY_ON_ERROR && MemMap_VerifyTranslateMEM(ppMEMs[i], NULL) && !fRetry) {
-                Sleep(100);
-                DeviceFPGA_ReadScatterMEM_Impl(ppMEMs, cpMEMs);
+    for(iRetry = 0; iRetry < ctx->perf.RETRY_ON_ERROR; iRetry++) {
+        fRetry = FALSE;
+        for(iMEM = 0; iMEM < cpMEMs; iMEM++) {
+            if((ppMEMs[iMEM]->cb < ppMEMs[iMEM]->cbMax) && MemMap_VerifyTranslateMEM(ppMEMs[iMEM], NULL)) {
                 fRetry = TRUE;
+                break;
             }
-            i++;
         }
+        if(!fRetry) { return; }
+        Sleep(25);
+        DeviceFPGA_ReadScatterMEM_Impl(ppMEMs, cpMEMs);
     }
 }
 
@@ -1596,42 +1609,42 @@ BOOL DeviceFPGA_CommandData(_In_ ULONG64 fOption, _In_reads_(cbDataIn) PBYTE pbD
     return FALSE;
 }
 
-#define OPTION_UDP_ADDRESS      0
-#define OPTION_PCIE             1
-#define OPTION_DELAY_READ       2
-#define OPTION_DELAY_WRITE      3
-#define OPTION_DELAY_PROBE      4
+#define FPGA_OPTION_UDP_ADDRESS     0
+#define FPGA_OPTION_PCIE            1
+#define FPGA_OPTION_DELAY_READ      2
+#define FPGA_OPTION_DELAY_WRITE     3
+#define FPGA_OPTION_DELAY_PROBE     4
+#define FPGA_OPTION_READ_ALGORITHM  5
+#define FPGA_OPTION_READ_SIZE       6
+#define FPGA_OPTION_READ_RETRY      7
+#define FPGA_OPTION_DEVICE_INDEX    8
+#define FPGA_OPTION_MAX             8
 
-VOID DeviceFPGA_Open_ParseParams(_Out_writes_(5) PDWORD dwOptions)
+VOID DeviceFPGA_Open_ParseParams(_Out_writes_(FPGA_OPTION_MAX + 1) PDWORD dwOptions)
 {
-    CHAR _szBuf[MAX_PATH];
-    DWORD i = 0, j = 0;
-    LPSTR sz;
-    ZeroMemory(dwOptions, 5 * sizeof(DWORD));
-    if(0 == _strnicmp("fpga://", ctxDeviceMain->cfg.szDevice, 7)) {
-        i = 7;
-        j = 1;
-    }
-    if(0 == _strnicmp("rawudp://", ctxDeviceMain->cfg.szDevice, 9)) {
-        i = 9;
-        j = 0;
-    }
-    if(i) {
-        strcpy_s(_szBuf, _countof(_szBuf), ctxDeviceMain->cfg.szDevice);
-        sz = _szBuf + i;
-        for(; i < _countof(_szBuf); i++) {
-            if(':' == _szBuf[i]) {
-                _szBuf[i] = 0;
-                dwOptions[j] = j ? atoi(sz) : inet_addr(sz);
-                if(++j == 4) { return; }
-                sz = _szBuf + i + 1;
-                continue;
+    SIZE_T i = 0, j;
+    CHAR sz[MAX_PATH];
+    LPCSTR szOPTIONS[] = { "ip=", "pciegen=", "tmread=", "tmwrite=", "tmprobe=", "algo=", "readsize=", "readretry=", "deviceindex=" };
+    ZeroMemory(dwOptions, 6 * sizeof(DWORD));
+    if(0 == _strnicmp("fpga://", ctxDeviceMain->cfg.szDevice, 7)) { i = 7; }
+    if(0 == _strnicmp("rawudp://", ctxDeviceMain->cfg.szDevice, 9)) { i = 9; }
+    if(!i) { return; }
+    strncpy_s(sz, MAX_PATH, ctxDeviceMain->cfg.szDevice + i, _TRUNCATE);
+    i = strlen(sz);
+    while(TRUE) {
+        if((i == 0) || (sz[i] == ',')) {
+            if((sz[i] == ',')) {
+                sz[i] = '\0';
+                i++;
             }
-            if('\0' == _szBuf[i]) {
-                dwOptions[j] = j ? atoi(sz) : inet_addr(sz);
-                return;
+            for(j = 0; j <= FPGA_OPTION_MAX; j++) {
+                if(0 == _strnicmp(szOPTIONS[j], sz + i, strlen(szOPTIONS[j]))) {
+                    dwOptions[j] = j ? (DWORD)Util_GetNumericA(sz + i + strlen(szOPTIONS[j])) : inet_addr(sz + i + strlen(szOPTIONS[j]));
+                }
             }
         }
+        if(i == 0) { return; }
+        i--;
     }
 }
 
@@ -1640,21 +1653,21 @@ BOOL DeviceFPGA_Open()
 {
     LPSTR szDeviceError;
     PDEVICE_CONTEXT_FPGA ctx;
-    DWORD dwOption[5] = { 0 };
+    DWORD dwOption[FPGA_OPTION_MAX + 1] = { 0 };
     ctx = LocalAlloc(LMEM_ZEROINIT, sizeof(DEVICE_CONTEXT_FPGA));
     if(!ctx) { return FALSE; }
     ctxDeviceMain->hDevice = (HANDLE)ctx;
     // parse parameters (if any)
     DeviceFPGA_Open_ParseParams(dwOption);
-    if(dwOption[OPTION_UDP_ADDRESS]) {
-        szDeviceError = DeviceFPGA_InitializeUDP(ctx, dwOption[OPTION_UDP_ADDRESS]);
+    if(dwOption[FPGA_OPTION_UDP_ADDRESS]) {
+        szDeviceError = DeviceFPGA_InitializeUDP(ctx, dwOption[FPGA_OPTION_UDP_ADDRESS]);
     } else {
-        szDeviceError = DeviceFPGA_InitializeFTDI(ctx);
+        szDeviceError = DeviceFPGA_InitializeFTDI(ctx, dwOption[FPGA_OPTION_DEVICE_INDEX]);
     }
     if(szDeviceError) { goto fail; }
     DeviceFPGA_GetDeviceID_FpgaVersion(ctx);
     // verify parameters and set version&speed
-    DeviceFPGA_SetSpeedPCIeGen(ctx, dwOption[OPTION_PCIE]);
+    DeviceFPGA_SetSpeedPCIeGen(ctx, dwOption[FPGA_OPTION_PCIE]);
     if(!ctx->wDeviceId) {
         szDeviceError = "Unable to retrieve required Device PCIe ID";
         goto fail;
@@ -1677,9 +1690,12 @@ BOOL DeviceFPGA_Open()
     ctxDeviceMain->pfnCommandData = DeviceFPGA_CommandData;
     ctxDeviceMain->pfnGetOption = DeviceFPGA_GetOption;
     ctxDeviceMain->pfnSetOption = DeviceFPGA_SetOption;
-    if(dwOption[OPTION_DELAY_READ]) { ctx->perf.DELAY_READ = dwOption[OPTION_DELAY_READ]; }
-    if(dwOption[OPTION_DELAY_WRITE]) { ctx->perf.DELAY_WRITE = dwOption[OPTION_DELAY_WRITE]; }
-    if(dwOption[OPTION_DELAY_PROBE]) { ctx->perf.DELAY_PROBE_READ = dwOption[OPTION_DELAY_PROBE]; }
+    if(dwOption[FPGA_OPTION_DELAY_READ]) { ctx->perf.DELAY_READ = dwOption[FPGA_OPTION_DELAY_READ]; }
+    if(dwOption[FPGA_OPTION_DELAY_WRITE]) { ctx->perf.DELAY_WRITE = dwOption[FPGA_OPTION_DELAY_WRITE]; }
+    if(dwOption[FPGA_OPTION_DELAY_PROBE]) { ctx->perf.DELAY_PROBE_READ = dwOption[FPGA_OPTION_DELAY_PROBE]; }
+    if(dwOption[FPGA_OPTION_READ_RETRY]) { ctx->perf.RETRY_ON_ERROR = dwOption[FPGA_OPTION_READ_RETRY]; }
+    if(dwOption[FPGA_OPTION_READ_SIZE] >= 0x1000) { ctx->perf.MAX_SIZE_RX = min(ctx->perf.MAX_SIZE_RX, dwOption[FPGA_OPTION_READ_SIZE] & ~0xfff); }
+    ctx->fAlgorithmReadTiny = (dwOption[FPGA_OPTION_READ_ALGORITHM] == 2);
     // return
     if(ctxDeviceMain->fVerbose) {
         printf(
@@ -1699,7 +1715,7 @@ BOOL DeviceFPGA_Open()
     }
     return TRUE;
 fail:
-    if(ctxDeviceMain->fVerboseExtra) {
+    if(ctxDeviceMain->fVerboseExtra && ctx->dev.fInitialized) {
         DeviceFPGA_ConfigPrint(ctx);
     }
     if(szDeviceError && ctxDeviceMain->fVerbose) {

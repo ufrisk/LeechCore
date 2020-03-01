@@ -53,6 +53,15 @@ VOID Util_Split3(_In_ LPSTR sz, CHAR chDelimiter, _Out_writes_(MAX_PATH) PCHAR _
 VOID Util_GenRandom(_Out_ PBYTE pb, _In_ DWORD cb);
 
 /*
+* Parse a string returning the QWORD representing the string. The string may
+* consist of a decimal or hexadecimal integer string. Hexadecimals must begin
+* with 0x.
+* -- sz
+* -- return
+*/
+QWORD Util_GetNumericA(_In_ LPSTR sz);
+
+/*
 * Returns true if this is a 64-bit Windows operating system.
 * This is regardless of whether this is a 32-bit WoW process or not.
 * Function have no meaning on Linux.

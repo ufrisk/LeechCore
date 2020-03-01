@@ -14,6 +14,8 @@
 #include "memmap.h"
 #include "util.h"
 
+#define HVSAVEDSTATE_MAX_PAGES_READ  0x1000
+
 typedef VOID* VM_SAVED_STATE_DUMP_HANDLE;
 
 typedef UINT64 GUEST_VIRTUAL_ADDRESS;
@@ -308,26 +310,80 @@ typedef struct tdHVSAVEDSTATE_CONTEXT {
     ULONG64 paMax;
     ULONG64 regCr3;
     ULONG64 regRip;
+
+    BYTE pb16M[HVSAVEDSTATE_MAX_PAGES_READ * 0x1000];  // 16MB Buffer
 } HVSAVEDSTATE_CONTEXT, *PHVSAVEDSTATE_CONTEXT;
 
-VOID DeviceHvSavedState_ReadScatterMEM(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_ DWORD cpMEMs)
+VOID DeviceHvSavedState_ReadScatterGather_Read(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_ DWORD cpMEMs, _In_ QWORD pa, _In_ DWORD cb)
 {
     PHVSAVEDSTATE_CONTEXT ctx = (PHVSAVEDSTATE_CONTEXT)ctxDeviceMain->hDevice;
     HRESULT hr;
-    PMEM_IO_SCATTER_HEADER pMEM;
-    DWORD i;
-    for(i = 0; i < cpMEMs; i++) {
-        pMEM = ppMEMs[i];
-        if((pMEM->cb == pMEM->cbMax) || (pMEM->qwA == (QWORD)-1)) { continue; } // skip already completed pMEMs
-        //
-        // ReadGuestPhysicalAddress() takes care of the sanity checks.
-        //
-        if(!MemMap_VerifyTranslateMEM(pMEM, NULL)) { continue; }
-        hr = ctx->fn.ReadGuestPhysicalAddress(ctx->hVmSavedStateDumpHandle, pMEM->qwA, (LPVOID)pMEM->pb, pMEM->cbMax, &pMEM->cb);
-        if(FAILED(hr)) {
-            pMEM->cb = 0;
+    DWORD iMEM, cbMEM;
+    //ptd->pa = pa;
+    //ptd->cb = cb;
+    //Device3380_ReadDMA2(ptd);
+    hr = ctx->fn.ReadGuestPhysicalAddress(ctx->hVmSavedStateDumpHandle, pa, (LPVOID)ctx->pb16M, cb, &cbMEM);
+    if(SUCCEEDED(hr)) {
+        // fill successful mem reads
+        for(iMEM = 0, cbMEM = 0; iMEM < cpMEMs; iMEM++) {
+            ppMEMs[iMEM]->cb = ppMEMs[iMEM]->cbMax;
+            memcpy(ppMEMs[iMEM]->pb, ctx->pb16M + cbMEM, ppMEMs[iMEM]->cb);
+            cbMEM += ppMEMs[iMEM]->cb;
         }
     }
+}
+
+VOID DeviceHvSavedState_ReadScatterGather_Gather(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_ DWORD cpMEMs)
+{
+    PMEM_IO_SCATTER_HEADER pMEM;
+    QWORD paBase = 0;
+    DWORD i, c = 0, iBase = 0, cbCurrent = 0;
+    for(i = 0; i < cpMEMs; i++) {
+        pMEM = ppMEMs[i];
+        if(!MemMap_VerifyTranslateMEM(pMEM, NULL)) { continue; }
+        if(c == 0) {
+            if(pMEM->cbMax && (pMEM->cb != pMEM->cbMax)) {
+                c = 1;
+                iBase = i;
+                paBase = pMEM->qwA;
+                cbCurrent = pMEM->cbMax;
+            }
+        } else if((paBase + cbCurrent == pMEM->qwA) && (cbCurrent + pMEM->cbMax <= HVSAVEDSTATE_MAX_PAGES_READ * 0x1000)) {
+            c++;
+            cbCurrent += pMEM->cbMax;
+        } else {
+            DeviceHvSavedState_ReadScatterGather_Read(ppMEMs + iBase, c, paBase, cbCurrent);
+            c = 0;
+            if(pMEM->cbMax && (pMEM->cb != pMEM->cbMax)) {
+                c = 1;
+                iBase = i;
+                paBase = pMEM->qwA;
+                cbCurrent = pMEM->cbMax;
+            }
+        }
+    }
+    if(c) {
+        DeviceHvSavedState_ReadScatterGather_Read(ppMEMs + iBase, c, paBase, cbCurrent);
+    }
+}
+
+/*
+* Read memory from the Hyper-V saved state file using a scatter-gather approach.
+* Performance on individual 4k page reads using the API ReadGuestPhysicalAddress
+* is abysmal so gather any contigious pages together in a single read in order
+* to increase performance.
+*/
+VOID DeviceHvSavedState_ReadScatterGather(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_ DWORD cpMEMs)
+{
+    if(cpMEMs > HVSAVEDSTATE_MAX_PAGES_READ) {
+        while(TRUE) {
+            DeviceHvSavedState_ReadScatterGather(ppMEMs, min(HVSAVEDSTATE_MAX_PAGES_READ, cpMEMs));
+            ppMEMs = ppMEMs + min(HVSAVEDSTATE_MAX_PAGES_READ, cpMEMs);
+            cpMEMs = cpMEMs - min(HVSAVEDSTATE_MAX_PAGES_READ, cpMEMs);
+            if(cpMEMs == 0) { return; }
+        }
+    }
+    DeviceHvSavedState_ReadScatterGather_Gather(ppMEMs, cpMEMs);
 }
 
 VOID DeviceHvSavedState_Close()
@@ -488,7 +544,7 @@ BOOL DeviceHvSavedState_Open()
     ctxDeviceMain->cfg.fVolatile = FALSE;
     ctxDeviceMain->cfg.paMaxNative = ctx->paMax;
     ctxDeviceMain->pfnClose = DeviceHvSavedState_Close;
-    ctxDeviceMain->pfnReadScatterMEM = DeviceHvSavedState_ReadScatterMEM;
+    ctxDeviceMain->pfnReadScatterMEM = DeviceHvSavedState_ReadScatterGather;
     ctxDeviceMain->pfnGetOption = DeviceHvSavedState_GetOption;
     vprintfv("DEVICE: Successfully opened Hyper-V Saved State '%s'.\n", ctxDeviceMain->cfg.szDevice)
     return TRUE;
