@@ -70,10 +70,10 @@ BOOL DeviceTMD_MemoryMapRetrieve(PDEVICE_CONTEXT_TMD ctxTMd)
     pMR = (PMEMORY_RANGE)(pbData + o);
     for(i = 0; i < c2; i++) {
         pMR = (PMEMORY_RANGE)(pbData + o + i * sizeof(MEMORY_RANGE));
-        if((pMR->pa & 0xfff) || (pMR->cb & 0xfff)) { goto fail; }
         if(pMR->Reserved & 0xff000000) {
             pMR->cb = pMR->cb << 8;
         }
+        if((pMR->pa & 0xfff) || (pMR->cb & 0xfff)) { goto fail; }
     }
     ctxTMd->paMax = min(0x8000000000, pMR->pa + pMR->cb); // 512GB = max supported in this implmentation ...
     ctxTMd->cMemoryRanges = c2;
