@@ -138,7 +138,6 @@ static PyObject*
 LEECHCOREPYC_Read(PyObject *self, PyObject *args)
 {
     PyObject *pyBytes;
-    BOOL result;
     DWORD cb, cbRead = 0, flags = 0;
     ULONG64 pa;
     PBYTE pb;
@@ -147,9 +146,9 @@ LEECHCOREPYC_Read(PyObject *self, PyObject *args)
     pb = LocalAlloc(0, cb);
     if(!pb) { return PyErr_NoMemory(); }
     Py_BEGIN_ALLOW_THREADS;
-    result = LeechCore_ReadEx(pa, pb, cb, flags, NULL);
+    cbRead = LeechCore_ReadEx(pa, pb, cb, flags, NULL);
     Py_END_ALLOW_THREADS;
-    if(!result) {
+    if(!cbRead) {
         LocalFree(pb);
         return PyErr_Format(PyExc_RuntimeError, "LEECHCOREPYC_Read: Failed.");
     }
