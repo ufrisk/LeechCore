@@ -6,13 +6,26 @@
 #define Py_LIMITED_API 0x03060000
 #ifdef _DEBUG
 #undef _DEBUG
-#include <python.h>
+#include <Python.h>
 #define _DEBUG
 #else
-#include <python.h>
+#include <Python.h>
 #endif
+
+#ifdef _WIN32
 #include <Windows.h>
+#endif
 #include "leechcore.h"
+
+#ifdef LINUX
+#define _TRUNCATE -1
+
+error_t strncpy_s(char *restrict dest, size_t destsz,
+                  const char *restrict src, size_t count) {
+	if (count == _TRUNCATE) count = destsz - 1;
+	strncpy(dest, src, count);
+}
+#endif
 
 inline int PyDict_SetItemString_DECREF(PyObject *dp, const char *key, PyObject *item)
 {
@@ -256,7 +269,7 @@ static PyModuleDef LEECHCOREPYC_Module = {
     NULL, NULL, NULL, NULL
 };
 
-__declspec(dllexport) PyObject* PyInit_leechcorepyc(void)
+PyMODINIT_FUNC PyInit_leechcorepyc(void)
 {
     return PyModule_Create(&LEECHCOREPYC_Module);
 }

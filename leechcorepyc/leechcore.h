@@ -180,7 +180,7 @@ typedef char                                CHAR, *PCHAR, *PSTR, *LPSTR;
 typedef const CHAR                          *LPCSTR;
 typedef uint16_t                            WORD, *PWORD, USHORT, *PUSHORT;
 typedef uint32_t                            DWORD, *PDWORD;
-typedef long long unsigned int              QWORD, *PQWORD, ULONG64, *PULONG64;
+typedef long long unsigned int              QWORD, *PQWORD, ULONG64, *PULONG64, *ULONG_PTR, SIZE_T;
 #define MAX_PATH                            260
 #define DLLEXPORT                           __attribute__((visibility("default")))
 #define _In_
