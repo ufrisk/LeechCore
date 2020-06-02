@@ -164,7 +164,7 @@ LEECHCOREPYC_Write(PyObject *self, PyObject *args)
     BOOL result;
     ULONG64 va;
     PBYTE pb, pbPy;
-    SIZE_T cb;
+    SIZE_T cb = 0;
     DWORD flags = 0;
     if(!PyArg_ParseTuple(args, "Ky#|k", &va, &pbPy, &cb, &flags)) { return NULL; }
     if(cb == 0) {
