@@ -14,34 +14,35 @@ Memory Acquisition Methods:
 ===========================
 ### Software based memory aqusition methods:
 
-Please find a summary of the supported software based memory acquisition methods listed below. Please note that the LeechService only provides a network connection to a remote LeechCore library. It's possible to use both hardware and software based memory acquisition once connected.
+Please find a summary of the supported software based memory acquisition methods listed below. Please note that the LeechAgent only provides a network connection to a remote LeechCore library. It's possible to use both hardware and software based memory acquisition once connected.
 
-| Device                     | Type             | Linux Support |
-| -------------------------- | ---------------- | ------------- |
-| [RAW physical memory dump](https://github.com/ufrisk/LeechCore/wiki/Device_File)         | File             | Yes |
-| [Full Microsoft Crash Dump](https://github.com/ufrisk/LeechCore/wiki/Device_File)        | File             | Yes |
-| [Full ELF Core Dump](https://github.com/ufrisk/LeechCore/wiki/Device_File)               | File             | Yes |
-| [VMware memory save file](https://github.com/ufrisk/LeechCore/wiki/Device_File)          | File             | Yes |
-| [Hyper-V Saved State](https://github.com/ufrisk/LeechCore/wiki/Device_HyperV_SavedState) | File             | No  |
-| [TotalMeltdown](https://github.com/ufrisk/LeechCore/wiki/Device_Totalmeltdown)           | CVE-2018-1038    | No  |
-| [DumpIt /LIVEKD](https://github.com/ufrisk/LeechCore/wiki/Device_DumpIt)                 | Live&nbsp;Memory | No  |
-| [WinPMEM](https://github.com/ufrisk/LeechCore/wiki/Device_WinPMEM)                       | Live&nbsp;Memory | No  |
-| [LeechService*](https://github.com/ufrisk/LeechCore/wiki/Device_Remote)                  | Remote           | No  |
+| Device                     | Type             | Volatile | Write | Linux Support | Plugin |
+| -------------------------- | ---------------- | -------- | ----- | ------------- | ------ |
+| [RAW physical memory dump](https://github.com/ufrisk/LeechCore/wiki/Device_File)         | File             | No  | No  | Yes | No  |
+| [Full Microsoft Crash Dump](https://github.com/ufrisk/LeechCore/wiki/Device_File)        | File             | No  | No  | Yes | No  |
+| [Full ELF Core Dump](https://github.com/ufrisk/LeechCore/wiki/Device_File)               | File             | No  | No  | Yes | No  |
+| [VMware memory save file](https://github.com/ufrisk/LeechCore/wiki/Device_File)          | File             | No  | No  | Yes | No  |
+| [TotalMeltdown](https://github.com/ufrisk/LeechCore/wiki/Device_Totalmeltdown)           | CVE-2018-1038    | Yes | Yes | No  | No  |
+| [DumpIt /LIVEKD](https://github.com/ufrisk/LeechCore/wiki/Device_DumpIt)                 | Live&nbsp;Memory | Yes | No  | No  | No  |
+| [LiveKd](https://github.com/ufrisk/LeechCore/wiki/Device_LiveKd)                         | Live&nbsp;Memory | Yes | No  | No  | No  |
+| [WinPMEM](https://github.com/ufrisk/LeechCore/wiki/Device_WinPMEM)                       | Live&nbsp;Memory | Yes | No  | No  | No  |
+| [Hyper-V Saved State](https://github.com/ufrisk/LeechCore/wiki/Device_HyperV_SavedState) | File             | No  | No  | No  | Yes |
+| [LeechAgent*](https://github.com/ufrisk/LeechCore/wiki/Device_Remote)                    | Remote           |     |     | No  | No  |
 
 ### Hardware based memory aqusition methods:
 
-Please find a summary of the supported hardware based memory acquisition methods listed below. All hardware based memory acquisition methods are supported on both Windows and Linux. The FPGA based methods however sports a slight performance penalty on Linux and will max out at approx: 90MB/s compared to 150MB/s on Windows.
-
-| Device                                      | Type | Interface | Speed | 64-bit memory access | PCIe TLP access |
-| ---------------------------------------------------------------------- | ------- | ------ | ------- | --- | --- |
-| [AC701/FT601](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)    | FPGA    | USB3   | 150MB/s | Yes | Yes |
-| [PCIeScreamer](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)   | FPGA    | USB3   | 100MB/s | Yes | Yes |
-| [SP605/FT601](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)    | FPGA    | USB3   |  75MB/s | Yes | Yes |
-| [SP605/TCP](https://github.com/ufrisk/LeechCore/wiki/Device_SP605TCP)  | FPGA    | TCP/IP | 100kB/s | Yes | Yes |
-| [NeTV2/UDP](https://github.com/ufrisk/LeechCore/wiki/Device_RawUDP)    | FPGA    | UDP/IP |   7MB/s | Yes | Yes |
-| [USB3380-EVB](https://github.com/ufrisk/LeechCore/wiki/Device_USB3380) | USB3380 | USB3   | 150MB/s | No  | No  |
-| [PP3380](https://github.com/ufrisk/LeechCore/wiki/Device_USB3380)      | USB3380 | USB3   | 150MB/s | No  | No  |
-| [DMA patched HP iLO](https://github.com/ufrisk/LeechCore/wiki/Device_iLO) | BMC  | TCP/IP |   1MB/s | Yes | No  |
+Please find a summary of the supported hardware based memory acquisition methods listed below. All hardware based memory acquisition methods are supported on both Windows and Linux. The FPGA based methods however have a performance penalty on Linux and will max out at approx: 90MB/s compared to 150MB/s on Windows due to less optimized drivers.
+| Device                                                                 | Type | Interface | Speed | 64-bit memory access | PCIe TLP access | Plugin |
+| -----------------------------------------------------------------------| ---- | --------- | ----- | -------------------- | --------------- | ------ |
+| [AC701/FT601](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)    | [FPGA](https://github.com/ufrisk/pcileech-fpga/tree/master/ac701_ft601) | USB3 | 150MB/s | Yes | Yes | No  |
+| [ScreamerM2](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)     | [FPGA](https://github.com/ufrisk/pcileech-fpga/tree/master/ScreamerM2)  | USB3 | 150MB/s | Yes | Yes | No  |
+| [PCIeScreamer](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)   | [FPGA](https://github.com/ufrisk/pcileech-fpga/tree/master/pciescreamer)| USB3 | 100MB/s | Yes | Yes | No  |
+| [SP605/FT601](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)    | [FPGA](https://github.com/ufrisk/pcileech-fpga/tree/master/sp605_ft601) | USB3 |  75MB/s | Yes | Yes | No  |
+| [NeTV2/UDP](https://github.com/ufrisk/LeechCore/wiki/Device_RawUDP)    | [FPGA](https://github.com/ufrisk/pcileech-fpga/tree/master/NeTV2)       | UDP  |   7MB/s | Yes | Yes | No  |
+| [USB3380-EVB](https://github.com/ufrisk/LeechCore/wiki/Device_USB3380) | USB3380 | USB3 | 150MB/s | No  | No  | No  |
+| [PP3380](https://github.com/ufrisk/LeechCore/wiki/Device_USB3380)      | USB3380 | USB3 | 150MB/s | No  | No  | No  |
+| [SP605/TCP](https://github.com/ufrisk/LeechCore/wiki/Device_SP605TCP)  | FPGA    | TCP  | 100kB/s | Yes | Yes | Yes |
+| [DMA patched HP iLO](https://github.com/ufrisk/LeechCore/wiki/Device_RawTCP) | BMC | TCP |  1MB/s | Yes | No  | Yes |
 
 The LeechAgent Memory Acquisition and Analysis Agent:
 =====================================================
@@ -66,7 +67,7 @@ Installing the LeechAgent on the local system (run as elevated administrator)'. 
 * `LeechAgent.exe -install`
 
 Installing the LeechAgent on a remote system (or on the local system) in the `Program Files\LeechAgent` folder. An Actice Directory environment with remote access to the Service Manager of the target system is required. For additional information see the [wiki entry](https://github.com/ufrisk/LeechCore/wiki/LeechAgent_Install) about installing LeechAgent.
-* `LeechSvc.exe -remoteinstall <remotecomputer.contoso.com>`
+* `LeechAgent.exe -remoteinstall <remotecomputer.contoso.com>`
 
 Uninstall an existing, locally installed, LeechAgent. The agent service will be uninstalled but any files will remain.
 * `LeechAgent.exe -uninstall`
@@ -83,12 +84,25 @@ Start the LeechAgent in interactive insecure mode - accepting connections from a
 Start the LeechAgent in interactive mode with DumpIt LIVEKD to allow connecting clients to access live memory. Start as elevated administrator. Only accept connections from administative users over kerberos-secured connections. 
 * `DumpIt.exe /LIVEKD /A LeechAgent.exe /C -interactive`
 
-Start the LeevhAgent in interactive mode with DumpIt LIVEKD to allow connecting clients to access live memory. Start as elevated administrator. Accept connections from all clients with access to port `tcp/28473` without any form of authentication.
+Start the LeechAgent in interactive mode with DumpIt LIVEKD to allow connecting clients to access live memory. Start as elevated administrator. Accept connections from all clients with access to port `tcp/28473` without any form of authentication.
 * `DumpIt.exe /LIVEKD /A LeechAgent.exe /C "-interactive -insecure"`
 
 Building:
 =========
 <b>Pre-built [binaries, modules and configuration files](https://github.com/ufrisk/LeechCore/releases/latest) are found in the latest release.</b> Build instructions are found in the [Wiki](https://github.com/ufrisk/LeechCore/wiki) in the [Building](https://github.com/ufrisk/LeechCore/wiki/Dev_Building) section.
+
+Contributing:
+=============
+PCILeech, MemProcFS and LeechCore are open source but not open contribution. PCILeech, MemProcFS and LeechCore offers a highly flexible plugin architecture that will allow for contributions in the form of plugins. If you wish to make a contribution, other than a plugin, to the core projects please contact me before starting to develop.
+
+Support PCILeech/MemProcFS development:
+=======================================
+PCILeech and MemProcFS are hobby projects of mine. I put a lot of time and energy into my projects. The time being most of my spare time - since I'm not able to work with this. Unfortunately since some aspects also relate to hardware I also put quite some of money into my projects. If you think PCILeech and/or MemProcFS are awesome tools and/or if you had a use for them it's now possible to contribute.
+
+Please do note that PCILeech and MemProcFS are free and open source - as such I'm not expecting donations; even though a donation would be very much appreciated. I'm also not able to promise product features, consultancy or other things in return for a donation. A donation will have to stay donation and no more.  I'll set up the Github sponsors as soon as I'm able to; but for now it's possible to contribute with:
+
+ - Paypal: `paypal@ulffrisk.com` 
+ - Bitcoin: `bc1q9kur5pym8wmh5yxkf65792rdqm0guncd2gl4tu`
 
 Links:
 ======
@@ -113,37 +127,15 @@ Please do note that PCILeech and MemProcFS are free and open source - as such I'
 
 Changelog:
 ===================
-v1.0
-* Initial Release.
+v1.0-1.8
+* Initial Release and various updates. Please see individual relases for more information.
 
-v1.1
-* Multiple bug fixes including pmem device.
-* LeechService: Multiple parallel connections and connection timeouts supported.
-
-v1.2
-* Project upgrade to Visual Studio 2019.
-* Release of the LeechAgent - remote memory acquisition and remote physical memory analysis.
-* LeechCore Windows x86 support. Now Windows x86/x64 and Linux x64 is supported.
-* Bug fixes and additional functionality to support LeechAgent.
-
-v1.3
-* Bug fixes.
-* Use libusb for FPGA USB access on Linux. Contribution by: [Jérémie Boutoille / Synacktiv](https://github.com/tlk-synacktiv). Based in part on PCIeScreamer kernel driver from [LambdaConcept](https://github.com/enjoy-digital/pcie_screamer/tree/master/drivers/ft60x).
-
-[v1.4](https://github.com/ufrisk/LeechCore/releases/tag/v1.4)
-* Minor API fixes and additions to allow extended MemProcFS dump file functionality.
-
-[v1.5](https://github.com/ufrisk/LeechCore/releases/tag/v1.5)
-* Move binaries into releases section.
-* [RawUDP](https://github.com/ufrisk/LeechCore/wiki/Device_RawUDP) device ([NeTV2 FPGA](https://github.com/ufrisk/pcileech-fpga) over UDP).
-* ELF Core Dump support (VirtualBox VBoxManage debugvm dumpvmcore).
-
-[v1.6](https://github.com/ufrisk/LeechCore/releases/tag/v1.6)
-* Code Signing.
-* FPGA: Support for writing to custom shadow configuration space.
-* FPGA: Examples: PCIe Configuration Space & Dynamic Reconfiguration Port Interface.
-
-[v1.7](https://github.com/ufrisk/LeechCore/releases/tag/v1.7)
-* FPGA: New options format and additional options.
-* Hyper-V Saved State: Performance Improvements.
-* Initial support for VMware memory save files.
+[v2.0](https://github.com/ufrisk/LeechCore/releases/tag/v2.0)
+* API: New handle based API to support multiple concurrent open devices.<br>
+  NB! API contains breaking changes compared to v1.x API versions.
+* FPGA related performance improvements and bug fixes.
+* New features:
+  - AMD support.
+  - User-settable physical memory map.
+  - External device plugins - see the [LeechCore-plugin](https://github.com/ufrisk/LeechCore-plugins) project for details.
+  - Sysinternals LiveKd Hyper-V VM-introspection (slow).

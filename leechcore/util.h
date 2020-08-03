@@ -5,15 +5,34 @@
 //
 #ifndef __UTIL_H__
 #define __UTIL_H__
-#include "device.h"
+#include "leechcore.h"
+#include "leechcore_device.h"
+#include "oscompatibility.h"
+
+/*
+* Retrieve the operating system path of the directory which is containing this:
+* a) .dll file (Windows)
+* b) executable file (Linux)
+* -- szPath
+*/
+VOID Util_GetPathLib(_Out_writes_(MAX_PATH) PCHAR szPath);
+
+/*
+* Try retrieve a numerical value from sz. If sz starts with '0x' it will be
+* interpreted as hex (base 16), otherwise decimal (base 10).
+* -- sz
+* -- return
+*/
+QWORD Util_GetNumericA(_In_ LPSTR sz);
 
 /*
 * Print a maximum of 8192 bytes of binary data as hexascii on the screen.
+* -- ctxLC
 * -- pb
 * -- cb
 * -- cbInitialOffset = offset, must be max 0x1000 and multiple of 0x10.
 */
-VOID Util_PrintHexAscii(_In_ PBYTE pb, _In_ DWORD cb, _In_ DWORD cbInitialOffset);
+VOID Util_PrintHexAscii(_In_opt_ PLC_CONTEXT ctxLC, _In_ PBYTE pb, _In_ DWORD cb, _In_ DWORD cbInitialOffset);
 
 /*
 * Fill a human readable hex ascii memory dump into the caller supplied sz buffer.
@@ -24,13 +43,6 @@ VOID Util_PrintHexAscii(_In_ PBYTE pb, _In_ DWORD cb, _In_ DWORD cbInitialOffset
 * -- pcsz = ptr to size of buffer on entry, size of characters on exit.
 */
 BOOL Util_FillHexAscii(_In_ PBYTE pb, _In_ DWORD cb, _In_ DWORD cbInitialOffset, _Inout_opt_ LPSTR sz, _Out_ PDWORD pcsz);
-
-/*
-* Return the path of the specified hModule (DLL) - ending with a backslash, or current Executable.
-* -- szPath
-* -- hModule = Optional, HMODULE handle for path to DLL, NULL for path to EXE.
-*/
-VOID Util_GetPathDll(_Out_writes_(MAX_PATH) PCHAR szPath, _In_opt_ HMODULE hModule);
 
 /*
 * Split a string into two at the first chDelimiter character. If no 2nd string
@@ -51,15 +63,6 @@ VOID Util_Split3(_In_ LPSTR sz, CHAR chDelimiter, _Out_writes_(MAX_PATH) PCHAR _
 * -- cb = length of random data to create.
 */
 VOID Util_GenRandom(_Out_ PBYTE pb, _In_ DWORD cb);
-
-/*
-* Parse a string returning the QWORD representing the string. The string may
-* consist of a decimal or hexadecimal integer string. Hexadecimals must begin
-* with 0x.
-* -- sz
-* -- return
-*/
-QWORD Util_GetNumericA(_In_ LPSTR sz);
 
 /*
 * Returns true if this is a 64-bit Windows operating system.

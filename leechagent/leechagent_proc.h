@@ -28,6 +28,6 @@ typedef struct tdLEECHAGENT_PROC_CMD {
 VOID LeechAgent_ProcChild_Main(int argc, wchar_t* argv[]);
 
 _Success_(return)
-BOOL LeechAgent_ProcParent_ExecPy(_In_ ULONG64 fDataIn, _In_reads_(cbDataIn) PBYTE pbDataIn, _In_ DWORD cbDataIn, _Out_writes_opt_(*pcbDataOut) PBYTE* ppbDataOut, _Out_opt_ PDWORD pcbDataOut);
+BOOL LeechAgent_ProcParent_ExecPy(_In_ DWORD dwTimeout, _In_reads_(cbDataIn) PBYTE pbDataIn, _In_ DWORD cbDataIn, _Out_writes_opt_(*pcbDataOut) PBYTE* ppbDataOut, _Out_opt_ PDWORD pcbDataOut);
 
 #endif /* __LEECHAGENT_PROC_H__ */

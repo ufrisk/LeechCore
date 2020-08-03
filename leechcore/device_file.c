@@ -3,8 +3,9 @@
 // (c) Ulf Frisk, 2018-2020
 // Author: Ulf Frisk, pcileech@frizk.net
 //
-#include "device.h"
-#include "memmap.h"
+#include "leechcore.h"
+#include "leechcore_device.h"
+#include "leechcore_internal.h"
 #include "util.h"
 
 //-----------------------------------------------------------------------------
@@ -30,7 +31,7 @@ typedef struct {
     DWORD NumberOfPages;
     DWORD Reserved2;
     _PHYSICAL_MEMORY_RUN64 Run[_PHYSICAL_MEMORY_MAX_RUNS];
-} _PHYSICAL_MEMORY_DESCRIPTOR64;
+} _PHYSICAL_MEMORY_DESCRIPTOR64, *_PPHYSICAL_MEMORY_DESCRIPTOR64;
 
 typedef struct {
     DWORD BasePage;
@@ -41,89 +42,11 @@ typedef struct {
     DWORD NumberOfRuns;
     DWORD NumberOfPages;
     _PHYSICAL_MEMORY_RUN32 Run[_PHYSICAL_MEMORY_MAX_RUNS];
-} _PHYSICAL_MEMORY_DESCRIPTOR32;
+} _PHYSICAL_MEMORY_DESCRIPTOR32, *_PPHYSICAL_MEMORY_DESCRIPTOR32;
 
-typedef struct tdDUMP_HEADER32 {
-    ULONG Signature;                    // 0x0000
-    ULONG ValidDump;                    // 0x0004
-    ULONG MajorVersion;                 // 0x0008
-    ULONG MinorVersion;					// 0x000c
-    ULONG DirectoryTableBase;			// 0x0010
-    ULONG PfnDataBase;                  // 0x0014
-    ULONG PsLoadedModuleList;           // 0x0018
-    ULONG PsActiveProcessHead;          // 0x001c
-    ULONG MachineImageType;             // 0x0020
-    ULONG NumberProcessors;             // 0x0024
-    ULONG BugCheckCode;                 // 0x0028
-    ULONG BugCheckParameter1;           // 0x002c
-    ULONG BugCheckParameter2;           // 0x0030
-    ULONG BugCheckParameter3;           // 0x0034
-    ULONG BugCheckParameter4;           // 0x0038
-    CHAR VersionUser[32];               // 0x003c
-    CHAR PaeEnabled;                    // 0x005c
-    CHAR KdSecondaryVersion;            // 0x005d
-    CHAR spare[2];                      // 0x005e
-    ULONG KdDebuggerDataBlock;          // 0x0060
-    union {                             // 0x0064
-        _PHYSICAL_MEMORY_DESCRIPTOR32 PhysicalMemoryBlock;
-        UCHAR PhysicalMemoryBlockBuffer[700];
-    };
-    UCHAR ContextRecord[1200];          // 0x0320
-    EXCEPTION_RECORD32 ExceptionRecord; // 0x07d0
-    CHAR Comment[128];                  // 0x0820
-    UCHAR reserved0[1768];              // 0x08a0
-    ULONG DumpType;                     // 0x0f88
-    ULONG MiniDumpFields;               // 0x0f8c
-    ULONG SecondaryDataState;           // 0x0f90
-    ULONG ProductType;                  // 0x0f94
-    ULONG SuiteMask;                    // 0x0f98
-    UCHAR reserved1[4];                 // 0x0f9c
-    ULONG64 RequiredDumpSpace;          // 0x0fa0
-    UCHAR reserved2[16];                // 0x0fa8
-    ULONG64 SystemUpTime;               // 0x0fb8
-    ULONG64 SystemTime;                 // 0x0fc0
-    UCHAR reserved3[56];                // 0x0fc8
-} DUMP_HEADER32, *PDUMP_HEADER32;
-
-typedef struct tdDUMP_HEADER64 {
-    ULONG Signature;					// 0x0000
-    ULONG ValidDump;					// 0x0004
-    ULONG MajorVersion;					// 0x0008
-    ULONG MinorVersion;					// 0x000c
-    ULONG64 DirectoryTableBase;			// 0x0010
-    ULONG64 PfnDataBase;				// 0x0018
-    ULONG64 PsLoadedModuleList;			// 0x0020
-    ULONG64 PsActiveProcessHead;		// 0x0028
-    ULONG MachineImageType;				// 0x0030
-    ULONG NumberProcessors;				// 0x0034
-    ULONG BugCheckCode;					// 0x0038
-    ULONG64 BugCheckParameter1;			// 0x0040
-    ULONG64 BugCheckParameter2;			// 0x0048
-    ULONG64 BugCheckParameter3;			// 0x0050
-    ULONG64 BugCheckParameter4;			// 0x0058
-    CHAR VersionUser[32];				// 0x0060
-    ULONG64 KdDebuggerDataBlock;		// 0x0080
-    union {								// 0x0088
-        _PHYSICAL_MEMORY_DESCRIPTOR64 PhysicalMemoryBlock;
-        UCHAR PhysicalMemoryBlockBuffer[700];
-    };
-    UCHAR ContextRecord[3000];			// 0x0348
-    EXCEPTION_RECORD64 ExceptionRecord;	// 0x0F00
-    ULONG DumpType;						// 0x0F98
-    ULONG64 RequiredDumpSpace;	        // 0x0FA0
-    ULONG64 SystemTime;				    // 0x0FA8 
-    CHAR Comment[0x80];					// 0x0FB0 May not be present.
-    ULONG64 SystemUpTime;				// 0x1030
-    ULONG MiniDumpFields;				// 0x1038
-    ULONG SecondaryDataState;			// 0x103c
-    ULONG ProductType;					// 0x1040
-    ULONG SuiteMask;					// 0x1044
-    ULONG WriterStatus;					// 0x1048
-    UCHAR Unused1;						// 0x104c
-    UCHAR KdSecondaryVersion;			// 0x104d Present only for W2K3 SP1 and better
-    UCHAR Unused[2];					// 0x104e
-    UCHAR _reserved0[4016];				// 0x1050
-} DUMP_HEADER64, *PDUMP_HEADER64;
+#define CDMP_DWORD(o)                               (*(PDWORD)(ctx->CrashOrCoreDump.pbHdr + o))
+#define CDMP_QWORD(o)                               (*(PQWORD)(ctx->CrashOrCoreDump.pbHdr + o))
+#define VMM_PTR_OFFSET_DUAL(f32, pb, o32, o64)      ((f32) ? *(PDWORD)((o32) + (PBYTE)(pb)) : *(PQWORD)((o64) + (PBYTE)(pb)))
 
 //-----------------------------------------------------------------------------
 // DEFINES: ELF HEADER DEFINES BELOW (USED FOR VIRTUALBOX .core DUMP FILES)
@@ -209,11 +132,8 @@ typedef struct tdDEVICE_CONTEXT_FILE {
         BOOL fValidCrashDump;
         BOOL fValidVMwareDump;
         BOOL f32;
-        QWORD paMax;
         union {
             BYTE pbHdr[0x2000];
-            DUMP_HEADER64 Hdr64;
-            DUMP_HEADER32 Hdr32;
             Elf64_Ehdr Elf64;
             Elf32_Ehdr Elf32;
         };
@@ -224,37 +144,39 @@ typedef struct tdDEVICE_CONTEXT_FILE {
 // GENERAL 'DEVICE' FUNCTIONALITY BELOW:
 //-----------------------------------------------------------------------------
 
-VOID DeviceFile_ReadScatterMEM(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_ DWORD cpMEMs)
+VOID DeviceFile_ReadScatter(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cpMEMs, _Inout_ PPMEM_SCATTER ppMEMs)
 {
-    PDEVICE_CONTEXT_FILE ctx = (PDEVICE_CONTEXT_FILE)ctxDeviceMain->hDevice;
+    PDEVICE_CONTEXT_FILE ctx = (PDEVICE_CONTEXT_FILE)ctxLC->hDevice;
     DWORD i;
-    QWORD qwA_File;
-    PMEM_IO_SCATTER_HEADER pMEM;
+    PMEM_SCATTER pMEM;
     for(i = 0; i < cpMEMs; i++) {
         pMEM = ppMEMs[i];
-        if(!MemMap_VerifyTranslateMEM(pMEM, &qwA_File)) {
-            if(pMEM->cbMax && (pMEM->cb < pMEM->cbMax)) {
-                vprintfvvv_fn("FAILED: no memory at address %016llx\n", pMEM->qwA);
+        if(pMEM->f || (pMEM->qwA == (QWORD)-1)) { continue; }
+        if(pMEM->qwA != _ftelli64(ctx->pFile)) {
+            if(_fseeki64(ctx->pFile, pMEM->qwA, SEEK_SET)) { continue; }
+        }
+        pMEM->f = pMEM->cb == (DWORD)fread(pMEM->pb, 1, pMEM->cb, ctx->pFile);
+        if(pMEM->f) {
+            if(ctxLC->fPrintf[LC_PRINTF_VVV]) {
+                lcprintf_fn(
+                    ctxLC,
+                    "READ:\n        offset=%016llx req_len=%08x\n",
+                    pMEM->qwA,
+                    pMEM->cb
+                );
+                Util_PrintHexAscii(ctxLC, pMEM->pb, pMEM->cb, 0);
             }
-            continue;
-        }
-        if(qwA_File >= ctx->cbFile) { continue; }
-        if(pMEM->cbMax > ctx->cbFile - qwA_File) { continue; }
-        if(qwA_File != _ftelli64(ctx->pFile)) {
-            if(_fseeki64(ctx->pFile, qwA_File, SEEK_SET)) { continue; }
-        }
-        pMEM->cb = (DWORD)fread(pMEM->pb, 1, pMEM->cbMax, ctx->pFile);
-        if(ctxDeviceMain->fVerboseExtraTlp) {
-            vprintf_fn(
-                "READ:\n        file='%s'\n        offset=%016llx req_len=%08x rsp_len=%08x\n",
-                ctx->szFileName,
-                pMEM->qwA,
-                pMEM->cbMax,
-                pMEM->cb
-            );
-            Util_PrintHexAscii(pMEM->pb, pMEM->cb, 0);
+        } else {
+            lcprintfvvv_fn(ctxLC, "READ FAILED:\n        offset=%016llx req_len=%08x\n", pMEM->qwA, pMEM->cb);
         }
     }
+}
+
+VOID DeviceFile_ReadContigious(_Inout_ PLC_READ_CONTIGIOUS_CONTEXT ctxRC)
+{
+    PDEVICE_CONTEXT_FILE ctx = (PDEVICE_CONTEXT_FILE)ctxRC->ctxLC->hDevice;
+    if(_fseeki64(ctx->pFile, ctxRC->paBase, SEEK_SET)) { return; }
+    ctxRC->cbRead = (DWORD)fread(ctxRC->pb, 1, ctxRC->cb, ctx->pFile);
 }
 
 //-----------------------------------------------------------------------------
@@ -290,9 +212,9 @@ typedef struct tdFILE_VMWARE_MEMORY_REGION {
 /*
 * Try to initialize a VMware Dump/Save File (.vmem + vmss/vmsn).
 */
-VOID DeviceFile_VMwareDumpInitialize()
+VOID DeviceFile_VMwareDumpInitialize(_In_ PLC_CONTEXT ctxLC)
 {
-    PDEVICE_CONTEXT_FILE ctx = (PDEVICE_CONTEXT_FILE)ctxDeviceMain->hDevice;
+    PDEVICE_CONTEXT_FILE ctx = (PDEVICE_CONTEXT_FILE)ctxLC->hDevice;
     FILE_VMWARE_HEADER hdr = { 0 };
     FILE_VMWARE_GROUP grp = { 0 };
     FILE_VMWARE_MEMORY_REGION regions[FILE_VMWARE_MEMORY_REGIONS_MAX] = { 0 };
@@ -301,7 +223,6 @@ VOID DeviceFile_VMwareDumpInitialize()
     PBYTE pb;
     QWORD oTag;
     DWORD iGroup, iMemoryRegion, cbTag, cchTag;
-    BOOL fMemMap = FALSE;
     strcpy_s(szFileName, _countof(szFileName), ctx->szFileName);
     // 1: open and verify metadata file
     memcpy(szFileName + strlen(szFileName) - 5, ".vmss", 5);
@@ -311,13 +232,13 @@ VOID DeviceFile_VMwareDumpInitialize()
         fopen_s(&pFile, szFileName, "rb");
     }
     if(!pFile) {
-        vprintf("DEVICE: WARN: Unable to open VMWare .vmss or .vmsn file - assuming 1:1 memory space.\n");
+        lcprintf(ctxLC, "DEVICE: WARN: Unable to open VMWare .vmss or .vmsn file - assuming 1:1 memory space.\n");
         goto fail;
     }
     _fseeki64(pFile, 0, SEEK_SET);
     fread(&hdr, 1, sizeof(FILE_VMWARE_HEADER), pFile);
     if((hdr.magic != 0xbed3bed3) && (hdr.magic != 0xbed2bed2) && (hdr.magic != 0xbad1bad1) /* && (hdr.magic != 0xbed2bed0) */) {
-        vprintf("DEVICE: WARN: Unable to verify file '%s'.\n", szFileName);
+        lcprintf(ctxLC, "DEVICE: WARN: Unable to verify file '%s'.\n", szFileName);
         goto fail;
     }
     // 2: locate memory group(s) and parse memory regions from group tags.
@@ -354,21 +275,15 @@ VOID DeviceFile_VMwareDumpInitialize()
             LocalFree(pb);
             for(iMemoryRegion = 0; iMemoryRegion < FILE_VMWARE_MEMORY_REGIONS_MAX; iMemoryRegion++) {
                 if(regions[iMemoryRegion].fSize && regions[iMemoryRegion].fOffsetMemory && regions[iMemoryRegion].fOffsetFile) {
-                    if(!fMemMap) {
-                        fMemMap = TRUE;
-                        MemMap_Initialize(0x0000ffffffffffff);
-                    }
-                    MemMap_AddRange(regions[iMemoryRegion].cbOffsetMemory, regions[iMemoryRegion].cbSize, regions[iMemoryRegion].cbOffsetFile);
+                    LcMemMap_AddRange(ctxLC, regions[iMemoryRegion].cbOffsetMemory, regions[iMemoryRegion].cbSize, regions[iMemoryRegion].cbOffsetFile);
+                    ctx->CrashOrCoreDump.fValidVMwareDump = TRUE;
                 }
             }
 
         }
     }
-    if(fMemMap) {
-        MemMap_GetMaxAddress(&ctx->CrashOrCoreDump.paMax);
-        ctx->CrashOrCoreDump.fValidVMwareDump = TRUE;
-    } else {
-        vprintf("DEVICE: WARN: No VMware memory regions located - file will be treated as single-region.\n");
+    if(!LcMemMap_IsInitialized(ctxLC)) {
+        lcprintf(ctxLC, "DEVICE: WARN: No VMware memory regions located - file will be treated as single-region.\n");
     }
 fail:
     if(pFile) { fclose(pFile); }
@@ -382,66 +297,61 @@ fail:
 * -- return
 */
 _Success_(return)
-BOOL DeviceFile_MsCrashCoreDumpInitialize()
+BOOL DeviceFile_MsCrashCoreDumpInitialize(_In_ PLC_CONTEXT ctxLC)
 {
-    PDEVICE_CONTEXT_FILE ctx = (PDEVICE_CONTEXT_FILE)ctxDeviceMain->hDevice;
+    PDEVICE_CONTEXT_FILE ctx = (PDEVICE_CONTEXT_FILE)ctxLC->hDevice;
     BOOL f, fElfLoadSegment = FALSE;
     QWORD i, cbFileOffset;
-    PDUMP_HEADER64 pDump64 = &ctx->CrashOrCoreDump.Hdr64;
-    PDUMP_HEADER32 pDump32 = &ctx->CrashOrCoreDump.Hdr32;
     PElf64_Ehdr pElf64 = &ctx->CrashOrCoreDump.Elf64;
     PElf32_Ehdr pElf32 = &ctx->CrashOrCoreDump.Elf32;
+    _PPHYSICAL_MEMORY_DESCRIPTOR64 pM32 = (_PPHYSICAL_MEMORY_DESCRIPTOR64)(ctx->CrashOrCoreDump.pbHdr + 0x064);
+    _PPHYSICAL_MEMORY_DESCRIPTOR64 pM64 = (_PPHYSICAL_MEMORY_DESCRIPTOR64)(ctx->CrashOrCoreDump.pbHdr + 0x088);
     _fseeki64(ctx->pFile, 0, SEEK_SET);
     fread(ctx->CrashOrCoreDump.pbHdr, 1, 0x2000, ctx->pFile);
-    if((pDump64->Signature == DUMP_SIGNATURE) && (pDump64->ValidDump == DUMP_VALID_DUMP64) && (pDump64->DumpType == DUMP_TYPE_FULL) && (pDump64->MachineImageType == IMAGE_FILE_MACHINE_AMD64)) {
+    if((CDMP_DWORD(0x000) == DUMP_SIGNATURE) && (CDMP_DWORD(0x004) == DUMP_VALID_DUMP64) && (CDMP_DWORD(0xf98) == DUMP_TYPE_FULL) && (CDMP_DWORD(0x030) == IMAGE_FILE_MACHINE_AMD64)) {
         // PAGEDUMP (64-bit memory dump) and FULL DUMP
-        vprintfvv_fn("64-bit Microsoft Crash Dump identified.\n");
+        lcprintfvv_fn(ctxLC, "64-bit Microsoft Crash Dump identified.\n");
         ctx->CrashOrCoreDump.fValidCrashDump = TRUE;
         ctx->CrashOrCoreDump.f32 = FALSE;
         // process runs
-        if(pDump64->PhysicalMemoryBlock.NumberOfRuns > _PHYSICAL_MEMORY_MAX_RUNS) {
-            vprintf("DEVICE: FAIL: too many memory segments in crash dump file. (%i)\n", pDump64->PhysicalMemoryBlock.NumberOfRuns);
+        if(pM64->NumberOfRuns > _PHYSICAL_MEMORY_MAX_RUNS) {
+            lcprintf(ctxLC, "DEVICE: FAIL: too many memory segments in crash dump file. (%i)\n", pM64->NumberOfRuns);
             return FALSE;
         }
         cbFileOffset = 0x2000;  // initial offset of 0x2000 bytes in 64-bit dump file
-        MemMap_Initialize(0x0000ffffffffffff);
-        for(i = 0; i < pDump64->PhysicalMemoryBlock.NumberOfRuns; i++) {
-            if(!MemMap_AddRange(pDump64->PhysicalMemoryBlock.Run[i].BasePage << 12, pDump64->PhysicalMemoryBlock.Run[i].PageCount << 12, cbFileOffset)) {
-                vprintf("DEVICE: FAIL: unable to add range to memory map. (%016llx %016llx %016llx)\n", pDump64->PhysicalMemoryBlock.Run[i].BasePage << 12, pDump64->PhysicalMemoryBlock.Run[i].PageCount << 12, cbFileOffset);
+        for(i = 0; i < pM64->NumberOfRuns; i++) {
+            if(!LcMemMap_AddRange(ctxLC, pM64->Run[i].BasePage << 12, pM64->Run[i].PageCount << 12, cbFileOffset)) {
+                lcprintf(ctxLC, "DEVICE: FAIL: unable to add range to memory map. (%016llx %016llx %016llx)\n", pM64->Run[i].BasePage << 12, pM64->Run[i].PageCount << 12, cbFileOffset);
                 return FALSE;
             }
-            cbFileOffset += pDump64->PhysicalMemoryBlock.Run[i].PageCount << 12;
+            cbFileOffset += pM64->Run[i].PageCount << 12;
         }
-        MemMap_GetMaxAddress(&ctx->CrashOrCoreDump.paMax);
     }
-    if((pDump32->Signature == DUMP_SIGNATURE) && (pDump32->ValidDump == DUMP_VALID_DUMP) && (pDump32->DumpType == DUMP_TYPE_FULL) && (pDump32->MachineImageType == IMAGE_FILE_MACHINE_I386)) {
+    if((CDMP_DWORD(0x000) == DUMP_SIGNATURE) && (CDMP_DWORD(0x004) == DUMP_VALID_DUMP) && (CDMP_DWORD(0xf88) == DUMP_TYPE_FULL) && (CDMP_DWORD(0x020) == IMAGE_FILE_MACHINE_I386)) {
         // PAGEDUMP (32-bit memory dump) and FULL DUMP
-        vprintfvv_fn("32-bit Microsoft Crash Dump identified.\n");
+        lcprintfvv_fn(ctxLC, "32-bit Microsoft Crash Dump identified.\n");
         ctx->CrashOrCoreDump.fValidCrashDump = TRUE;
         ctx->CrashOrCoreDump.f32 = TRUE;
-        if(pDump32->PhysicalMemoryBlock.NumberOfRuns > _PHYSICAL_MEMORY_MAX_RUNS) {
-            vprintf("DEVICE: FAIL: too many memory segments in crash dump file. (%i)\n", pDump32->PhysicalMemoryBlock.NumberOfRuns);
+        if(pM32->NumberOfRuns > _PHYSICAL_MEMORY_MAX_RUNS) {
+            lcprintf(ctxLC, "DEVICE: FAIL: too many memory segments in crash dump file. (%i)\n", pM32->NumberOfRuns);
             return FALSE;
         }
         cbFileOffset = 0x1000;  // initial offset of 0x1000 bytes in 64-bit dump file
-        MemMap_Initialize(0xffffffff);
-        for(i = 0; i < pDump32->PhysicalMemoryBlock.NumberOfRuns; i++) {
-            if(!MemMap_AddRange((QWORD)pDump32->PhysicalMemoryBlock.Run[i].BasePage << 12, (QWORD)pDump32->PhysicalMemoryBlock.Run[i].PageCount << 12, cbFileOffset)) {
-                vprintf("DEVICE: FAIL: unable to add range to memory map. (%016llx %016llx %016llx)\n", (QWORD)pDump32->PhysicalMemoryBlock.Run[i].BasePage << 12, (QWORD)pDump32->PhysicalMemoryBlock.Run[i].PageCount << 12, cbFileOffset);
+        for(i = 0; i < pM32->NumberOfRuns; i++) {
+            if(!LcMemMap_AddRange(ctxLC, (QWORD)pM32->Run[i].BasePage << 12, (QWORD)pM32->Run[i].PageCount << 12, cbFileOffset)) {
+                lcprintf(ctxLC, "DEVICE: FAIL: unable to add range to memory map. (%016llx %016llx %016llx)\n", (QWORD)pM32->Run[i].BasePage << 12, (QWORD)pM32->Run[i].PageCount << 12, cbFileOffset);
                 return FALSE;
             }
-            cbFileOffset += (QWORD)pDump32->PhysicalMemoryBlock.Run[i].PageCount << 12;
+            cbFileOffset += (QWORD)pM32->Run[i].PageCount << 12;
         }
-        MemMap_GetMaxAddress(&ctx->CrashOrCoreDump.paMax);
     }
     if((*(PDWORD)pElf64->e_ident == ELF_EI_MAGIC) && (*(PWORD)(pElf64->e_ident + 4) == ELF_EI_CLASSDATA_64)) {
         // ELF CORE DUMP - 64-bit full dump
-        vprintfvv_fn("64-bit ELF Core Dump identified.\n");
+        lcprintfvv_fn(ctxLC, "64-bit ELF Core Dump identified.\n");
         if((pElf64->e_type != ELF_ET_CORE) || (pElf64->e_version != ELF_ET_VERSION) || (pElf64->e_phoff != ELF_PHDR_OFFSET_64) || (pElf64->e_phentsize != sizeof(Elf64_Phdr)) || !pElf64->e_phnum || (pElf64->e_phnum > 0x200)) {
-            vprintf("DEVICE: FAIL: unable to parse elf header\n");
+            lcprintf(ctxLC, "DEVICE: FAIL: unable to parse elf header\n");
             return FALSE;
         }
-        MemMap_Initialize(0xffffffff);
         for(i = 0; i < pElf64->e_phnum; i++) {
             f = (pElf64->Phdr[i].p_type == ELF_PT_LOAD) &&
                 pElf64->Phdr[i].p_offset && (pElf64->Phdr[i].p_offset < ctx->cbFile) &&
@@ -451,24 +361,22 @@ BOOL DeviceFile_MsCrashCoreDumpInitialize()
                 !(pElf64->Phdr[i].p_paddr & 0xfff) && !(pElf64->Phdr[i].p_filesz & 0xfff);
             if(f) {
                 fElfLoadSegment = TRUE;
-                if(!MemMap_AddRange(pElf64->Phdr[i].p_paddr, pElf64->Phdr[i].p_filesz, pElf64->Phdr[i].p_offset)) {
-                    vprintf("DEVICE: FAIL: unable to add range to memory map. (%016llx %016llx %016llx)\n", pElf64->Phdr[i].p_paddr, pElf64->Phdr[i].p_filesz, pElf64->Phdr[i].p_offset);
+                if(!LcMemMap_AddRange(ctxLC, pElf64->Phdr[i].p_paddr, pElf64->Phdr[i].p_filesz, pElf64->Phdr[i].p_offset)) {
+                    lcprintf(ctxLC, "DEVICE: FAIL: unable to add range to memory map. (%016llx %016llx %016llx)\n", pElf64->Phdr[i].p_paddr, pElf64->Phdr[i].p_filesz, pElf64->Phdr[i].p_offset);
                     return FALSE;
                 }
             }
         }
         if(!fElfLoadSegment) { return FALSE; }
         ctx->CrashOrCoreDump.fValidCoreDump = TRUE;
-        MemMap_GetMaxAddress(&ctx->CrashOrCoreDump.paMax);
     }
     if((*(PDWORD)pElf32->e_ident == ELF_EI_MAGIC) && (*(PWORD)(pElf32->e_ident + 4) == ELF_EI_CLASSDATA_32)) {
         // ELF CORE DUMP - 32-bit full dump
-        vprintfvv_fn("32-bit ELF Core Dump identified.\n");
+        lcprintfvv_fn(ctxLC, "32-bit ELF Core Dump identified.\n");
         if((pElf32->e_type != ELF_ET_CORE) || (pElf32->e_version != ELF_ET_VERSION) || (pElf32->e_phoff != ELF_PHDR_OFFSET_64) || (pElf32->e_phentsize != sizeof(Elf32_Phdr)) || !pElf32->e_phnum || (pElf32->e_phnum > 0x200)) {
-            vprintf("DEVICE: FAIL: unable to parse elf header\n");
+            lcprintf(ctxLC, "DEVICE: FAIL: unable to parse elf header\n");
             return FALSE;
         }
-        MemMap_Initialize(0xffffffff);
         for(i = 0; i < pElf32->e_phnum; i++) {
             f = (pElf32->Phdr[i].p_type == ELF_PT_LOAD) &&
                 pElf32->Phdr[i].p_offset && (pElf32->Phdr[i].p_offset < ctx->cbFile) &&
@@ -478,24 +386,24 @@ BOOL DeviceFile_MsCrashCoreDumpInitialize()
                 !(pElf32->Phdr[i].p_paddr & 0xfff) && !(pElf32->Phdr[i].p_filesz & 0xfff);
             if(f) {
                 fElfLoadSegment = TRUE;
-                if(!MemMap_AddRange(pElf32->Phdr[i].p_paddr, pElf32->Phdr[i].p_filesz, pElf32->Phdr[i].p_offset)) {
-                    vprintf("DEVICE: FAIL: unable to add range to memory map. (%08x %08x %08x)\n", pElf32->Phdr[i].p_paddr, pElf32->Phdr[i].p_filesz, pElf32->Phdr[i].p_offset);
+                if(!LcMemMap_AddRange(ctxLC, pElf32->Phdr[i].p_paddr, pElf32->Phdr[i].p_filesz, pElf32->Phdr[i].p_offset)) {
+                    lcprintf(ctxLC, "DEVICE: FAIL: unable to add range to memory map. (%08x %08x %08x)\n", pElf32->Phdr[i].p_paddr, pElf32->Phdr[i].p_filesz, pElf32->Phdr[i].p_offset);
                     return FALSE;
                 }
             }
         }
         if(!fElfLoadSegment) { return FALSE; }
         ctx->CrashOrCoreDump.fValidCoreDump = TRUE;
-        MemMap_GetMaxAddress(&ctx->CrashOrCoreDump.paMax);
     }
     return TRUE;
 }
 
 _Success_(return)
-BOOL DeviceFile_GetOption(_In_ QWORD fOption, _Out_ PQWORD pqwValue)
+BOOL DeviceFile_GetOption(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _Out_ PQWORD pqwValue)
 {
-    PDEVICE_CONTEXT_FILE ctx = (PDEVICE_CONTEXT_FILE)ctxDeviceMain->hDevice;
-    if(fOption == LEECHCORE_OPT_MEMORYINFO_VALID) {
+    PDEVICE_CONTEXT_FILE ctx = (PDEVICE_CONTEXT_FILE)ctxLC->hDevice;
+    BOOL f32 = ctx->CrashOrCoreDump.f32;
+    if(fOption == LC_OPT_MEMORYINFO_VALID) {
         *pqwValue = ctx->CrashOrCoreDump.fValidCrashDump ? 1 : 0;
         return TRUE;
     }
@@ -504,47 +412,44 @@ BOOL DeviceFile_GetOption(_In_ QWORD fOption, _Out_ PQWORD pqwValue)
         return FALSE;
     }
     switch(fOption) {
-        case LEECHCORE_OPT_MEMORYINFO_ADDR_MAX:
-            *pqwValue = ctx->CrashOrCoreDump.paMax;
-            return TRUE;
-        case LEECHCORE_OPT_MEMORYINFO_FLAG_32BIT:
+        case LC_OPT_MEMORYINFO_FLAG_32BIT:
             *pqwValue = ctx->CrashOrCoreDump.f32 ? 1 : 0;
             return TRUE;
-        case LEECHCORE_OPT_MEMORYINFO_FLAG_PAE:
-            *pqwValue = (ctx->CrashOrCoreDump.f32 && ctx->CrashOrCoreDump.Hdr32.PaeEnabled) ? 1 : 0;
+        case LC_OPT_MEMORYINFO_FLAG_PAE:
+            *pqwValue = ctx->CrashOrCoreDump.f32 ? ctx->CrashOrCoreDump.pbHdr[0x5c] : 0;
             return TRUE;
-        case LEECHCORE_OPT_MEMORYINFO_OS_VERSION_MINOR:
-            *pqwValue = ctx->CrashOrCoreDump.f32 ? ctx->CrashOrCoreDump.Hdr32.MinorVersion : ctx->CrashOrCoreDump.Hdr64.MinorVersion;
+        case LC_OPT_MEMORYINFO_OS_VERSION_MINOR:
+            *pqwValue = *(PDWORD)(ctx->CrashOrCoreDump.pbHdr + 0x00c);
             return TRUE;
-        case LEECHCORE_OPT_MEMORYINFO_OS_VERSION_MAJOR:
-            *pqwValue = ctx->CrashOrCoreDump.f32 ? ctx->CrashOrCoreDump.Hdr32.MajorVersion : ctx->CrashOrCoreDump.Hdr64.MajorVersion;
+        case LC_OPT_MEMORYINFO_OS_VERSION_MAJOR:
+            *pqwValue = *(PDWORD)(ctx->CrashOrCoreDump.pbHdr + 0x008);
             return TRUE;
-        case LEECHCORE_OPT_MEMORYINFO_OS_DTB:
-            *pqwValue = ctx->CrashOrCoreDump.f32 ? ctx->CrashOrCoreDump.Hdr32.DirectoryTableBase : ctx->CrashOrCoreDump.Hdr64.DirectoryTableBase;
+        case LC_OPT_MEMORYINFO_OS_DTB:
+            *pqwValue = VMM_PTR_OFFSET_DUAL(f32, ctx->CrashOrCoreDump.pbHdr, 0x010, 0x010);
             return TRUE;
-        case LEECHCORE_OPT_MEMORYINFO_OS_PFN:
-            *pqwValue = ctx->CrashOrCoreDump.f32 ? ctx->CrashOrCoreDump.Hdr32.PfnDataBase : ctx->CrashOrCoreDump.Hdr64.PfnDataBase;
+        case LC_OPT_MEMORYINFO_OS_PFN:
+            *pqwValue = VMM_PTR_OFFSET_DUAL(f32, ctx->CrashOrCoreDump.pbHdr, 0x014, 0x018);
             return TRUE;
-        case LEECHCORE_OPT_MEMORYINFO_OS_PsLoadedModuleList:
-            *pqwValue = ctx->CrashOrCoreDump.f32 ? ctx->CrashOrCoreDump.Hdr32.PsLoadedModuleList : ctx->CrashOrCoreDump.Hdr64.PsLoadedModuleList;
+        case LC_OPT_MEMORYINFO_OS_PsLoadedModuleList:
+            *pqwValue = VMM_PTR_OFFSET_DUAL(f32, ctx->CrashOrCoreDump.pbHdr, 0x018, 0x020);
             return TRUE;
-        case LEECHCORE_OPT_MEMORYINFO_OS_PsActiveProcessHead:
-            *pqwValue = ctx->CrashOrCoreDump.f32 ? ctx->CrashOrCoreDump.Hdr32.PsActiveProcessHead : ctx->CrashOrCoreDump.Hdr64.PsActiveProcessHead;
+        case LC_OPT_MEMORYINFO_OS_PsActiveProcessHead:
+            *pqwValue = VMM_PTR_OFFSET_DUAL(f32, ctx->CrashOrCoreDump.pbHdr, 0x01c, 0x028);
             return TRUE;
-        case LEECHCORE_OPT_MEMORYINFO_OS_MACHINE_IMAGE_TP:
-            *pqwValue = ctx->CrashOrCoreDump.f32 ? ctx->CrashOrCoreDump.Hdr32.MachineImageType : ctx->CrashOrCoreDump.Hdr64.MachineImageType;
+        case LC_OPT_MEMORYINFO_OS_MACHINE_IMAGE_TP:
+            *pqwValue = *(PDWORD)(ctx->CrashOrCoreDump.pbHdr + (f32 ? 0x020 : 0x030));
             return TRUE;
-        case LEECHCORE_OPT_MEMORYINFO_OS_NUM_PROCESSORS:
-            *pqwValue = ctx->CrashOrCoreDump.f32 ? ctx->CrashOrCoreDump.Hdr32.NumberProcessors : ctx->CrashOrCoreDump.Hdr64.NumberProcessors;
+        case LC_OPT_MEMORYINFO_OS_NUM_PROCESSORS:
+            *pqwValue = *(PDWORD)(ctx->CrashOrCoreDump.pbHdr + (f32 ? 0x024 : 0x034));
             return TRUE;
-        case LEECHCORE_OPT_MEMORYINFO_OS_SYSTEMTIME:
-            *pqwValue = ctx->CrashOrCoreDump.f32 ? *(PQWORD)&ctx->CrashOrCoreDump.Hdr32.SystemTime : *(PQWORD)&ctx->CrashOrCoreDump.Hdr64.SystemTime;
+        case LC_OPT_MEMORYINFO_OS_SYSTEMTIME:
+            *pqwValue = *(PQWORD)(ctx->CrashOrCoreDump.pbHdr + (f32 ? 0xfc0 : 0xfa8));
             return TRUE;
-        case LEECHCORE_OPT_MEMORYINFO_OS_UPTIME:
-            *pqwValue = ctx->CrashOrCoreDump.f32 ? *(PQWORD)&ctx->CrashOrCoreDump.Hdr32.SystemUpTime : *(PQWORD)&ctx->CrashOrCoreDump.Hdr64.SystemUpTime;
+        case LC_OPT_MEMORYINFO_OS_UPTIME:
+            *pqwValue = *(PQWORD)(ctx->CrashOrCoreDump.pbHdr + (f32 ? 0xfb8 : 0x1030));
             return TRUE;
-        case LEECHCORE_OPT_MEMORYINFO_OS_KdDebuggerDataBlock:
-            *pqwValue = ctx->CrashOrCoreDump.f32 ? ctx->CrashOrCoreDump.Hdr32.KdDebuggerDataBlock : ctx->CrashOrCoreDump.Hdr64.KdDebuggerDataBlock;
+        case LC_OPT_MEMORYINFO_OS_KdDebuggerDataBlock:
+            *pqwValue = VMM_PTR_OFFSET_DUAL(f32, ctx->CrashOrCoreDump.pbHdr, 0x060, 0x080);
             return TRUE;
     }
     *pqwValue = 0;
@@ -552,15 +457,28 @@ BOOL DeviceFile_GetOption(_In_ QWORD fOption, _Out_ PQWORD pqwValue)
 }
 
 _Success_(return)
-BOOL DeviceFile_CommandData(_In_ ULONG64 fOption, _In_reads_(cbDataIn) PBYTE pbDataIn, _In_ DWORD cbDataIn, _Out_writes_opt_(cbDataOut) PBYTE pbDataOut, _In_ DWORD cbDataOut, _Out_opt_ PDWORD pcbDataOut)
-{
-    PDEVICE_CONTEXT_FILE ctx = (PDEVICE_CONTEXT_FILE)ctxDeviceMain->hDevice;
-    if(fOption == LEECHCORE_COMMANDDATA_FILE_DUMPHEADER_GET) {
-        if(!ctx->CrashOrCoreDump.fValidCrashDump || !pbDataOut || (cbDataOut < (ctx->CrashOrCoreDump.f32 ? 0x1000UL : 0x2000UL))) { return FALSE; }
-        if(pcbDataOut) {
-            *pcbDataOut = ctx->CrashOrCoreDump.f32 ? 0x1000 : 0x2000;
-        }
-        memcpy(pbDataOut, ctx->CrashOrCoreDump.pbHdr, (ctx->CrashOrCoreDump.f32 ? 0x1000 : 0x2000));
+BOOL DeviceFile_Command(
+    _In_ PLC_CONTEXT ctxLC,
+    _In_ ULONG64 fOption,
+    _In_ DWORD cbDataIn,
+    _In_reads_opt_(cbDataIn) PBYTE pbDataIn,
+    _Out_opt_ PBYTE *ppbDataOut,
+    _Out_opt_ PDWORD pcbDataOut
+) {
+    PDEVICE_CONTEXT_FILE ctx = (PDEVICE_CONTEXT_FILE)ctxLC->hDevice;
+    BOOL f32 = ctx->CrashOrCoreDump.f32;
+    PBYTE pb;
+    DWORD cb;
+    UNREFERENCED_PARAMETER(cbDataIn);
+    UNREFERENCED_PARAMETER(pbDataIn);
+    // GET DUMP HEADER:
+    if(fOption == LC_CMD_FILE_DUMPHEADER_GET) {
+        if(!ppbDataOut || !ctx->CrashOrCoreDump.fValidCrashDump) { return FALSE; }
+        cb = ctx->CrashOrCoreDump.f32 ? 0x1000 : 0x2000;
+        if(!(pb = LocalAlloc(0, cb))) { return FALSE; }
+        memcpy(pb, ctx->CrashOrCoreDump.pbHdr, cb);
+        if(pcbDataOut) { *pcbDataOut = cb; }
+        *ppbDataOut = pb;
         return TRUE;
     }
     return FALSE;
@@ -570,69 +488,74 @@ BOOL DeviceFile_CommandData(_In_ ULONG64 fOption, _In_reads_(cbDataIn) PBYTE pbD
 // OPEN/CLOSE FUNCTIONALITY BELOW:
 //-----------------------------------------------------------------------------
 
-VOID DeviceFile_Close()
+VOID DeviceFile_Close(_Inout_ PLC_CONTEXT ctxLC)
 {
-    PDEVICE_CONTEXT_FILE ctx = (PDEVICE_CONTEXT_FILE)ctxDeviceMain->hDevice;
+    PDEVICE_CONTEXT_FILE ctx = (PDEVICE_CONTEXT_FILE)ctxLC->hDevice;
     if(!ctx) { return; }
     if(ctx->pFile) { fclose(ctx->pFile); }
     LocalFree(ctx);
-    ctxDeviceMain->hDevice = 0;
+    ctxLC->hDevice = 0;
 }
 
 _Success_(return)
-BOOL DeviceFile_Open()
+BOOL DeviceFile_Open(_Inout_ PLC_CONTEXT ctxLC)
 {
     PDEVICE_CONTEXT_FILE ctx;
-    if(!ctxDeviceMain) { return FALSE; }
     if(!(ctx = (PDEVICE_CONTEXT_FILE)LocalAlloc(LMEM_ZEROINIT, sizeof(DEVICE_CONTEXT_FILE)))) { return FALSE; }
-    if(0 == _strnicmp("file://", ctxDeviceMain->cfg.szDevice, 7)) {
-        strncpy_s(ctx->szFileName, _countof(ctx->szFileName), ctxDeviceMain->cfg.szDevice + 7, _countof(ctxDeviceMain->cfg.szDevice) - 7);
-    } else if(0 == _stricmp(ctxDeviceMain->cfg.szDevice, "dumpit")) {
+    lcprintfv(ctxLC, "DEVICE OPEN: %s\n", ctxLC->Config.szDeviceName);
+    if(0 == _strnicmp("file://", ctxLC->Config.szDevice, 7)) {
+        strncpy_s(ctx->szFileName, _countof(ctx->szFileName), ctxLC->Config.szDevice + 7, _countof(ctxLC->Config.szDevice) - 7);
+    } else if(0 == _stricmp(ctxLC->Config.szDevice, "livekd")) {
+        strcpy_s(ctx->szFileName, _countof(ctx->szFileName), "C:\\WINDOWS\\livekd.dmp");
+    } else if(0 == _stricmp(ctxLC->Config.szDevice, "dumpit")) {
         strcpy_s(ctx->szFileName, _countof(ctx->szFileName), "C:\\WINDOWS\\DumpIt.dmp");
     } else {
-        strncpy_s(ctx->szFileName, _countof(ctx->szFileName), ctxDeviceMain->cfg.szDevice, _countof(ctxDeviceMain->cfg.szDevice));
+        strncpy_s(ctx->szFileName, _countof(ctx->szFileName), ctxLC->Config.szDevice, _countof(ctxLC->Config.szDevice));
     }
     // open backing file
     if(fopen_s(&ctx->pFile, ctx->szFileName, "rb") || !ctx->pFile) { goto fail; }
     if(_fseeki64(ctx->pFile, 0, SEEK_END)) { goto fail; }   // seek to end of file
     ctx->cbFile = _ftelli64(ctx->pFile);                    // get current file pointer
     if(ctx->cbFile < 0x01000000) { goto fail; }             // minimum allowed dump file size = 16MB
-    ctxDeviceMain->hDevice = (HANDLE)ctx;
+    ctxLC->hDevice = (HANDLE)ctx;
     // set callback functions and fix up config
-    ctxDeviceMain->cfg.tpDevice = LEECHCORE_DEVICE_FILE;
-    ctxDeviceMain->cfg.fVolatile = FALSE;   // Files are assumed to be static non-volatile.
+    ctxLC->pfnClose = DeviceFile_Close;
+    ctxLC->pfnReadScatter = DeviceFile_ReadScatter;
+    ctxLC->pfnGetOption = DeviceFile_GetOption;
+    ctxLC->pfnCommand = DeviceFile_Command;
+    ctxLC->Config.fVolatile = FALSE;                  // Files are assumed to be static non-volatile.
     if(strstr(ctx->szFileName, "DumpIt.dmp")) {
-        ctxDeviceMain->cfg.fVolatile = TRUE; // DumpIt LIVEKD files are volatile.
+        ctxLC->Config.fVolatile = TRUE;               // DumpIt LIVEKD files are volatile.
     }
-    ctxDeviceMain->pfnClose = DeviceFile_Close;
-    ctxDeviceMain->pfnReadScatterMEM = DeviceFile_ReadScatterMEM;
-    ctxDeviceMain->pfnGetOption = DeviceFile_GetOption;
-    ctxDeviceMain->pfnCommandData = DeviceFile_CommandData;
+    if(strstr(ctx->szFileName, "livekd.dmp")) {
+        // LiveKd files are volatile. LiveKd is also currently super slow -
+        // almost so slow it's useless. But doing linear reads speeds things up
+        // very marginally (10-15%); doing multi-threaded reads does not help :(
+        ctxLC->Config.fVolatile = TRUE;
+        ctxLC->pfnReadScatter = NULL;
+        ctxLC->pfnReadContigious = DeviceFile_ReadContigious;
+    }
     if((strlen(ctx->szFileName) >= 6) && (0 == _stricmp(".vmem", ctx->szFileName + strlen(ctx->szFileName) - 5))) {
-        DeviceFile_VMwareDumpInitialize();
+        DeviceFile_VMwareDumpInitialize(ctxLC);
     }
     if(!ctx->CrashOrCoreDump.fValidVMwareDump) {
-        if(!DeviceFile_MsCrashCoreDumpInitialize()) { goto fail; }
+        if(!DeviceFile_MsCrashCoreDumpInitialize(ctxLC)) { goto fail; }
     }    
     if(ctx->CrashOrCoreDump.fValidCrashDump) {
-        ctxDeviceMain->cfg.paMaxNative = ctx->CrashOrCoreDump.paMax;
-        vprintfv("DEVICE: Successfully opened file: '%s' as Microsoft Crash Dump.\n", ctxDeviceMain->cfg.szDevice);
+        lcprintfv(ctxLC, "DEVICE: Successfully opened file: '%s' as Microsoft Crash Dump.\n", ctx->szFileName);
     } else if(ctx->CrashOrCoreDump.fValidCoreDump) {
-        ctxDeviceMain->cfg.paMaxNative = ctx->CrashOrCoreDump.paMax;
-        vprintfv("DEVICE: Successfully opened file: '%s' as ELF Core Dump.\n", ctxDeviceMain->cfg.szDevice);
+        lcprintfv(ctxLC, "DEVICE: Successfully opened file: '%s' as ELF Core Dump.\n", ctx->szFileName);
     } else if(ctx->CrashOrCoreDump.fValidVMwareDump) {
-        ctxDeviceMain->cfg.paMaxNative = ctx->CrashOrCoreDump.paMax;
-        vprintfv("DEVICE: Successfully opened file: '%s' as VMware Dump.\n", ctxDeviceMain->cfg.szDevice);
+        lcprintfv(ctxLC, "DEVICE: Successfully opened file: '%s' as VMware Dump.\n", ctx->szFileName);
     } else {
-        ctxDeviceMain->cfg.paMaxNative = ctx->cbFile;
-        if(!MemMap_Initialize(ctxDeviceMain->cfg.paMaxNative)) { goto fail; }
-        vprintfv("DEVICE: Successfully opened file: '%s' as RAW Memory Dump.\n", ctxDeviceMain->cfg.szDevice);
+        LcMemMap_AddRange(ctxLC, 0, ctx->cbFile, 0);
+        lcprintfv(ctxLC, "DEVICE: Successfully opened file: '%s' as RAW Memory Dump.\n", ctx->szFileName);
     }
     return TRUE;
 fail:
     if(ctx->pFile) { fclose(ctx->pFile); }
     LocalFree(ctx);
-    ctxDeviceMain->hDevice = 0;
-    printf("DEVICE: ERROR: Failed opening file: '%s'.\n", ctxDeviceMain->cfg.szDevice);
+    ctxLC->hDevice = 0;
+    lcprintf(ctxLC, "DEVICE: ERROR: Failed opening file: '%s'.\n", ctxLC->Config.szDevice);
     return FALSE;
 }

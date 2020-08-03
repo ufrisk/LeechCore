@@ -37,7 +37,7 @@
     <ClInclude Include="leechcorepyc.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="leechcore.h">
+    <ClInclude Include="..\includes\leechcore.h">
       <Filter>Header Files\leechcore</Filter>
     </ClInclude>
   </ItemGroup>

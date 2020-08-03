@@ -4,7 +4,6 @@
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include <stdio.h>
-#include "leechcore.h"
 #include "leechrpc.h"
 
 //-----------------------------------------------------------------------------

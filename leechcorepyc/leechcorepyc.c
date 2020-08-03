@@ -12,7 +12,9 @@
 #include <python.h>
 #endif
 #include <Windows.h>
-#include "leechcore.h"
+#include <leechcore.h>
+
+HANDLE g_hLC = NULL;
 
 inline int PyDict_SetItemString_DECREF(PyObject *dp, const char *key, PyObject *item)
 {
@@ -41,35 +43,26 @@ LEECHCOREPYC_Open(PyObject *self, PyObject *args)
     DWORD dwFlags = 0;
     QWORD paMax = 0;
     LPSTR szDevice = NULL, szRemote = NULL;
-    LEECHCORE_CONFIG cfg = { 0 };
+    LC_CONFIG cfg = { 0 };
     if(!PyArg_ParseTuple(args, "ss|kKK", &szDevice, &szRemote, &dwFlags, &paMax)) { return NULL; }
     if(!szDevice || !szDevice[0]) {
         return PyErr_Format(PyExc_RuntimeError, "LEECHCOREPYC_Open: Required argument 'device' is missing.");
     }
     Py_BEGIN_ALLOW_THREADS;
-    cfg.magic = LEECHCORE_CONFIG_MAGIC;
-    cfg.version = LEECHCORE_CONFIG_VERSION;
-    cfg.flags = (WORD)dwFlags;
+    cfg.dwVersion = LC_CONFIG_VERSION;
+    cfg.dwPrintfVerbosity = (WORD)dwFlags;
     cfg.paMax = paMax;
     strncpy_s(cfg.szDevice, sizeof(cfg.szDevice), szDevice, _TRUNCATE);
     if(szRemote) { strncpy_s(cfg.szRemote, sizeof(cfg.szRemote), szRemote, _TRUNCATE); }
-    result = LeechCore_Open(&cfg);
+    result =
+        !g_hLC &&
+        (g_hLC = LcCreate(&cfg));
     Py_END_ALLOW_THREADS;
     if(!result) {
         return PyErr_Format(PyExc_RuntimeError, "LEECHCOREPYC_Open: Failed.");
     }
     if(!(pyDict = PyDict_New())) { return PyErr_NoMemory(); }
-    PyDict_SetItemString_DECREF(pyDict, "flags", PyLong_FromLong((long)cfg.flags));
-    PyDict_SetItemString_DECREF(pyDict, "paMax", PyLong_FromUnsignedLongLong(cfg.paMax));
-    PyDict_SetItemString_DECREF(pyDict, "paMaxNative", PyLong_FromUnsignedLongLong(cfg.paMaxNative));
-    PyDict_SetItemString_DECREF(pyDict, "tpDevice", PyLong_FromLong((long)cfg.tpDevice));
-    PyDict_SetItemString_DECREF(pyDict, "fWritable", PyBool_FromLong(cfg.fWritable ? 1 : 0));
-    PyDict_SetItemString_DECREF(pyDict, "fVolatile", PyBool_FromLong(cfg.fVolatile ? 1 : 0));
-    PyDict_SetItemString_DECREF(pyDict, "fVolatileMaxAddress", PyBool_FromLong(cfg.fVolatileMaxAddress ? 1 : 0));
-    PyDict_SetItemString_DECREF(pyDict, "fRemote", PyBool_FromLong(cfg.fRemote ? 1 : 0));
-    PyDict_SetItemString_DECREF(pyDict, "VersionMajor", PyLong_FromLong((long)cfg.VersionMajor));
-    PyDict_SetItemString_DECREF(pyDict, "VersionMinor", PyLong_FromLong((long)cfg.VersionMinor));
-    PyDict_SetItemString_DECREF(pyDict, "VersionRevision", PyLong_FromLong((long)cfg.VersionRevision));
+    PyDict_SetItemString_DECREF(pyDict, "devicename", PyUnicode_FromFormat("%s", cfg.szDeviceName));
     PyDict_SetItemString_DECREF(pyDict, "device", PyUnicode_FromFormat("%s", cfg.szDevice));
     PyDict_SetItemString_DECREF(pyDict, "remote", PyUnicode_FromFormat("%s", cfg.szRemote));
     return pyDict;
@@ -80,7 +73,8 @@ static PyObject*
 LEECHCOREPYC_Close(PyObject *self, PyObject *args)
 {
     Py_BEGIN_ALLOW_THREADS;
-    LeechCore_Close();
+    LcClose(g_hLC);
+    g_hLC = NULL;
     Py_END_ALLOW_THREADS;
     return Py_BuildValue("s", NULL);    // None returned on success.
 }
@@ -90,23 +84,21 @@ static PyObject*
 LEECHCOREPYC_ReadScatter(PyObject *self, PyObject *args)
 {
     PyObject *pyListSrc, *pyListItemSrc, *pyListDst, *pyDict;
-    BOOL result;
     QWORD pa;
     DWORD i, cMEMs;
-    PMEM_IO_SCATTER_HEADER pMEM, *ppMEMs;
+    PMEM_SCATTER pMEM, *ppMEMs;
     if(!PyArg_ParseTuple(args, "O!", &PyList_Type, &pyListSrc)) { return NULL; }
     cMEMs = (DWORD)PyList_Size(pyListSrc);
-    if(cMEMs == 0) {
+    // verify, allocate & initialize
+    if((cMEMs == 0) || !LcAllocScatter1(cMEMs, &ppMEMs)) {
         Py_DECREF(pyListSrc);
         return PyList_New(0);
     }
-    // allocate & initialize
-    result = LeechCore_AllocScatterEmpty(cMEMs, &ppMEMs);
     for(i = 0; i < cMEMs; i++) {
         pyListItemSrc = PyList_GetItem(pyListSrc, i); // borrowed reference
         if(!pyListItemSrc || !PyLong_Check(pyListItemSrc)) {
             Py_DECREF(pyListSrc);
-            LocalFree(ppMEMs);
+            LcMemFree(ppMEMs);
             return PyErr_Format(PyExc_RuntimeError, "LEECHCOREPYC_ReadScatter: Argument list contains non numeric item.");
         }
         pa = PyLong_AsUnsignedLongLong(pyListItemSrc);
@@ -114,40 +106,40 @@ LEECHCOREPYC_ReadScatter(PyObject *self, PyObject *args)
     }
     // call c-dll for LeechCore
     Py_BEGIN_ALLOW_THREADS;
-    LeechCore_ReadScatter(ppMEMs, cMEMs);
+    LcReadScatter(g_hLC, cMEMs, ppMEMs);
     Py_END_ALLOW_THREADS;
     if(!(pyListDst = PyList_New(0))) {
-        LocalFree(ppMEMs);
+        LcMemFree(ppMEMs);
         return PyErr_NoMemory();
     }
     // parse result
     for(i = 0; i < cMEMs; i++) {
         pMEM = ppMEMs[i];
-        if((pyDict = PyDict_New())) {
+        if(pMEM->f && (pyDict = PyDict_New())) {
             PyDict_SetItemString_DECREF(pyDict, "addr", PyLong_FromUnsignedLongLong(pMEM->qwA));
             PyDict_SetItemString_DECREF(pyDict, "data", PyBytes_FromStringAndSize(pMEM->pb, pMEM->cb));
             PyList_Append_DECREF(pyListDst, pyDict);
         }
     }
-    LeechCore_MemFree(ppMEMs);
+    LcMemFree(ppMEMs);
     return pyListDst;
 }
 
-// (ULONG64, DWORD, (DWORD)) -> PBYTE
+// (ULONG64, DWORD) -> PBYTE
 static PyObject*
 LEECHCOREPYC_Read(PyObject *self, PyObject *args)
 {
     PyObject *pyBytes;
     BOOL result;
-    DWORD cb, cbRead = 0, flags = 0;
+    DWORD cb, cbRead = 0;
     ULONG64 pa;
     PBYTE pb;
-    if(!PyArg_ParseTuple(args, "Kk|K", &pa, &cb, &flags)) { return NULL; }
+    if(!PyArg_ParseTuple(args, "Kk", &pa, &cb)) { return NULL; }
     if(cb > 0x01000000) { return PyErr_Format(PyExc_RuntimeError, "LEECHCOREPYC_Read: Read larger than maxium supported 16MB requested."); }
     pb = LocalAlloc(0, cb);
     if(!pb) { return PyErr_NoMemory(); }
     Py_BEGIN_ALLOW_THREADS;
-    result = LeechCore_ReadEx(pa, pb, cb, flags, NULL);
+    result = LcRead(g_hLC, pa, cb, pb);
     Py_END_ALLOW_THREADS;
     if(!result) {
         LocalFree(pb);
@@ -166,8 +158,7 @@ LEECHCOREPYC_Write(PyObject *self, PyObject *args)
     ULONG64 va;
     PBYTE pb, pbPy;
     SIZE_T cb;
-    DWORD flags = 0;
-    if(!PyArg_ParseTuple(args, "Ky#|k", &va, &pbPy, &cb, &flags)) { return NULL; }
+    if(!PyArg_ParseTuple(args, "Ky#", &va, &pbPy, &cb)) { return NULL; }
     if(cb == 0) {
         return Py_BuildValue("s", NULL);    // zero-byte write is always successful.
     }
@@ -177,7 +168,7 @@ LEECHCOREPYC_Write(PyObject *self, PyObject *args)
     }
     memcpy(pb, pbPy, cb);
     Py_BEGIN_ALLOW_THREADS;
-    result = LeechCore_WriteEx(va, pb, (DWORD)cb, flags);
+    result = LcWrite(g_hLC, va, (DWORD)cb, pb);
     LocalFree(pb);
     Py_END_ALLOW_THREADS;
     if(!result) { return PyErr_Format(PyExc_RuntimeError, "LEECHCOREPYC_Write: Failed."); }
@@ -192,7 +183,7 @@ LEECHCOREPYC_GetOption(PyObject *self, PyObject *args)
     ULONG64 fOption, qwValue = 0;
     if(!PyArg_ParseTuple(args, "K", &fOption)) { return NULL; }
     Py_BEGIN_ALLOW_THREADS;
-    result = LeechCore_GetOption(fOption, &qwValue);
+    result = LcGetOption(g_hLC, fOption, &qwValue);
     Py_END_ALLOW_THREADS;
     if(!result) { return PyErr_Format(PyExc_RuntimeError, "LEECHCOREPYC_GetOption: Unable to retrieve value for option."); }
     return PyLong_FromUnsignedLongLong(qwValue);
@@ -206,13 +197,13 @@ LEECHCOREPYC_SetOption(PyObject *self, PyObject *args)
     ULONG64 fOption, qwValue = 0;
     if(!PyArg_ParseTuple(args, "KK", &fOption, &qwValue)) { return NULL; }
     Py_BEGIN_ALLOW_THREADS;
-    result = LeechCore_SetOption(fOption, qwValue);
+    result = LcSetOption(g_hLC, fOption, qwValue);
     Py_END_ALLOW_THREADS;
     if(!result) { return PyErr_Format(PyExc_RuntimeError, "LEECHCOREPYC_SetOption: Unable to set value for option."); }
     return Py_BuildValue("s", NULL);    // None returned on success.
 }
 
-// (ULONG64, PBYTE, (DWORD)) -> PBYTE
+// (ULONG64, PBYTE) -> PBYTE
 static PyObject*
 LEECHCOREPYC_CommandData(PyObject *self, PyObject *args)
 {
@@ -222,21 +213,19 @@ LEECHCOREPYC_CommandData(PyObject *self, PyObject *args)
     PBYTE pb, pbPy, pbDataOut;
     SIZE_T cb;
     DWORD cbDataOut = 0;
-    if(!PyArg_ParseTuple(args, "Ky#|k", &fOption, &pbPy, &cb, &cbDataOut)) { return NULL; }
-    if(!cbDataOut || (cbDataOut > 0x01000000)) { cbDataOut = 0x01000000; }
+    if(!PyArg_ParseTuple(args, "Ky#", &fOption, &pbPy, &cb)) { return NULL; }
     pb = LocalAlloc(0, cb);
     if(!pb) {
         return PyErr_NoMemory();
     }
     memcpy(pb, pbPy, cb);
     Py_BEGIN_ALLOW_THREADS;
-    pbDataOut = LocalAlloc(0, cbDataOut);
-    result = pbDataOut && LeechCore_CommandData(fOption, pb, (DWORD)cb, pbDataOut, cbDataOut, &cbDataOut);
+    result = LcCommand(g_hLC, fOption, (DWORD)cb, pb, &pbDataOut, &cbDataOut);
     LocalFree(pb);
     Py_END_ALLOW_THREADS;
     if(!result) { return PyErr_Format(PyExc_RuntimeError, "LEECHCOREPYC_CommandData: Failed."); }
     pyBytes = PyBytes_FromStringAndSize(pbDataOut, cbDataOut);
-    LocalFree(pbDataOut);
+    LcMemFree(pbDataOut);
     return pyBytes;
 }
 
@@ -257,7 +246,7 @@ static PyModuleDef LEECHCOREPYC_Module = {
     NULL, NULL, NULL, NULL
 };
 
-__declspec(dllexport) PyObject* PyInit_leechcorepyc(void)
+PyMODINIT_FUNC PyInit_leechcorepyc(void)
 {
     return PyModule_Create(&LEECHCOREPYC_Module);
 }

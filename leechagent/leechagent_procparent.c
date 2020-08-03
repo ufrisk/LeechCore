@@ -259,7 +259,7 @@ BOOL LeechAgent_ProcParent_GetStdOutErrText(_In_ PPROCPARENT_CONTEXT ctx, _Out_w
 }
 
 _Success_(return)
-BOOL LeechAgent_ProcParent_ExecPy(_In_ ULONG64 fDataIn, _In_reads_(cbDataIn) PBYTE pbDataIn, _In_ DWORD cbDataIn, _Out_writes_opt_(*pcbDataOut) PBYTE *ppbDataOut, _Out_opt_ PDWORD pcbDataOut)
+BOOL LeechAgent_ProcParent_ExecPy(_In_ DWORD dwTimeout, _In_reads_(cbDataIn) PBYTE pbDataIn, _In_ DWORD cbDataIn, _Out_writes_opt_(*pcbDataOut) PBYTE *ppbDataOut, _Out_opt_ PDWORD pcbDataOut)
 {
     WCHAR wszProcessPathName[MAX_PATH] = { 0 };
     WCHAR wszProcessArgs[MAX_PATH] = { 0 };
@@ -341,7 +341,7 @@ BOOL LeechAgent_ProcParent_ExecPy(_In_ ULONG64 fDataIn, _In_reads_(cbDataIn) PBY
     }
     // set up child process auto-terminator watchdog
     // NB! no 'goto fail' must be made after this
-    ctx->dwChildKillAfterMilliseconds = (fDataIn && (fDataIn < LEECHAGENT_CHILDPROCESS_TIMEOUT_MAX_MS)) ? (DWORD)fDataIn : LEECHAGENT_CHILDPROCESS_TIMEOUT_DEFAULT_MS;  // kill child after time
+    ctx->dwChildKillAfterMilliseconds = (dwTimeout && (dwTimeout < LEECHAGENT_CHILDPROCESS_TIMEOUT_MAX_MS)) ? dwTimeout : LEECHAGENT_CHILDPROCESS_TIMEOUT_DEFAULT_MS;  // kill child after time
     ctx->hThreadChildTerminator = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)LeechAgent_ProcParent_ChildTerminatorThread, (LPVOID)ctx, 0, NULL);
     // send commands to child process to initialize MemProcFS, Python and execute code.
     fChildInitVmmPython =

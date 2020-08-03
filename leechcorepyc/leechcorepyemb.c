@@ -15,7 +15,7 @@
 #include <python.h>
 #endif
 #include <Windows.h>
-#include "leechcore.h"
+#include <leechcore.h>
 #include "leechcorepyc.h"
 
 #define PYTHON_PATH_MAX             7*MAX_PATH

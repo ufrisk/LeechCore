@@ -12,24 +12,18 @@
 #include <stdio.h>
 #include <winusb.h>
 #include <setupapi.h>
-#include <bcrypt.h>
 #include <conio.h>
-
-#pragma comment (lib, "winusb.lib")
-#pragma comment (lib, "setupapi.lib")
-#pragma comment (lib, "bcrypt.lib")
 
 typedef unsigned __int64                    QWORD, *PQWORD;
 #define SOCK_NONBLOCK                       0
 
 #pragma warning( disable : 4477)
 
+#define LC_LIBRARY_FILETYPE                 ".dll"
 VOID usleep(_In_ DWORD us);
 
 #endif /* _WIN32 */
 #ifdef LINUX
-#define _GNU_SOURCE
-
 #include <libusb.h>
 #include <byteswap.h>
 #include <ctype.h>
@@ -42,10 +36,13 @@ VOID usleep(_In_ DWORD us);
 #include <pthread.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/eventfd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+
+#define LC_LIBRARY_FILETYPE                 ".so"
 
 typedef void                                VOID, *PVOID;
 typedef void                                *HANDLE, **PHANDLE;
@@ -59,9 +56,9 @@ typedef wchar_t                             WCHAR, *PWCHAR, *LPWSTR;
 typedef uint32_t                            DWORD, *PDWORD;
 typedef uint32_t                            ULONG, *PULONG;
 typedef long long unsigned int              QWORD, *PQWORD, ULONG64, *PULONG64;
-typedef long long unsigned int              LARGE_INTEGER, *PLARGE_INTEGER, FILETIME;
+typedef uint64_t                            LARGE_INTEGER, *PLARGE_INTEGER, FILETIME;
 typedef uint64_t                            SIZE_T, *PSIZE_T;
-typedef void                                *LPOVERLAPPED;
+typedef void                                *OVERLAPPED, *LPOVERLAPPED;
 typedef struct tdEXCEPTION_RECORD32         { CHAR sz[80]; } EXCEPTION_RECORD32;
 typedef struct tdEXCEPTION_RECORD64         { CHAR sz[152]; } EXCEPTION_RECORD64;
 #define TRUE                                1
@@ -91,18 +88,31 @@ typedef struct tdEXCEPTION_RECORD64         { CHAR sz[152]; } EXCEPTION_RECORD64
 #define INVALID_SOCKET	                    -1
 #define SOCKET_ERROR	                    -1
 #define WSAEWOULDBLOCK                      10035L
+#define WAIT_OBJECT_0                       (0x00000000UL)
+#define INFINITE                            (0xFFFFFFFFUL)
+#define MAXIMUM_WAIT_OBJECTS                64
 
 #define _In_
+#define _In_z_
 #define _Out_
 #define _Inout_
 #define _Inout_opt_
 #define _In_opt_
 #define _Out_opt_
+#define _Check_return_opt_
+#define _Frees_ptr_opt_
+#define _Post_ptr_invalid_
+#define _Printf_format_string_
+#define _In_reads_(x)
+#define _In_reads_opt_(x)
+#define _Out_writes_(x)
 #define __bcount(x)
 #define _Inout_bytecount_(x)
+#define _Inout_updates_opt_(x)
 #define _Inout_updates_bytes_(x)
 #define _Out_writes_opt_(x)
-#define _Success_(return)
+#define _Success_(x)
+#define UNREFERENCED_PARAMETER(x)
 
 #define max(a, b)                           (((a) > (b)) ? (a) : (b))
 #define min(a, b)                           (((a) < (b)) ? (a) : (b))
@@ -113,6 +123,8 @@ typedef struct tdEXCEPTION_RECORD64         { CHAR sz[152]; } EXCEPTION_RECORD64
 #define strnlen_s(s, maxcount)              (strnlen(s, maxcount))
 #define strcpy_s(dst, len, src)             (strncpy(dst, src, len))
 #define strncpy_s(dst, len, src, srclen)    (strncpy(dst, src, len))
+#define strcat_s(dst, len, src)             (strcat(dst, src))
+#define strncat_s(dst, len, src, srclen)    (strncat(dst, src, srclen))
 #define _stricmp(s1, s2)                    (strcasecmp(s1, s2))
 #define _strnicmp(s1, s2, maxcount)         (strncasecmp(s1, s2, maxcount))
 #define strtok_s(s, d, c)                   (strtok_r(s, d, c))
@@ -126,7 +138,6 @@ typedef struct tdEXCEPTION_RECORD64         { CHAR sz[152]; } EXCEPTION_RECORD64
 #define GetModuleFileNameA(m, f, l)         (readlink("/proc/self/exe", f, l))
 #define ZeroMemory(pb, cb)                  (memset(pb, 0, cb))
 #define WinUsb_SetPipePolicy(h, p, t, cb, pb)   // TODO: implement this for better USB2 performance.
-#define CloseHandle(h)                          // TODO: remove this dummy implementation & replace with WARN.
 #define WSAGetLastError()                   (WSAEWOULDBLOCK)    // TODO: remove this dummy when possible.
 #define _ftelli64(f)                        (ftello(f))
 #define _fseeki64(f, o, w)                  (fseeko(f, o, w))
@@ -137,10 +148,14 @@ typedef struct tdEXCEPTION_RECORD64         { CHAR sz[152]; } EXCEPTION_RECORD64
 #define GetCurrentProcess()					((HANDLE)-1)
 #define closesocket(s)                      close(s)
 
+#ifndef _LINUX_DEF_CRITICAL_SECTION
+#define _LINUX_DEF_CRITICAL_SECTION
 typedef struct tdCRITICAL_SECTION {
     pthread_mutex_t mutex;
     pthread_mutexattr_t mta;
 } CRITICAL_SECTION, *LPCRITICAL_SECTION;
+#endif /* _LINUX_DEF_CRITICAL_SECTION */
+
 VOID InitializeCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
 VOID DeleteCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
 VOID EnterCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
@@ -183,11 +198,6 @@ HANDLE CreateThread(
     PDWORD    lpThreadId
 );
 
-BOOL GetExitCodeThread(
-    HANDLE    hThread,
-    PDWORD    lpExitCode
-);
-
 BOOL __WinUsb_ReadWritePipe(
     WINUSB_INTERFACE_HANDLE InterfaceHandle,
     UCHAR    PipeID,
@@ -199,9 +209,17 @@ BOOL __WinUsb_ReadWritePipe(
 #define WinUsb_ReadPipe(h, p, b, l, t, o)   (__WinUsb_ReadWritePipe(h, p, b, l, t, o))
 #define WinUsb_WritePipe(h, p, b, l, t, o)  (__WinUsb_ReadWritePipe(h, p, b, l, t, o))
 
+HMODULE LoadLibraryA(LPSTR lpFileName);
+BOOL FreeLibrary(_In_ HMODULE hLibModule);
 FARPROC GetProcAddress(HMODULE hModule, LPSTR lpProcName);
-HMODULE LoadLibrary(LPWSTR lpFileName);
-#define FreeLibrary(hModule)                (TRUE)
+
+BOOL CloseHandle(_In_ HANDLE hObject);
+BOOL ResetEvent(_In_ HANDLE hEvent);
+BOOL SetEvent(_In_ HANDLE hEvent);
+HANDLE CreateEvent(_In_opt_ PVOID lpEventAttributes, _In_ BOOL bManualReset, _In_ BOOL bInitialState, _In_opt_ PVOID lpName);
+DWORD WaitForMultipleObjects(_In_ DWORD nCount, HANDLE *lpHandles, _In_ BOOL bWaitAll, _In_ DWORD dwMilliseconds);
+DWORD WaitForSingleObject(_In_ HANDLE hHandle, _In_ DWORD dwMilliseconds);
+
 #endif /* LINUX */
 
 #endif /* __OSCOMPATIBILITY_H__ */

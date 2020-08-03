@@ -432,7 +432,7 @@ BOOL SvcInstallRemote(_In_ LPWSTR wszComputer)
         }
     }
     // 7: Install and start service
-    ZeroMemory(wszRemotePathFile, MAX_PATH);
+    ZeroMemory(wszRemotePathFile, MAX_PATH * sizeof(WCHAR));
     Util_wcsncat_s_N(wszRemotePathFile, MAX_PATH - 1, _TRUNCATE, wszRemoteLocalPath, L"\\LeechAgent\\", g_REMOTE_FILES_REQUIRED[0].wsz, NULL);
     if(!SvcInstall(wszComputer, wszRemotePathFile)) {
         goto fail_cleanup_remote;

@@ -21,16 +21,7 @@
     <ClCompile Include="device_fpga.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="device_hvsavedstate.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="device_pmem.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="device_rawtcp.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="device_sp605tcp.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="device_tmd.c">
@@ -54,9 +45,6 @@
     <ClCompile Include="oscompatibility.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="tlp.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="util.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -65,55 +53,28 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="device.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="device_file.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="device_fpga.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="device_hvsavedstate.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="device_pmem.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="device_rawtcp.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="device_sp605tcp.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="device_tmd.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="device_usb3380.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="leechcore.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="leechrpc.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="leechrpc_h.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="memmap.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="oscompatibility.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="tlp.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="util.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="version.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="leechcore.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="leechcore_device.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="leechcore_internal.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

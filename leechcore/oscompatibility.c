@@ -19,12 +19,29 @@ VOID usleep(_In_ DWORD us)
     }
 }
 
+_Success_(return)
+BOOL Util_GetPathExe(_Out_writes_(MAX_PATH) PCHAR szPath)
+{
+    SIZE_T i;
+    if(GetModuleFileNameA(NULL, szPath, MAX_PATH - 4)) {
+        for(i = strlen(szPath) - 1; i > 0; i--) {
+            if(szPath[i] == '/' || szPath[i] == '\\') {
+                szPath[i + 1] = '\0';
+                return TRUE;
+            }
+        }
+    }
+    return FALSE;
+}
+
 #endif /* _WIN32 */
 #ifdef LINUX
 
 #include "oscompatibility.h"
-#include "fpga_libusb.h"
+#include "util.h"
+#include <dlfcn.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <sys/ioctl.h>
 
 #define INTERNAL_HANDLE_TYPE_THREAD        0xdeadbeeffedfed01
@@ -110,7 +127,7 @@ HANDLE FindFirstFileA(LPSTR lpFileName, LPWIN32_FIND_DATAA lpFindFileData)
     DIR *hDir;
     CHAR szDirName[MAX_PATH];
     memset(szDirName, 0, MAX_PATH);
-    strcpy_s(lpFindFileData->__cExtension, 5, lpFileName + strlen(lpFileName) - 4);
+    strcpy_s(lpFindFileData->__cExtension, 5, lpFileName + strlen(lpFileName) - 3);
     strcpy_s(szDirName, MAX_PATH, lpFileName);
     for(i = strlen(szDirName) - 1; i > 0; i--) {
         if(szDirName[i] == '/') {
@@ -131,7 +148,7 @@ BOOL FindNextFileA(HANDLE hFindFile, LPWIN32_FIND_DATAA lpFindFileData)
     if(!hDir) { return FALSE; }
     while ((dir = readdir(hDir)) != NULL) {
         sz = dir->d_name;
-        if((strlen(sz) > 4) && !strcasecmp(sz + strlen(sz) - 4, lpFindFileData->__cExtension)) {
+        if((strlen(sz) > 3) && !strcasecmp(sz + strlen(sz) - 3, lpFindFileData->__cExtension)) {
             strcpy_s(lpFindFileData->cFileName, MAX_PATH, sz);
             return TRUE;
         }
@@ -184,166 +201,28 @@ BOOL IsWow64Process(HANDLE hProcess, PBOOL Wow64Process)
 }
 
 // ----------------------------------------------------------------------------
-// Facade implementation of FTDI functions using functionality provided by
-// a basic implmentation of FTDI library.
-// NB! functionality below is by no way complete - only minimal functionality
-// required by PCILeech use is implemented ...
-// ----------------------------------------------------------------------------
-
-#define FT601_HANDLE_LIBUSB         (HANDLE)-2
-
-ULONG FT60x_FT_Create(PVOID pvArg, DWORD dwFlags, HANDLE *pftHandle)
-{
-    int i, rc;
-    // first try kernel driver
-    {
-        // NB! underlying driver will create a device object at /dev/ft60x[0-3]
-        //     when loaded. Iterate through possible combinations at load time.
-        CHAR szDevice[12] = { '/', 'd', 'e', 'v', '/', 'f', 't', '6', '0', 'x', '0', 0 };
-        for(i = 0; i < 4; i++) {
-            szDevice[10] = '0' + i;
-            rc = open(szDevice, O_RDWR | O_CLOEXEC);
-            if(rc > 0) {
-                *pftHandle = (HANDLE)(QWORD)rc;
-                return 0;
-            }
-        }
-    }
-    // try libusb built-in driver
-    {
-        rc = fpga_open();
-        if(rc != -1) {
-            *pftHandle = FT601_HANDLE_LIBUSB;
-            return 0;
-        }
-    }
-    return 0x20;
-}
-
-ULONG FT60x_FT_Close(HANDLE ftHandle)
-{
-    if(ftHandle == FT601_HANDLE_LIBUSB) {
-        fpga_close();
-    } else {
-        close((int)(QWORD)ftHandle);
-    }
-    return 0;
-}
-
-ULONG FT60x_FT_GetChipConfiguration(HANDLE ftHandle, PVOID pvConfiguration)
-{
-    if(ftHandle == FT601_HANDLE_LIBUSB) {
-        return (fpga_get_chip_configuration(pvConfiguration) == -1) ? 0x20 : 0;
-    } else {
-        return ioctl((int)(QWORD)ftHandle, 0, pvConfiguration) ? 0x20 : 0;
-    }
-}
-
-ULONG FT60x_FT_SetChipConfiguration(HANDLE ftHandle, PVOID pvConfiguration)
-{
-    if(ftHandle == FT601_HANDLE_LIBUSB) {
-        return ioctl((int)(QWORD)ftHandle, 1, pvConfiguration) ? 0x20 : 0;
-    } else {
-        return (fpga_set_chip_configuration(pvConfiguration) == -1) ? 0x20 : 0;
-    }
-}
-
-ULONG FT60x_FT_SetSuspendTimeout(HANDLE ftHandle, ULONG Timeout)
-{
-    // dummy function, only here for compatibility in Linux case
-    return 0;
-}
-
-ULONG FT60x_FT_AbortPipe(HANDLE ftHandle, UCHAR ucPipeID)
-{
-    // dummy function, only here for compatibility in Linux case
-    return 0;
-}
-
-ULONG FT60x_FT_WritePipe(HANDLE ftHandle, UCHAR ucPipeID, PUCHAR pucBuffer, ULONG ulBufferLength, PULONG pulBytesTransferred, PVOID pOverlapped)
-{
-    int result, cbTxTotal = 0;
-    if(ftHandle == FT601_HANDLE_LIBUSB) {
-        return (fpga_write(pucBuffer, ulBufferLength, pulBytesTransferred) == -1) ? 0x20 : 0;
-    } else {
-        // NB! underlying ft60x driver cannot handle more than 0x800 bytes per write,
-        //     split larger writes into smaller writes if required.
-        while(cbTxTotal < ulBufferLength) {
-            result = write((int)(QWORD)ftHandle, pucBuffer + cbTxTotal, min(0x800, ulBufferLength - cbTxTotal));
-            if(!result) { return 0x20; } // no bytes transmitted -> error
-            cbTxTotal += result;
-        }
-        *pulBytesTransferred = cbTxTotal;
-        return 0;
-    }
-}
-
-ULONG FT60x_FT_ReadPipe2_KernelDriver(HANDLE ftHandle, UCHAR ucPipeID, PUCHAR pucBuffer, ULONG ulBufferLength, PULONG pulBytesTransferred, PVOID pOverlapped)
-{
-    int result;
-    *pulBytesTransferred = 0;
-    // NB! underlying driver have a max tranfer size in one go, multiple reads may be
-    //     required to retrieve all data - hence the loop.
-    do {
-        result = read((int)(QWORD)ftHandle, pucBuffer + *pulBytesTransferred, ulBufferLength - *pulBytesTransferred);
-        if(result > 0) {
-            *pulBytesTransferred += result;
-        }
-    } while((result > 0) && (0 == (result % 0x1000)) && (ulBufferLength > * pulBytesTransferred));
-    return (result > 0) ? 0 : 0x20;
-}
-
-ULONG FT60x_FT_ReadPipe(HANDLE ftHandle, UCHAR ucPipeID, PUCHAR pucBuffer, ULONG ulBufferLength, PULONG pulBytesTransferred, PVOID pOverlapped)
-{
-    ULONG i, result, cbRx, cbRxTotal = 0;
-    if(ftHandle == FT601_HANDLE_LIBUSB) {
-        return (fpga_read(pucBuffer, ulBufferLength, pulBytesTransferred) == -1) ? 0x20 : 0;
-    } else {
-        // NB! underlying driver won't return all data on the USB core queue in first
-        //     read so we have to read two times.
-        for(i = 0; i < 2; i++) {
-            result = FT60x_FT_ReadPipe2_KernelDriver(ftHandle, ucPipeID, pucBuffer + cbRxTotal, ulBufferLength - cbRxTotal, &cbRx, pOverlapped);
-            cbRxTotal += cbRx;
-        }
-        *pulBytesTransferred = cbRxTotal;
-        return result;
-    }
-}
-
-// ----------------------------------------------------------------------------
 // LoadLibrary / GetProcAddress facades (for FPGA functionality) below:
 // ----------------------------------------------------------------------------
 
-#define MAGIC_HMODULE_FTD3XX    0x00eeffee81635432
-
-HMODULE LoadLibrary(LPWSTR lpFileName)
+HMODULE LoadLibraryA(LPSTR lpFileName)
 {
-    if(lpFileName && (0 == memcmp(lpFileName, L"FTD3XX.dll", 20))) {
-        return (HMODULE)MAGIC_HMODULE_FTD3XX;
+    CHAR szFileName[2 * MAX_PATH];
+    if(lpFileName && (0 == memcmp(lpFileName, "FTD3XX.dll", 10))) {
+        lpFileName = "leechcore_ft601_driver_linux.so";
     }
-    return NULL;
+    Util_GetPathLib(szFileName);
+    strncat(szFileName, lpFileName, MAX_PATH);
+    return dlopen(szFileName, RTLD_NOW);
+}
+
+BOOL FreeLibrary(_In_ HMODULE hLibModule)
+{
+    dlclose(hLibModule);
 }
 
 FARPROC GetProcAddress(HMODULE hModule, LPSTR lpProcName)
 {
-    if(MAGIC_HMODULE_FTD3XX != (QWORD)hModule)              { return NULL; }
-    if(0 == strcmp("FT_AbortPipe", lpProcName))             { return (FARPROC)FT60x_FT_AbortPipe; }
-    if(0 == strcmp("FT_Close", lpProcName))                 { return (FARPROC)FT60x_FT_Close; }
-    if(0 == strcmp("FT_Create", lpProcName))                { return (FARPROC)FT60x_FT_Create; }
-    if(0 == strcmp("FT_GetChipConfiguration", lpProcName))  { return (FARPROC)FT60x_FT_GetChipConfiguration; }
-    if(0 == strcmp("FT_SetChipConfiguration", lpProcName))  { return (FARPROC)FT60x_FT_SetChipConfiguration; }
-    if(0 == strcmp("FT_SetSuspendTimeout", lpProcName))     { return (FARPROC)FT60x_FT_SetSuspendTimeout; }
-    if(0 == strcmp("FT_ReadPipeEx", lpProcName))            { return (FARPROC)FT60x_FT_ReadPipe; }
-    if(0 == strcmp("FT_WritePipeEx", lpProcName))           { return (FARPROC)FT60x_FT_WritePipe; }
-    return NULL;
-}
-
-BOOL GetExitCodeThread(HANDLE hThread, PDWORD lpExitCode)
-{
-    PINTERNAL_HANDLE ph = (PINTERNAL_HANDLE)hThread;
-    if(ph->type != INTERNAL_HANDLE_TYPE_THREAD) { return FALSE; }
-    *lpExitCode = (pthread_tryjoin_np((pthread_t)ph->handle, NULL) == EBUSY) ? STILL_ACTIVE : 0;
-    return TRUE;
+    return dlsym(hModule, lpProcName);
 }
 
 // ----------------------------------------------------------------------------
@@ -372,6 +251,101 @@ VOID EnterCriticalSection(LPCRITICAL_SECTION lpCriticalSection)
 VOID LeaveCriticalSection(LPCRITICAL_SECTION lpCriticalSection)
 {
     pthread_mutex_unlock(&lpCriticalSection->mutex);
+}
+
+// ----------------------------------------------------------------------------
+// EVENT AND CLOSE HANDLE functionality below:
+// ----------------------------------------------------------------------------
+
+#define OSCOMPATIBILITY_HANDLE_INTERNAL         0x35d91cca
+#define OSCOMPATIBILITY_HANDLE_TYPE_EVENTFD     1
+
+typedef struct tdHANDLE_INTERNAL {
+    DWORD magic;
+    DWORD type;
+    BOOL fEventManualReset;
+    int handle;
+} HANDLE_INTERNAL, *PHANDLE_INTERNAL;
+
+BOOL CloseHandle(_In_ HANDLE hObject)
+{
+    PHANDLE_INTERNAL hi = (PHANDLE_INTERNAL)hObject;
+    if(hi->magic != OSCOMPATIBILITY_HANDLE_INTERNAL) { return FALSE; }
+    if(hi->type == OSCOMPATIBILITY_HANDLE_TYPE_EVENTFD) {
+        close(hi->handle);
+    }
+    LocalFree(hi);
+    return TRUE;
+}
+
+BOOL SetEvent(_In_ HANDLE hEvent)
+{
+    PHANDLE_INTERNAL hi = (PHANDLE_INTERNAL)hEvent;
+    uint64_t v = 1;
+    write(hi->handle, &v, sizeof(v));
+    return TRUE;
+}
+
+// function is not thread-safe, but use case in leechcore is single-threaded
+BOOL ResetEvent(_In_ HANDLE hEvent)
+{
+    PHANDLE_INTERNAL hi = (PHANDLE_INTERNAL)hEvent;
+    uint64_t v;
+    struct pollfd fds[1];
+    fds[0].fd = hi->handle;
+    fds[0].events = POLLIN;
+    while((poll(fds, 1, 0) > 0) && (fds[0].revents & POLLIN)) {
+        read(fds[0].fd, &v, sizeof(v));
+    }
+    return TRUE;
+}
+
+HANDLE CreateEvent(_In_opt_ PVOID lpEventAttributes, _In_ BOOL bManualReset, _In_ BOOL bInitialState, _In_opt_ PVOID lpName)
+{
+    PHANDLE_INTERNAL pi;
+    pi = malloc(sizeof(HANDLE_INTERNAL));
+    pi->magic = OSCOMPATIBILITY_HANDLE_INTERNAL;
+    pi->type = OSCOMPATIBILITY_HANDLE_TYPE_EVENTFD;
+    pi->fEventManualReset = bManualReset;
+    pi->handle = eventfd(0, 0);
+    if(bInitialState) { SetEvent(pi); }
+    return pi;
+}
+
+// function is limited and not thread-safe, but use case in leechcore is single-threaded
+DWORD WaitForSingleObject(_In_ HANDLE hHandle, _In_ DWORD dwMilliseconds)
+{
+    PHANDLE_INTERNAL hi = (PHANDLE_INTERNAL)hHandle;
+    uint64_t v;
+    read(hi->handle, &v, sizeof(v));
+    return 0;
+}
+
+// function is limited and not thread-safe, but use case in leechcore is single-threaded
+DWORD WaitForMultipleObjects(_In_ DWORD nCount, HANDLE *lpHandles, _In_ BOOL bWaitAll, _In_ DWORD dwMilliseconds)
+{
+    struct pollfd fds[MAXIMUM_WAIT_OBJECTS];
+    int i;
+    uint64_t v;
+    if(bWaitAll) {
+        for(i = 0; i < nCount; i++) {
+            WaitForSingleObject(lpHandles[i], dwMilliseconds);
+        }
+        return -1;
+    }
+    for(i = 0; i < nCount; i++) {
+        fds[i].fd = ((PHANDLE_INTERNAL)lpHandles[i])->handle;
+        fds[i].events = POLLIN;
+    }
+    if(poll(fds, 1, -1) > 0) {
+        for(i = 0; i < nCount; i++) {
+            if((fds[0].revents & POLLIN)) {
+                read(fds[i].fd, &v, sizeof(v));
+                return i;
+            }
+        }
+    }
+    return -1;
 }
 
 #endif /* LINUX */

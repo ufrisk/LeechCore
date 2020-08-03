@@ -3,10 +3,13 @@
 // (c) Ulf Frisk, 2018-2020
 // Author: Ulf Frisk, pcileech@frizk.net
 //
-#ifdef _WIN32
-#include "device.h"
-#include "memmap.h"
+#include "leechcore.h"
+#include "leechcore_device.h"
+#include "leechcore_internal.h"
 #include "util.h"
+#ifdef _WIN32
+
+DWORD g_cDevicePMEM = 0;
 
 //-----------------------------------------------------------------------------
 // MEMORY INFO STRUCT FROM WINPMEM HEADER BELOW:
@@ -68,88 +71,32 @@ typedef struct tdDEVICE_CONTEXT_PMEM {
 // GENERAL FUNCTIONALITY BELOW:
 //-----------------------------------------------------------------------------
 
-VOID DevicePMEM_ReadScatterMEM(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_ DWORD cpMEMs)
+VOID DevicePMEM_ReadScatter(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cpMEMs, _Inout_ PPMEM_SCATTER ppMEMs)
 {
-    PDEVICE_CONTEXT_PMEM ctx = (PDEVICE_CONTEXT_PMEM)ctxDeviceMain->hDevice;
-    DWORD i, cbToRead;
-    PMEM_IO_SCATTER_HEADER pMEM;
+    PDEVICE_CONTEXT_PMEM ctx = (PDEVICE_CONTEXT_PMEM)ctxLC->hDevice;
+    DWORD i, cbRead;
+    PMEM_SCATTER pMEM;
     LARGE_INTEGER qwA_LI;
-    BOOL fResultRead;
     for(i = 0; i < cpMEMs; i++) {
         pMEM = ppMEMs[i];
-        if(pMEM->cb == pMEM->cbMax) { continue; }
-        if(!MemMap_VerifyTranslateMEM(pMEM, NULL)) {
-            if(pMEM->cbMax && (pMEM->cb < pMEM->cbMax)) {
-                vprintfvvv("device_pmem.c!DevicePMEM_ReadScatterMEM: FAILED: no memory at address %016llx\n", pMEM->qwA);
-            }
-            continue;
-        }
-        if(pMEM->qwA >= ctx->paMax) { continue; }
-        cbToRead = (DWORD)min(pMEM->cb, ctx->paMax - pMEM->qwA);
+        if(pMEM->f || MEM_SCATTER_ADDR_ISINVALID(pMEM)) { continue; }
         qwA_LI.QuadPart = pMEM->qwA;
         SetFilePointerEx(ctx->hFile, qwA_LI, NULL, FILE_BEGIN);
-        fResultRead = ReadFile(ctx->hFile, pMEM->pb, pMEM->cbMax, &pMEM->cb, NULL);
-        if(fResultRead) {
-            if(ctxDeviceMain->fVerboseExtraTlp) {
-                vprintf_fn(
-                    "READ:\n        offset=%016llx req_len=%08x rsp_len=%08x\n",
+        pMEM->f = ReadFile(ctx->hFile, pMEM->pb, pMEM->cb, &cbRead, NULL);
+        if(pMEM->f) {
+            if(ctxLC->fPrintf[LC_PRINTF_VVV]) {
+                lcprintf_fn(
+                    ctxLC,
+                    "READ:\n        offset=%016llx req_len=%08x\n",
                     pMEM->qwA,
-                    pMEM->cbMax,
                     pMEM->cb
                 );
-                Util_PrintHexAscii(pMEM->pb, pMEM->cb, 0);
+                Util_PrintHexAscii(ctxLC, pMEM->pb, pMEM->cb, 0);
             }
         } else {
-            vprintfvvv_fn("READ FAILED:\n        offset=%016llx req_len=%08x\n", pMEM->qwA, pMEM->cbMax);
+            lcprintfvvv_fn(ctxLC, "READ FAILED:\n        offset=%016llx req_len=%08x\n", pMEM->qwA, pMEM->cb);
         }
     }
-}
-
-_Success_(return)
-BOOL DevicePMEM_GetOption(_In_ QWORD fOption, _Out_ PQWORD pqwValue)
-{
-    PDEVICE_CONTEXT_PMEM ctx = (PDEVICE_CONTEXT_PMEM)ctxDeviceMain->hDevice;
-    if(fOption == LEECHCORE_OPT_MEMORYINFO_VALID) {
-        *pqwValue = 1;
-        return TRUE;
-    }
-    switch(fOption) {
-        case LEECHCORE_OPT_MEMORYINFO_ADDR_MAX:
-            *pqwValue = ctx->paMax;
-            return TRUE;
-        case LEECHCORE_OPT_MEMORYINFO_FLAG_32BIT:
-            *pqwValue = 0; // only 64-bit supported currently
-            return TRUE;
-        case LEECHCORE_OPT_MEMORYINFO_FLAG_PAE:
-            *pqwValue = 0;
-            return TRUE;
-        case LEECHCORE_OPT_MEMORYINFO_OS_VERSION_MINOR:
-            *pqwValue = ctx->MemoryInfo.NtBuildNumber.HighPart;
-            return TRUE;
-        case LEECHCORE_OPT_MEMORYINFO_OS_VERSION_MAJOR:
-            *pqwValue = ctx->MemoryInfo.NtBuildNumber.LowPart;
-            return TRUE;
-        case LEECHCORE_OPT_MEMORYINFO_OS_DTB:
-            *pqwValue = ctx->MemoryInfo.CR3.QuadPart;
-            return TRUE;
-        case LEECHCORE_OPT_MEMORYINFO_OS_PFN:
-            *pqwValue = ctx->MemoryInfo.PfnDataBase.QuadPart;
-            return TRUE;
-        case LEECHCORE_OPT_MEMORYINFO_OS_PsLoadedModuleList:
-            *pqwValue = ctx->MemoryInfo.PsLoadedModuleList.QuadPart;
-            return TRUE;
-        case LEECHCORE_OPT_MEMORYINFO_OS_PsActiveProcessHead:
-            *pqwValue = ctx->MemoryInfo.PsActiveProcessHead.QuadPart;
-            return TRUE;
-        case LEECHCORE_OPT_MEMORYINFO_OS_MACHINE_IMAGE_TP:
-            *pqwValue = 0x8664; // only 64-bit supported currently
-            return TRUE;
-        case LEECHCORE_OPT_MEMORYINFO_OS_KERNELBASE:
-            *pqwValue = ctx->MemoryInfo.KernBase.QuadPart;
-            return TRUE;
-    }
-    *pqwValue = 0;
-    return FALSE;
 }
 
 /*
@@ -172,31 +119,45 @@ VOID DevicePMEM_SvcClose()
 }
 
 /*
+* Is pmem service running (kernel driver loaded).
+*/
+BOOL DevicePMEM_SvcStatusRunning()
+{
+    BOOL fResult = FALSE;
+    SC_HANDLE hSCM, hSvcPMem;
+    if((hSCM = OpenSCManager(NULL, NULL, SC_MANAGER_CREATE_SERVICE))) {
+        if((hSvcPMem = OpenServiceA(hSCM, DEVICEPMEM_SERVICENAME, SERVICE_ALL_ACCESS))) {
+            if(hSvcPMem) { CloseServiceHandle(hSvcPMem); }
+            fResult = TRUE;
+        }
+        CloseServiceHandle(hSCM);
+    }
+    return fResult;
+}
+
+/*
 * Create the winpmem kernel driver loader service and load the kernel driver
 * into the kernel. Upon fail it's guaranteed that no lingering service exists.
 */
 _Success_(return)
-BOOL DevicePMEM_SvcStart()
+BOOL DevicePMEM_SvcStart(_In_ PLC_CONTEXT ctxLC)
 {
-    PDEVICE_CONTEXT_PMEM ctx = (PDEVICE_CONTEXT_PMEM)ctxDeviceMain->hDevice;
+    PDEVICE_CONTEXT_PMEM ctx = (PDEVICE_CONTEXT_PMEM)ctxLC->hDevice;
     DWORD i, dwWinErr;
     CHAR szDriverFile[MAX_PATH] = { 0 };
     FILE *pDriverFile = NULL;
-    HMODULE hModuleLeechCore;
     SC_HANDLE hSCM = 0, hSvcPMem = 0;
     BOOL f64;
     // 1: verify that driver file exists.
-    if(!_strnicmp("pmem://", ctxDeviceMain->cfg.szDevice, 7)) {
-        strcat_s(szDriverFile, _countof(szDriverFile), ctxDeviceMain->cfg.szDevice + 7);
+    if(!_strnicmp("pmem://", ctxLC->Config.szDevice, 7)) {
+        strcat_s(szDriverFile, _countof(szDriverFile), ctxLC->Config.szDevice + 7);
     } else {
         // NB! defaults to locating driver .sys file relative to the loaded
         // 'leechcore.dll' - if unable to locate library (for whatever reason)
         // defaults will be to try to loade relative to executable (NULL).
         f64 = Util_IsPlatformBitness64();
         for(i = 0; i < (sizeof(szDEVICEPMEM_DRIVERFILE[f64 ? 1 : 0]) / sizeof(LPCSTR)); i++) {
-            hModuleLeechCore = LoadLibraryA("leechcore.dll");
-            Util_GetPathDll(szDriverFile, hModuleLeechCore);
-            if(hModuleLeechCore) { FreeLibrary(hModuleLeechCore); }
+            Util_GetPathLib(szDriverFile);
             strcat_s(szDriverFile, _countof(szDriverFile), szDEVICEPMEM_DRIVERFILE[f64 ? 1 : 0][i]);
             if(!fopen_s(&pDriverFile, szDriverFile, "rb") && pDriverFile) {
                 fclose(pDriverFile);
@@ -207,7 +168,7 @@ BOOL DevicePMEM_SvcStart()
         }
     }
     if(fopen_s(&pDriverFile, szDriverFile, "rb") || !pDriverFile) {
-        vprintf(
+        lcprintf(ctxLC,
             "DEVICE: ERROR: unable to locate the winpmem driver file '%s'.\n",
             szDriverFile);
         return FALSE;
@@ -215,7 +176,7 @@ BOOL DevicePMEM_SvcStart()
     fclose(pDriverFile);
     // 2: create and start service to load driver into kernel.
     if(!(hSCM = OpenSCManagerA(NULL, NULL, SC_MANAGER_CREATE_SERVICE))) {
-        vprintf("DEVICE: ERROR: unable to load driver - not running as elevated administrator?\n");
+        lcprintf(ctxLC, "DEVICE: ERROR: unable to load driver - not running as elevated administrator?\n");
         return FALSE;
     }
     hSvcPMem = CreateServiceA(
@@ -236,19 +197,19 @@ BOOL DevicePMEM_SvcStart()
         if((dwWinErr = GetLastError()) == ERROR_SERVICE_EXISTS) {
             hSvcPMem = OpenServiceA(hSCM, DEVICEPMEM_SERVICENAME, SERVICE_ALL_ACCESS);
         } else {
-            vprintf(
+            lcprintf(ctxLC,
                 "DEVICE: ERROR: Unable create service required to load driver.\n"
                 "Is project executable running from the C:\\ drive ?\n");
-            vprintfv("DEVICE: ERROR: LastError: 0x%08x\n", dwWinErr);
+            lcprintfv(ctxLC, "DEVICE: ERROR: LastError: 0x%08x\n", dwWinErr);
             CloseServiceHandle(hSCM);
             return FALSE;
         }
     }
     if(!StartServiceA(hSvcPMem, 0, NULL) && ((dwWinErr = GetLastError()) != ERROR_SERVICE_ALREADY_RUNNING)) {
-        vprintf(
+        lcprintf(ctxLC,
             "DEVICE: ERROR: Unable to load driver into kernel.\n"
             "Is project executable running from the C:\\ drive ?\n");
-        vprintfv("DEVICE: ERROR: LastError: 0x%08x\n", dwWinErr);
+        lcprintfv(ctxLC, "DEVICE: ERROR: LastError: 0x%08x\n", dwWinErr);
         CloseServiceHandle(hSvcPMem);
         CloseServiceHandle(hSCM);
         DevicePMEM_SvcClose();
@@ -275,84 +236,123 @@ BOOL DevicePMEM_SvcStart()
 /*
 * Close the PMEM device and clean up both context and any kernel drivers.
 */
-VOID DevicePMEM_Close()
+VOID DevicePMEM_Close(_Inout_ PLC_CONTEXT ctxLC)
 {
-    PDEVICE_CONTEXT_PMEM ctx = (PDEVICE_CONTEXT_PMEM)ctxDeviceMain->hDevice;
-    DevicePMEM_SvcClose();
+    PDEVICE_CONTEXT_PMEM ctx = (PDEVICE_CONTEXT_PMEM)ctxLC->hDevice;
+    if(0 == --g_cDevicePMEM) {
+        DevicePMEM_SvcClose();
+    }
     if(ctx) {
         CloseHandle(ctx->hFile);
-        MemMap_Close();
         LocalFree(ctx);
     }
-    ctxDeviceMain->hDevice = 0;
+    ctxLC->hDevice = 0;
 }
 
 _Success_(return)
-BOOL DevicePMEM_GetMemoryInformation()
+BOOL DevicePMEM_GetMemoryInformation(_Inout_ PLC_CONTEXT ctxLC)
 {
-    PDEVICE_CONTEXT_PMEM ctx = (PDEVICE_CONTEXT_PMEM)ctxDeviceMain->hDevice;
+    PDEVICE_CONTEXT_PMEM ctx = (PDEVICE_CONTEXT_PMEM)ctxLC->hDevice;
     DWORD i, cbRead;
     // 1: retrieve information from kernel driver
     if(!DeviceIoControl(ctx->hFile, PMEM_INFO_IOCTRL, NULL, 0, &ctx->MemoryInfo, sizeof(ctx->MemoryInfo), &cbRead, NULL)) {
-        vprintf("DEVICE: ERROR: Unable to communicate with winpmem driver.\n");
+        lcprintf(ctxLC, "DEVICE: ERROR: Unable to communicate with winpmem driver.\n");
         return FALSE;
     }
     // 2: sanity checks
-    if(ctx->MemoryInfo.NumberOfRuns.QuadPart > 100) {
-        vprintf("DEVICE: ERROR: too many memory segments reported from winpmem driver. (%lli)\n", ctx->MemoryInfo.NumberOfRuns.QuadPart);
+    if((ctx->MemoryInfo.NumberOfRuns.QuadPart == 0) || (ctx->MemoryInfo.NumberOfRuns.QuadPart > 100)) {
+        lcprintf(ctxLC, "DEVICE: ERROR: too few/many memory segments reported from winpmem driver. (%lli)\n", ctx->MemoryInfo.NumberOfRuns.QuadPart);
         return FALSE;
     }
     // 3: parse memory ranges
-    MemMap_Initialize(0x0000ffffffffffff);
     for(i = 0; i < ctx->MemoryInfo.NumberOfRuns.QuadPart; i++) {
-        if(!MemMap_AddRange(ctx->MemoryInfo.Run[i].start, ctx->MemoryInfo.Run[i].length, ctx->MemoryInfo.Run[i].start)) {
-            vprintf("DEVICE: FAIL: unable to add range to memory map. (%016llx %016llx %016llx)\n", ctx->MemoryInfo.Run[i].start, ctx->MemoryInfo.Run[i].length, ctx->MemoryInfo.Run[i].start);
+        if(!LcMemMap_AddRange(ctxLC, ctx->MemoryInfo.Run[i].start, ctx->MemoryInfo.Run[i].length, ctx->MemoryInfo.Run[i].start)) {
+            lcprintf(ctxLC, "DEVICE: FAIL: unable to add range to memory map. (%016llx %016llx %016llx)\n", ctx->MemoryInfo.Run[i].start, ctx->MemoryInfo.Run[i].length, ctx->MemoryInfo.Run[i].start);
             return FALSE;
         }
     }
-    MemMap_GetMaxAddress(&ctx->paMax);
     return TRUE;
 }
 
 _Success_(return)
-BOOL DevicePMEM_Open()
+BOOL DevicePMEM_GetOption(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _Out_ PQWORD pqwValue)
+{
+    PDEVICE_CONTEXT_PMEM ctx = (PDEVICE_CONTEXT_PMEM)ctxLC->hDevice;
+    if(fOption == LC_OPT_MEMORYINFO_VALID) {
+        *pqwValue = 1;
+        return TRUE;
+    }
+    switch(fOption) {
+        case LC_OPT_MEMORYINFO_FLAG_32BIT:
+            *pqwValue = 0; // only 64-bit supported currently
+            return TRUE;
+        case LC_OPT_MEMORYINFO_FLAG_PAE:
+            *pqwValue = 0;
+            return TRUE;
+        case LC_OPT_MEMORYINFO_OS_VERSION_MINOR:
+            *pqwValue = ctx->MemoryInfo.NtBuildNumber.HighPart;
+            return TRUE;
+        case LC_OPT_MEMORYINFO_OS_VERSION_MAJOR:
+            *pqwValue = ctx->MemoryInfo.NtBuildNumber.LowPart;
+            return TRUE;
+        case LC_OPT_MEMORYINFO_OS_DTB:
+            *pqwValue = ctx->MemoryInfo.CR3.QuadPart;
+            return TRUE;
+        case LC_OPT_MEMORYINFO_OS_PFN:
+            *pqwValue = ctx->MemoryInfo.PfnDataBase.QuadPart;
+            return TRUE;
+        case LC_OPT_MEMORYINFO_OS_PsLoadedModuleList:
+            *pqwValue = ctx->MemoryInfo.PsLoadedModuleList.QuadPart;
+            return TRUE;
+        case LC_OPT_MEMORYINFO_OS_PsActiveProcessHead:
+            *pqwValue = ctx->MemoryInfo.PsActiveProcessHead.QuadPart;
+            return TRUE;
+        case LC_OPT_MEMORYINFO_OS_MACHINE_IMAGE_TP:
+            *pqwValue = 0x8664; // only 64-bit supported currently
+            return TRUE;
+        case LC_OPT_MEMORYINFO_OS_KERNELBASE:
+            *pqwValue = ctx->MemoryInfo.KernBase.QuadPart;
+            return TRUE;
+    }
+    *pqwValue = 0;
+    return FALSE;
+}
+
+_Success_(return)
+BOOL DevicePMEM_Open(_Inout_ PLC_CONTEXT ctxLC)
 {
     BOOL result;
     PDEVICE_CONTEXT_PMEM ctx;
-    // 1: terminate any lingering winpmem service.
-    DevicePMEM_SvcClose();
-    // 2: initialize core context.
+    // 1: initialize core context.
     ctx = (PDEVICE_CONTEXT_PMEM)LocalAlloc(LMEM_ZEROINIT, sizeof(DEVICE_CONTEXT_PMEM));
     if(!ctx) { return FALSE; }
-    ctxDeviceMain->hDevice = (HANDLE)ctx;
+    ctxLC->hDevice = (HANDLE)ctx;
     // set callback functions and fix up config
-    ctxDeviceMain->cfg.tpDevice = LEECHCORE_DEVICE_PMEM;
-    ctxDeviceMain->cfg.fVolatile = TRUE;
-    ctxDeviceMain->pfnClose = DevicePMEM_Close;
-    ctxDeviceMain->pfnReadScatterMEM = DevicePMEM_ReadScatterMEM;
-    ctxDeviceMain->pfnGetOption = DevicePMEM_GetOption;
-    // 3: load winpmem kernel driver.
-    result = DevicePMEM_SvcStart();
-    // 4: retrieve memory map.
-    result = result && DevicePMEM_GetMemoryInformation();
+    ctxLC->Config.fVolatile = TRUE;
+    ctxLC->pfnClose = DevicePMEM_Close;
+    ctxLC->pfnReadScatter = DevicePMEM_ReadScatter;
+    ctxLC->pfnGetOption = DevicePMEM_GetOption;
+    // 2: load winpmem kernel driver.
+    g_cDevicePMEM++;
+    result = DevicePMEM_SvcStatusRunning() || DevicePMEM_SvcStart(ctxLC);
+    // 3: retrieve memory map.
+    result = result && DevicePMEM_GetMemoryInformation(ctxLC);
     if(!result) {
-        DevicePMEM_Close();
+        DevicePMEM_Close(ctxLC);
         return FALSE;
     }
-    ctxDeviceMain->cfg.paMaxNative = ctx->paMax;
-    vprintfv("DEVICE: Successfully loaded winpmem memory acquisition driver.\n");
+    lcprintfv(ctxLC, "DEVICE: Successfully loaded winpmem memory acquisition driver.\n");
     return TRUE;
 }
 
 #endif /* _WIN32 */
-#if defined(LINUX) || defined(ANDROID)
-#include "device.h"
+#ifdef LINUX
 
 _Success_(return)
-BOOL DevicePMEM_Open()
+BOOL DevicePMEM_Open(_Inout_ PLC_CONTEXT ctxLC)
 {
-    vprintfv("DEVICE: FAIL: 'pmem' memory acquisition only supported on Windows.\n");
+    lcprintfv(ctxLC, "DEVICE: FAIL: 'pmem' memory acquisition only supported on Windows.\n");
     return FALSE;
 }
 
-#endif /* LINUX || ANDROID */
+#endif /* LINUX */

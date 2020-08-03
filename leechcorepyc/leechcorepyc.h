@@ -6,6 +6,7 @@
 #ifndef __LEECHCOREPYC_H__
 #define __LEECHCOREPYC_H__
 #include <Windows.h>
+#include <leechcore.h>
 
 /*
 * Initialize and clean up the standard output from the embedded Python console

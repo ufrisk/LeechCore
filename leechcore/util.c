@@ -4,7 +4,47 @@
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include "util.h"
-#include "device.h"
+
+/*
+* Retrieve the operating system path of the directory which is containing this:
+* a) .dll file (Windows)
+* b) executable file (Linux)
+* -- szPath
+*/
+VOID Util_GetPathLib(_Out_writes_(MAX_PATH) PCHAR szPath)
+{
+    SIZE_T i;
+    ZeroMemory(szPath, MAX_PATH);
+#ifdef _WIN32
+    HMODULE hModuleLeechCore;
+    hModuleLeechCore = LoadLibraryA("lc.dll");
+    GetModuleFileNameA(hModuleLeechCore, szPath, MAX_PATH - 4);
+    if(hModuleLeechCore) { FreeLibrary(hModuleLeechCore); }
+#endif /* _WIN32 */
+#ifdef LINUX
+    readlink("/proc/self/exe", szPath, MAX_PATH - 4);
+#endif /* LINUX */
+    for(i = strlen(szPath) - 1; i > 0; i--) {
+        if(szPath[i] == '/' || szPath[i] == '\\') {
+            szPath[i + 1] = '\0';
+            return;
+        }
+    }
+}
+
+/*
+* Try retrieve a numerical value from sz. If sz starts with '0x' it will be
+* interpreted as hex (base 16), otherwise decimal (base 10).
+* -- sz
+* -- return
+*/
+QWORD Util_GetNumericA(_In_ LPSTR sz)
+{
+    BOOL fhex = sz[0] && sz[1] && (sz[0] == '0') && ((sz[1] == 'x') || (sz[1] == 'X'));
+    return strtoull(sz, NULL, fhex ? 16 : 10);
+}
+
+//-----------------------------------------------------------------------------
 
 #define Util_2HexChar(x) (((((x) & 0xf) <= 9) ? '0' : ('a' - 10)) + ((x) & 0xf))
 
@@ -66,31 +106,27 @@ BOOL Util_FillHexAscii(_In_ PBYTE pb, _In_ DWORD cb, _In_ DWORD cbInitialOffset,
     return TRUE;
 }
 
-VOID Util_PrintHexAscii(_In_ PBYTE pb, _In_ DWORD cb, _In_ DWORD cbInitialOffset)
+VOID Util_PrintHexAscii(_In_opt_ PLC_CONTEXT ctxLC, _In_ PBYTE pb, _In_ DWORD cb, _In_ DWORD cbInitialOffset)
 {
     DWORD szMax;
     LPSTR sz;
     if(cb > 0x10000) {
-        vprintf("Large output. Only displaying first 65kB.\n");
+        if(ctxLC) {
+            lcprintf(ctxLC, "Large output. Only displaying first 65kB.\n");
+        } else {
+            printf("Large output. Only displaying first 65kB.\n");
+        }
         cb = 0x10000 - cbInitialOffset;
     }
     Util_FillHexAscii(pb, cb, cbInitialOffset, NULL, &szMax);
     if(!(sz = LocalAlloc(0, szMax))) { return; }
     Util_FillHexAscii(pb, cb, cbInitialOffset, sz, &szMax);
-    vprintf("%s", sz);
-    LocalFree(sz);
-}
-
-VOID Util_GetPathDll(_Out_writes_(MAX_PATH) PCHAR szPath, _In_opt_ HMODULE hModule)
-{
-    SIZE_T i;
-    GetModuleFileNameA(hModule, szPath, MAX_PATH - 4);
-    for(i = strlen(szPath) - 1; i > 0; i--) {
-        if(szPath[i] == '/' || szPath[i] == '\\') {
-            szPath[i + 1] = '\0';
-            return;
-        }
+    if(ctxLC) {
+        lcprintf(ctxLC, "%s", sz);
+    } else {
+        printf("%s", sz);
     }
+    LocalFree(sz);
 }
 
 VOID Util_Split2(_In_ LPSTR sz, CHAR chDelimiter, _Out_writes_(MAX_PATH) PCHAR _szBuf, _Out_ LPSTR *psz1, _Out_ LPSTR *psz2)
@@ -149,15 +185,6 @@ VOID Util_GenRandom(_Out_ PBYTE pb, _In_ DWORD cb)
     }
 }
 
-QWORD Util_GetNumericA(_In_ LPSTR sz)
-{
-    if((strlen(sz) > 1) && (sz[0] == '0') && ((sz[1] == 'x') || (sz[1] == 'X'))) {
-        return strtoull(sz, NULL, 16); // Hex (starts with 0x)
-    } else {
-        return strtoull(sz, NULL, 10); // Not Hex -> try Decimal
-    }
-}
-
 BOOL Util_IsPlatformBitness64()
 {
     BOOL f64 = TRUE;
@@ -174,18 +201,3 @@ BOOL Util_IsProgramBitness64()
 #endif /* _WIN64 */
     return TRUE;
 }
-
-#ifdef _WIN32
-
-_Success_(return)
-BOOL Util_GetBytesPipe(_In_ HANDLE hPipe_Rd, _Out_writes_opt_(cb) PBYTE pb, _In_ DWORD cb)
-{
-    DWORD cbReadTotal = 0, cbRead = 0;
-    while((cbReadTotal < cb) && ReadFile(hPipe_Rd, pb + cbReadTotal, cb - cbReadTotal, &cbRead, NULL)) {
-        cbReadTotal += cbRead;
-    }
-    return (cb == cbReadTotal);
-}
-
-#endif /* _WIN32 */
-

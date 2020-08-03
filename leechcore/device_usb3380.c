@@ -3,8 +3,10 @@
 // (c) Ulf Frisk, 2017-2020
 // Author: Ulf Frisk, pcileech@frizk.net
 //
-#include "device.h"
-#include "memmap.h"
+#include "leechcore.h"
+#include "leechcore_device.h"
+#include "leechcore_internal.h"
+#include "oscompatibility.h"
 
 #define USB3380_MAX_PAGES_READ              0x1000
 
@@ -59,25 +61,11 @@ EP_INFO CEP_INFO[3] = {
     {.pipe = USB_EP_DMAIN3,.rCTL = REG_DMACTL_3,.rSTAT = REG_DMASTAT_3,.rCOUNT = REG_DMACOUNT_3,.rADDR = REG_DMAADDR_3 }
 };
 
-typedef struct tdThreadDataReadEP {
-    DWORD iEP;
-    DWORD pa;
-    DWORD cb;
-    PBYTE pb;
-    BOOL isFinished;
-    BOOL result;
-    PPMEM_IO_SCATTER_HEADER ppMEMs;
-    DWORD cpMEMs;
-} THREAD_DATA_READ_EP, *PTHREAD_DATA_READ_EP;
-
 typedef struct _DEVICE_DATA {
     BOOL HandlesOpen;
-    BOOL fMultiThreadDMA;
     WINUSB_INTERFACE_HANDLE WinusbHandle;
     HANDLE DeviceHandle;
     WCHAR DevicePath[MAX_PATH];
-    THREAD_DATA_READ_EP ptd[3];
-    BYTE pb18M[0x01200000];
 } DEVICE_DATA, *PDEVICE_DATA;
 
 #pragma pack(push, 1) /* DISABLE STRUCT PADDINGS (REENABLE AFTER STRUCT DEFINITIONS) */
@@ -102,9 +90,9 @@ DEVICE_MEMORY_RANGE CDEVICE_RESERVED_MEMORY_RANGES[NUMBER_OF_DEVICE_RESERVED_MEM
 };
 
 _Success_(return)
-BOOL Device3380_WriteCsr(_In_ WORD wRegAddr, _In_ DWORD dwRegValue, _In_ BYTE fCSR)
+BOOL Device3380_WriteCsr(_In_ PLC_CONTEXT ctxLC, _In_ WORD wRegAddr, _In_ DWORD dwRegValue, _In_ BYTE fCSR)
 {
-    PDEVICE_DATA ctx = (PDEVICE_DATA)ctxDeviceMain->hDevice;
+    PDEVICE_DATA ctx = (PDEVICE_DATA)ctxLC->hDevice;
     DWORD cbTransferred;
     PIPE_SEND_CSR_WRITE ps = { .u1 = fCSR | 0x40,.u2 = 0,.u3 = wRegAddr & 0xFF,.u4 = (wRegAddr >> 8) & 0xFF,.dwRegValue = dwRegValue };
     if(wRegAddr & 0x03) { return FALSE; } // must be dword aligned
@@ -112,9 +100,9 @@ BOOL Device3380_WriteCsr(_In_ WORD wRegAddr, _In_ DWORD dwRegValue, _In_ BYTE fC
 }
 
 _Success_(return)
-BOOL Device3380_ReadCsr(_In_ WORD wRegAddr, _Out_ PDWORD pdwRegValue, _In_ BYTE fCSR)
+BOOL Device3380_ReadCsr(_In_ PLC_CONTEXT ctxLC, _In_ WORD wRegAddr, _Out_ PDWORD pdwRegValue, _In_ BYTE fCSR)
 {
-    PDEVICE_DATA ctx = (PDEVICE_DATA)ctxDeviceMain->hDevice;
+    PDEVICE_DATA ctx = (PDEVICE_DATA)ctxLC->hDevice;
     DWORD cbTransferred;
     PIPE_SEND_CSR_WRITE ps = { .u1 = fCSR | 0xcf,.u2 = 0,.u3 = wRegAddr & 0xff,.u4 = (wRegAddr >> 8) & 0xff,.dwRegValue = 0 };
     if(wRegAddr & 0x03) { return FALSE; } // must be dword aligned
@@ -123,274 +111,108 @@ BOOL Device3380_ReadCsr(_In_ WORD wRegAddr, _Out_ PDWORD pdwRegValue, _In_ BYTE 
         WinUsb_ReadPipe(ctx->WinusbHandle, USB_EP_CSRIN, (PUCHAR)pdwRegValue, 4, &cbTransferred, NULL);
 }
 
-_Success_(return)
-BOOL Device3380_ReadDMA_Retry(PTHREAD_DATA_READ_EP ptd)
+VOID Device3380_ReadContigious_Retry(_Inout_ PLC_READ_CONTIGIOUS_CONTEXT ctxRC)
 {
-    PDEVICE_DATA ctx = (PDEVICE_DATA)ctxDeviceMain->hDevice;
-    BOOL result;
-    DWORD cbTransferred;
-    Device3380_WriteCsr(CEP_INFO[ptd->iEP].rCTL, 0xc2, CSR_CONFIGSPACE_MEMM | CSR_BYTE0); // DMA_ENABLE
-    Device3380_WriteCsr(CEP_INFO[ptd->iEP].rADDR, ptd->pa, CSR_CONFIGSPACE_MEMM | CSR_BYTEALL); // DMA_ADDRESS
-    Device3380_WriteCsr(CEP_INFO[ptd->iEP].rCOUNT, 0x40000000 | ptd->cb, CSR_CONFIGSPACE_MEMM | CSR_BYTEALL); // DMA_COUNT
-    Device3380_WriteCsr(CEP_INFO[ptd->iEP].rSTAT, 0x080000c1, CSR_CONFIGSPACE_MEMM | CSR_BYTE0 | CSR_BYTE3); // DMA_START & DMA_CLEAR_ABORT
-    Device3380_WriteCsr(REG_PCI_STATCMD, 0x07, CSR_CONFIGSPACE_PCIE | CSR_BYTE0); // BUS_MASTER ??? needed ???
-    result = WinUsb_ReadPipe(ctx->WinusbHandle, CEP_INFO[ptd->iEP].pipe, ptd->pb, ptd->cb, &cbTransferred, NULL);
-    return result;
+    PDEVICE_DATA ctx = (PDEVICE_DATA)ctxRC->ctxLC->hDevice;
+    Device3380_WriteCsr(ctxRC->ctxLC, CEP_INFO[ctxRC->iRL].rCTL, 0xc2, CSR_CONFIGSPACE_MEMM | CSR_BYTE0); // DMA_ENABLE
+    Device3380_WriteCsr(ctxRC->ctxLC, CEP_INFO[ctxRC->iRL].rADDR, (DWORD)ctxRC->paBase, CSR_CONFIGSPACE_MEMM | CSR_BYTEALL); // DMA_ADDRESS
+    Device3380_WriteCsr(ctxRC->ctxLC, CEP_INFO[ctxRC->iRL].rCOUNT, 0x40000000 | ctxRC->cb, CSR_CONFIGSPACE_MEMM | CSR_BYTEALL); // DMA_COUNT
+    Device3380_WriteCsr(ctxRC->ctxLC, CEP_INFO[ctxRC->iRL].rSTAT, 0x080000c1, CSR_CONFIGSPACE_MEMM | CSR_BYTE0 | CSR_BYTE3); // DMA_START & DMA_CLEAR_ABORT
+    Device3380_WriteCsr(ctxRC->ctxLC, REG_PCI_STATCMD, 0x07, CSR_CONFIGSPACE_PCIE | CSR_BYTE0); // BUS_MASTER ??? needed ???
+    WinUsb_ReadPipe(ctx->WinusbHandle, CEP_INFO[ctxRC->iRL].pipe, ctxRC->pb, ctxRC->cb, &ctxRC->cbRead, NULL);
 }
 
-VOID Device3380_ReadDMA2(PTHREAD_DATA_READ_EP ptd)
+VOID Device3380_ReadContigious(_Inout_ PLC_READ_CONTIGIOUS_CONTEXT ctxRC)
 {
-    PDEVICE_DATA ctx = (PDEVICE_DATA)ctxDeviceMain->hDevice;
-    DWORD dwTimeout, cbTransferred;
+    PDEVICE_DATA ctx = (PDEVICE_DATA)ctxRC->ctxLC->hDevice;
+    DWORD dwTimeout;
     // set EP timeout value on conservative usb2 assumptions (3 parallel reads, 35MB/s total speed)
     // (XMB * 1000 * 3) / (35 * 1024 * 1024) -> 0x2fc9 ~> 0x3000 :: 4k->64ms, 5.3M->520ms
-    dwTimeout = 64 + ptd->cb / 0x3000;
-    WinUsb_SetPipePolicy(ctx->WinusbHandle, CEP_INFO[ptd->iEP].pipe, PIPE_TRANSFER_TIMEOUT, (ULONG)sizeof(BOOL), &dwTimeout);
+    dwTimeout = 64 + ctxRC->cb / 0x3000;
+    WinUsb_SetPipePolicy(ctx->WinusbHandle, CEP_INFO[ctxRC->iRL].pipe, PIPE_TRANSFER_TIMEOUT, (ULONG)sizeof(BOOL), &dwTimeout);
     // perform memory read
-    Device3380_WriteCsr(CEP_INFO[ptd->iEP].rADDR, ptd->pa, CSR_CONFIGSPACE_MEMM | CSR_BYTEALL); // DMA_ADDRESS
-    Device3380_WriteCsr(CEP_INFO[ptd->iEP].rCOUNT, 0x40000000 | ptd->cb, CSR_CONFIGSPACE_MEMM | CSR_BYTEALL); // DMA_COUNT
-    Device3380_WriteCsr(CEP_INFO[ptd->iEP].rSTAT, 0x080000c1, CSR_CONFIGSPACE_MEMM | CSR_BYTE0 | CSR_BYTE3); // DMA_START & DMA_CLEAR_ABORT
-    ptd->result = WinUsb_ReadPipe(ctx->WinusbHandle, CEP_INFO[ptd->iEP].pipe, ptd->pb, ptd->cb, &cbTransferred, NULL);
-    if(!ptd->result) {
-        ptd->result = Device3380_ReadDMA_Retry(ptd);
-    }
-    ptd->isFinished = TRUE;
-}
-
-PTHREAD_DATA_READ_EP ReadScatterGather_Thread3_Collect(_In_ BOOL fAll)
-{
-    PDEVICE_DATA ctx = (PDEVICE_DATA)ctxDeviceMain->hDevice;
-    PTHREAD_DATA_READ_EP ptd;
-    DWORD i, iMEM, cbMEM;
-    // 1: If fAll is specified wait for all reads to complete!
-    while(fAll && (!ctx->ptd[0].isFinished || !ctx->ptd[1].isFinished || !ctx->ptd[2].isFinished)) {
-        SwitchToThread();
-    }
-    // 2: Collect a single finished read and return the PTHREAD_DATA_READ_EP for re-use, or collect all reads.
-    while(TRUE) {
-        for(i = 0; i < 3; i++) {
-            ptd = ctx->ptd + i;
-            if(ptd->isFinished) {
-                if(ptd->result) {
-                    // fill successful mem reads
-                    for(iMEM = 0, cbMEM = 0; iMEM < ptd->cpMEMs; iMEM++) {
-                        ptd->ppMEMs[iMEM]->cb = ptd->ppMEMs[iMEM]->cbMax;
-                        memcpy(ptd->ppMEMs[iMEM]->pb, ptd->pb + cbMEM, ptd->ppMEMs[iMEM]->cb);
-                        cbMEM += ptd->ppMEMs[iMEM]->cb;
-                    }
-                }
-                if(!fAll) { return ptd; }  // return 1st finished 'single' for re-use if fAll not specified.
-                if(i == 2) { return ptd; } // return once all is processed if fAll is specified.
-            }
-        }
-        SwitchToThread();
-    }
-}
-
-VOID ReadScatterGather_Thread3_Queue(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_ DWORD cpMEMs, _In_ DWORD pa, _In_ DWORD cb)
-{
-    HANDLE hThread;
-    PTHREAD_DATA_READ_EP ptd = ReadScatterGather_Thread3_Collect(FALSE);
-    ptd->isFinished = FALSE;
-    ptd->result = FALSE;
-    ptd->pa = pa;
-    ptd->cb = cb;
-    ptd->ppMEMs = ppMEMs;
-    ptd->cpMEMs = cpMEMs;
-    hThread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)Device3380_ReadDMA2, ptd, 0, NULL);
-    if(hThread) { CloseHandle(hThread); }
-}
-
-VOID ReadScatterGather_Thread3(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_ DWORD cpMEMs, _In_ DWORD cbThreadLimit)
-{
-    PDEVICE_DATA ctx = (PDEVICE_DATA)ctxDeviceMain->hDevice;
-    PMEM_IO_SCATTER_HEADER pMEM;
-    QWORD i, iBase = 0;
-    DWORD c = 0, paBase = 0, cbCurrent = 0;
-    ZeroMemory(ctx->ptd, sizeof(ctx->ptd));
-    for(i = 0; i < 3; i++) {
-        ctx->ptd[i].iEP = (DWORD)i;
-        ctx->ptd[i].pb = ctx->pb18M + (i * 0x00600000); // 6MB per thread
-        ctx->ptd[i].isFinished = TRUE;
-    }
-    for(i = 0; i < cpMEMs; i++) {
-        pMEM = ppMEMs[i];
-        if(!MemMap_VerifyTranslateMEM(pMEM, NULL)) { continue; }
-        if(c == 0) {
-            if(pMEM->cbMax && (pMEM->cb != pMEM->cbMax)) {
-                c = 1;
-                iBase = i;
-                paBase = (DWORD)pMEM->qwA;
-                cbCurrent = pMEM->cbMax;
-            }
-        } else if(((QWORD)paBase + cbCurrent == pMEM->qwA) && (cbCurrent < cbThreadLimit)) {
-            c++;
-            cbCurrent += pMEM->cbMax;
-        } else {
-            ReadScatterGather_Thread3_Queue(ppMEMs + iBase, c, paBase, cbCurrent);
-            c = 0;
-            if(pMEM->cbMax && (pMEM->cb != pMEM->cbMax)) {
-                c = 1;
-                iBase = i;
-                paBase = (DWORD)pMEM->qwA;
-                cbCurrent = pMEM->cbMax;
-            }
-        }
-    }
-    if(c) {
-        ReadScatterGather_Thread3_Queue(ppMEMs + iBase, c, paBase, cbCurrent);
-    }
-    ReadScatterGather_Thread3_Collect(TRUE);
-}
-
-VOID ReadScatterGather_Thread1_QueueCollect(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_ DWORD cpMEMs, _In_ DWORD pa, _In_ DWORD cb)
-{
-    PDEVICE_DATA ctx = (PDEVICE_DATA)ctxDeviceMain->hDevice;
-    PTHREAD_DATA_READ_EP ptd = ctx->ptd;
-    DWORD iMEM, cbMEM;
-    ptd->result = FALSE;
-    ptd->pa = pa;
-    ptd->cb = cb;
-    Device3380_ReadDMA2(ptd);
-    if(ptd->result) {
-        // fill successful mem reads
-        for(iMEM = 0, cbMEM = 0; iMEM < cpMEMs; iMEM++) {
-            ppMEMs[iMEM]->cb = ppMEMs[iMEM]->cbMax;
-            memcpy(ppMEMs[iMEM]->pb, ptd->pb + cbMEM, ppMEMs[iMEM]->cb);
-            cbMEM += ppMEMs[iMEM]->cb;
-        }
-    }
-}
-
-VOID ReadScatterGather_Thread1(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_ DWORD cpMEMs)
-{
-    PDEVICE_DATA ctx = (PDEVICE_DATA)ctxDeviceMain->hDevice;
-    PTHREAD_DATA_READ_EP ptd = ctx->ptd;
-    PMEM_IO_SCATTER_HEADER pMEM;
-    DWORD i, c = 0, iBase = 0, paBase = 0, cbCurrent = 0;
-    ZeroMemory(ctx->ptd, sizeof(THREAD_DATA_READ_EP));
-    ptd->pb = ctx->pb18M;
-    for(i = 0; i < cpMEMs; i++) {
-        pMEM = ppMEMs[i];
-        if(!MemMap_VerifyTranslateMEM(pMEM, NULL)) { continue; }
-        if(c == 0) {
-            if(pMEM->cbMax && (pMEM->cb != pMEM->cbMax)) {
-                c = 1;
-                iBase = i;
-                paBase = (DWORD)pMEM->qwA;
-                cbCurrent = pMEM->cbMax;
-            }
-        } else if(((QWORD)paBase + cbCurrent == pMEM->qwA) && (cbCurrent + pMEM->cbMax <= 0x00800000)) {
-            c++;
-            cbCurrent += pMEM->cbMax;
-        } else {
-            ReadScatterGather_Thread1_QueueCollect(ppMEMs + iBase, c, paBase, cbCurrent);
-            c = 0;
-            if(pMEM->cbMax && (pMEM->cb != pMEM->cbMax)) {
-                c = 1;
-                iBase = i;
-                paBase = (DWORD)pMEM->qwA;
-                cbCurrent = pMEM->cbMax;
-            }
-        }
-    }
-    if(c) {
-        ReadScatterGather_Thread1_QueueCollect(ppMEMs + iBase, c, paBase, cbCurrent);
-    }
-}
-
-VOID Device3380_ReadScatterGather(_Inout_ PPMEM_IO_SCATTER_HEADER ppMEMs, _In_ DWORD cpMEMs)
-{
-    PDEVICE_DATA ctx = (PDEVICE_DATA)ctxDeviceMain->hDevice;
-    DWORD cbThreadLimit;
-    if(cpMEMs > USB3380_MAX_PAGES_READ) {
-        while(TRUE) {
-            Device3380_ReadScatterGather(ppMEMs, min(USB3380_MAX_PAGES_READ, cpMEMs));
-            ppMEMs = ppMEMs + min(USB3380_MAX_PAGES_READ, cpMEMs);
-            cpMEMs = cpMEMs - min(USB3380_MAX_PAGES_READ, cpMEMs);
-            if(cpMEMs == 0) { return; }
-        }
-    }
-    if(!ctx->fMultiThreadDMA || (cpMEMs <= 0x100)) {
-        ReadScatterGather_Thread1(ppMEMs, cpMEMs);
-    } else {
-        cbThreadLimit = 0x1000 * (1 + (cpMEMs / 3));
-        ReadScatterGather_Thread3(ppMEMs, cpMEMs, cbThreadLimit);
+    Device3380_WriteCsr(ctxRC->ctxLC, CEP_INFO[ctxRC->iRL].rADDR, (DWORD)ctxRC->paBase, CSR_CONFIGSPACE_MEMM | CSR_BYTEALL); // DMA_ADDRESS
+    Device3380_WriteCsr(ctxRC->ctxLC, CEP_INFO[ctxRC->iRL].rCOUNT, 0x40000000 | ctxRC->cb, CSR_CONFIGSPACE_MEMM | CSR_BYTEALL); // DMA_COUNT
+    Device3380_WriteCsr(ctxRC->ctxLC, CEP_INFO[ctxRC->iRL].rSTAT, 0x080000c1, CSR_CONFIGSPACE_MEMM | CSR_BYTE0 | CSR_BYTE3); // DMA_START & DMA_CLEAR_ABORT
+    if(!WinUsb_ReadPipe(ctx->WinusbHandle, CEP_INFO[ctxRC->iRL].pipe, ctxRC->pb, ctxRC->cb, &ctxRC->cbRead, NULL)) {
+        Device3380_ReadContigious_Retry(ctxRC);
     }
 }
 
 _Success_(return)
-BOOL Device3380_WriteDMA(_In_ QWORD pa, _In_reads_(cb) PBYTE pb, _In_ DWORD cb)
+BOOL Device3380_Write(_In_ PLC_CONTEXT ctxLC, _In_ QWORD pa, _In_ DWORD cb, _In_reads_(cb) PBYTE pb)
 {
-    PDEVICE_DATA ctx = (PDEVICE_DATA)ctxDeviceMain->hDevice;
+    PDEVICE_DATA ctx = (PDEVICE_DATA)ctxLC->hDevice;
     BOOL result;
     DWORD cbTransferred;
     if(pa + cb > 0x100000000) { return FALSE; }
-    Device3380_WriteCsr(REG_FIFOSTAT_0, 0xffffffff, CSR_CONFIGSPACE_MEMM | CSR_BYTEALL); // USB_FIFO0 FLUSH
-    Device3380_WriteCsr(REG_DMACTL_0, 0xc2, CSR_CONFIGSPACE_MEMM | CSR_BYTE0); // DMA_ENABLE
-    Device3380_WriteCsr(REG_DMAADDR_0, (DWORD)pa, CSR_CONFIGSPACE_MEMM | CSR_BYTEALL); // DMA_ADDRESS
-    Device3380_WriteCsr(REG_DMACOUNT_0, 0x00000000 | cb, CSR_CONFIGSPACE_MEMM | CSR_BYTEALL); // DMA_COUNT
-    Device3380_WriteCsr(REG_DMASTAT_0, 0x080000d1, CSR_CONFIGSPACE_MEMM | CSR_BYTE0 | CSR_BYTE3); // DMA_START & DMA_CLEAR_ABORT
-    Device3380_WriteCsr(REG_PCI_STATCMD, 0x07, CSR_CONFIGSPACE_PCIE | CSR_BYTE0); // BUS_MASTER ??? needed ???
+    Device3380_WriteCsr(ctxLC, REG_FIFOSTAT_0, 0xffffffff, CSR_CONFIGSPACE_MEMM | CSR_BYTEALL); // USB_FIFO0 FLUSH
+    Device3380_WriteCsr(ctxLC, REG_DMACTL_0, 0xc2, CSR_CONFIGSPACE_MEMM | CSR_BYTE0); // DMA_ENABLE
+    Device3380_WriteCsr(ctxLC, REG_DMAADDR_0, (DWORD)pa, CSR_CONFIGSPACE_MEMM | CSR_BYTEALL); // DMA_ADDRESS
+    Device3380_WriteCsr(ctxLC, REG_DMACOUNT_0, 0x00000000 | cb, CSR_CONFIGSPACE_MEMM | CSR_BYTEALL); // DMA_COUNT
+    Device3380_WriteCsr(ctxLC, REG_DMASTAT_0, 0x080000d1, CSR_CONFIGSPACE_MEMM | CSR_BYTE0 | CSR_BYTE3); // DMA_START & DMA_CLEAR_ABORT
+    Device3380_WriteCsr(ctxLC, REG_PCI_STATCMD, 0x07, CSR_CONFIGSPACE_PCIE | CSR_BYTE0); // BUS_MASTER ??? needed ???
     result = WinUsb_WritePipe(ctx->WinusbHandle, USB_EP_DMAOUT, pb, cb, &cbTransferred, NULL);
-    Device3380_WriteCsr(REG_DMASTAT_0, 0x080000d1, CSR_CONFIGSPACE_MEMM | CSR_BYTE0 | CSR_BYTE3); // DMA_START & DMA_CLEAR_ABORT - must be here for 1st transfer to work.
+    Device3380_WriteCsr(ctxLC, REG_DMASTAT_0, 0x080000d1, CSR_CONFIGSPACE_MEMM | CSR_BYTE0 | CSR_BYTE3); // DMA_START & DMA_CLEAR_ABORT - must be here for 1st transfer to work.
     return result;
 }
 
-_Success_(return) BOOL Device3380_Open2();
+_Success_(return) BOOL Device3380_Open2(_Inout_ PLC_CONTEXT ctxLC);
 
-VOID Device3380_Close()
+VOID Device3380_Close(_Inout_ PLC_CONTEXT ctxLC)
 {
-    PDEVICE_DATA ctx = (PDEVICE_DATA)ctxDeviceMain->hDevice;
+    PDEVICE_DATA ctx = (PDEVICE_DATA)ctxLC->hDevice;
     if(!ctx) { return; }
     if(!ctx->HandlesOpen) { return; }
     WinUsb_Free(ctx->WinusbHandle);
     if(ctx->DeviceHandle) { CloseHandle(ctx->DeviceHandle); }
     ctx->HandlesOpen = FALSE;
     LocalFree(ctx);
-    ctxDeviceMain->hDevice = 0;
+    ctxLC->hDevice = 0;
 }
 
 _Success_(return)
-BOOL Device3380_Open()
+BOOL Device3380_Open(_Inout_ PLC_CONTEXT ctxLC)
 {
     BOOL result;
     DWORD dwReg;
     QWORD paMax;
-    if(!ctxDeviceMain) { return FALSE; }
-    result = Device3380_Open2();
+    result = Device3380_Open2(ctxLC);
     if(!result) { return FALSE; }
-    Device3380_ReadCsr(REG_USBSTAT, &dwReg, CSR_CONFIGSPACE_MEMM | CSR_BYTEALL);
-    if((0 == _strnicmp("usb3380://usb2", ctxDeviceMain->cfg.szDevice, 15)) && (dwReg & 0x0100 /* Super-Speed(USB3) */)) {
-        printf("Device Info: USB3380 running at USB3 speed; downgrading to USB2 ...\n");
+    Device3380_ReadCsr(ctxLC, REG_USBSTAT, &dwReg, CSR_CONFIGSPACE_MEMM | CSR_BYTEALL);
+    if((2 == LcDeviceParameterGetNumeric(ctxLC, "usb")) && (dwReg & 0x0100 /* Super-Speed(USB3) */)) {
+        lcprintf(ctxLC, "Device Info: USB3380 running at USB3 speed; downgrading to USB2 ...\n");
         dwReg = 0x04; // USB2=ENABLE, USB3=DISABLE
-        Device3380_WriteCsr(REG_USBCTL2, dwReg, CSR_CONFIGSPACE_MEMM | CSR_BYTE0);
-        Device3380_Close();
+        Device3380_WriteCsr(ctxLC, REG_USBCTL2, dwReg, CSR_CONFIGSPACE_MEMM | CSR_BYTE0);
+        Device3380_Close(ctxLC);
         Sleep(1000);
-        result = Device3380_Open2();
+        result = Device3380_Open2(ctxLC);
         if(!result) { return FALSE; }
-        Device3380_ReadCsr(REG_USBSTAT, &dwReg, CSR_CONFIGSPACE_MEMM | CSR_BYTEALL);
+        Device3380_ReadCsr(ctxLC, REG_USBSTAT, &dwReg, CSR_CONFIGSPACE_MEMM | CSR_BYTEALL);
     }
     if(dwReg & 0xc0 /* Full-Speed(USB1)|High-Speed(USB2) */) {
-        vprintf("Device Info: USB3380 running at USB2 speed.\n");
+        lcprintf(ctxLC, "Device Info: USB3380 running at USB2 speed.\n");
     } else {
-        vprintfv("Device Info: USB3380 running at USB3 speed.\n");
+        lcprintfv(ctxLC, "Device Info: USB3380 running at USB3 speed.\n");
     }
-    vprintfv("Device Info: USB3380.\n");
+    lcprintfv(ctxLC, "Device Info: USB3380.\n");
     // set callback functions and fix up config
-    ctxDeviceMain->cfg.tpDevice = LEECHCORE_DEVICE_USB3380;
-    ctxDeviceMain->cfg.fVolatile = TRUE;
-    ctxDeviceMain->cfg.paMaxNative = 0x00000000ffffffff;
-    ctxDeviceMain->pfnClose = Device3380_Close;
-    ctxDeviceMain->pfnReadScatterMEM = Device3380_ReadScatterGather;
-    ctxDeviceMain->pfnWriteMEM = Device3380_WriteDMA;
+    ctxLC->Config.fVolatile = TRUE;
+    ctxLC->ReadContigious.fLoadBalance = TRUE;
+    ctxLC->ReadContigious.cbChunkSize = 0x00800000;
+    ctxLC->pfnReadContigious = Device3380_ReadContigious;
+    ctxLC->pfnClose = Device3380_Close;
+    ctxLC->pfnWriteContigious = Device3380_Write;
     // initialize memory map
-    paMax = min(ctxDeviceMain->cfg.paMax, ctxDeviceMain->cfg.paMaxNative);
-    MemMap_Initialize(paMax);
-    MemMap_AddRange(0x00000000, min(0x000A0000, paMax), 0x00000000);
+    if(!ctxLC->Config.paMax) { ctxLC->Config.paMax = 0xffffffff; }
+    paMax = min(0xffffffff, ctxLC->Config.paMax);
+    if(ctxLC->Config.paMax) {
+        paMax = min(paMax, ctxLC->Config.paMax);
+    }
+    LcMemMap_AddRange(ctxLC, 0x00000000, min(0x000A0000, paMax), 0x00000000);
     // ... SMM LOWER 0x000A0000-0x000FFFFF
-    MemMap_AddRange(0x00100000, min(0xF0000000, paMax) - 0x00100000, 0x00100000);
-    // ... PCI SPACE 0xF0000000-0xFFFFFFFF
+    LcMemMap_AddRange(ctxLC, 0x00100000, min(0xF0000000, paMax) - 0x00100000, 0x00100000);
+    // ... PCI SPACE 0xF0000000-0xFFFFFFFF (guess)
     return TRUE;
 }
 
@@ -459,15 +281,15 @@ VOID Device3380_Open_SetPipePolicy(_In_ PDEVICE_DATA pDeviceData)
 }
 
 _Success_(return)
-BOOL Device3380_Open2()
+BOOL Device3380_Open2(_Inout_ PLC_CONTEXT ctxLC)
 {
     BOOL result;
     PDEVICE_DATA pDeviceData;
-    if(!ctxDeviceMain->hDevice) {
-        ctxDeviceMain->hDevice = (HANDLE)LocalAlloc(LMEM_ZEROINIT, sizeof(DEVICE_DATA));
-        if(!ctxDeviceMain->hDevice) { return FALSE; }
+    if(!ctxLC->hDevice) {
+        ctxLC->hDevice = (HANDLE)LocalAlloc(LMEM_ZEROINIT, sizeof(DEVICE_DATA));
+        if(!ctxLC->hDevice) { return FALSE; }
     }
-    pDeviceData = (PDEVICE_DATA)ctxDeviceMain->hDevice;
+    pDeviceData = (PDEVICE_DATA)ctxLC->hDevice;
     result = Device3380_RetrievePath(pDeviceData->DevicePath, MAX_PATH);
     if(!result) { return FALSE; }
     pDeviceData->DeviceHandle = CreateFile(pDeviceData->DevicePath,
@@ -487,7 +309,7 @@ BOOL Device3380_Open2()
     }
     Device3380_Open_SetPipePolicy(pDeviceData);
     pDeviceData->HandlesOpen = TRUE;
-    pDeviceData->fMultiThreadDMA = IsWindows8OrGreater(); // multi threaded DMA read fails on WIN7.
+    ctxLC->ReadContigious.cThread = IsWindows8OrGreater() ? 3 : 1; // multi threaded DMA read fails on WIN7.
     return TRUE;
 }
 
@@ -495,26 +317,25 @@ BOOL Device3380_Open2()
 #ifdef LINUX
 
 _Success_(return)
-BOOL Device3380_Open2()
+BOOL Device3380_Open2(_Inout_ PLC_CONTEXT ctxLC)
 {
     PDEVICE_DATA pDeviceData;
     if(libusb_init(NULL)) { return FALSE; }
-    if(!ctxDeviceMain->hDevice) {
-        ctxDeviceMain->hDevice = (HANDLE)LocalAlloc(LMEM_ZEROINIT, sizeof(DEVICE_DATA));
-        if(!ctxDeviceMain->hDevice) { return FALSE; }
+    if(!ctxLC->hDevice) {
+        ctxLC->hDevice = (HANDLE)LocalAlloc(LMEM_ZEROINIT, sizeof(DEVICE_DATA));
+        if(!ctxLC->hDevice) { return FALSE; }
     }
-    pDeviceData = (PDEVICE_DATA)ctxDeviceMain->hDevice;
+    pDeviceData = (PDEVICE_DATA)ctxLC->hDevice;
     pDeviceData->WinusbHandle = libusb_open_device_with_vid_pid(NULL, 0x18d1, 0x9001);
     if(!pDeviceData->WinusbHandle) {
         libusb_exit(NULL);
-        LocalFree(ctxDeviceMain->hDevice);
-        ctxDeviceMain->hDevice = NULL;
+        LocalFree(ctxLC->hDevice);
+        ctxLC->hDevice = NULL;
         return FALSE;
     }
     libusb_claim_interface(pDeviceData->WinusbHandle, 0);
     pDeviceData->HandlesOpen = TRUE;
     // synchronous libusb bulk read/write doesn't seem to support multi threaded accesses.
-    pDeviceData->fMultiThreadDMA = FALSE;
     return TRUE;
 }
 
