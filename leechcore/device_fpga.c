@@ -63,7 +63,8 @@ typedef struct tdDEV_CFG_PHY {
 
 typedef struct tdDEVICE_PERFORMANCE {
     LPSTR SZ_DEVICE_NAME;
-    DWORD PROBE_MAXPAGES;    // 0x400
+    DWORD PROBE_MAXPAGES;     // 0x400
+    DWORD RX_FLUSH_LIMIT;
     DWORD MAX_SIZE_RX;        // in data bytes (excl. overhead/TLP headers)
     DWORD MAX_SIZE_TX;        // in total data (incl. overhead/TLP headers)
     DWORD DELAY_PROBE_READ;
@@ -90,8 +91,9 @@ const DEVICE_PERFORMANCE PERFORMANCE_PROFILES[DEVICE_ID_MAX + 1] = {
     {
         .SZ_DEVICE_NAME = "SP605 / FT601",
         .PROBE_MAXPAGES = 0x400,
+        .RX_FLUSH_LIMIT = 0x8000,
         .MAX_SIZE_RX = 0x1f000,
-        .MAX_SIZE_TX = 0x3f0,
+        .MAX_SIZE_TX = 0x2000,
         .DELAY_PROBE_READ = 500,
         .DELAY_PROBE_WRITE = 0,
         .DELAY_WRITE = 175,
@@ -103,6 +105,7 @@ const DEVICE_PERFORMANCE PERFORMANCE_PROFILES[DEVICE_ID_MAX + 1] = {
         // to retry after a delay.
         .SZ_DEVICE_NAME = "PCIeScreamer R1",
         .PROBE_MAXPAGES = 0x400,
+        .RX_FLUSH_LIMIT = 0,
         .MAX_SIZE_RX = 0x1c000,
         .MAX_SIZE_TX = 0x3f0,
         .DELAY_PROBE_READ = 1000,
@@ -113,6 +116,7 @@ const DEVICE_PERFORMANCE PERFORMANCE_PROFILES[DEVICE_ID_MAX + 1] = {
     }, {
         .SZ_DEVICE_NAME = "AC701 / FT601",
         .PROBE_MAXPAGES = 0x400,
+        .RX_FLUSH_LIMIT = 0,
         .MAX_SIZE_RX = 0x1c000,
         .MAX_SIZE_TX = 0x3f0,
         .DELAY_PROBE_READ = 500,
@@ -123,6 +127,7 @@ const DEVICE_PERFORMANCE PERFORMANCE_PROFILES[DEVICE_ID_MAX + 1] = {
     }, {
         .SZ_DEVICE_NAME = "PCIeScreamer R2",
         .PROBE_MAXPAGES = 0x400,
+        .RX_FLUSH_LIMIT = 0,
         .MAX_SIZE_RX = 0x1c000,
         .MAX_SIZE_TX = 0x3f0,
         .DELAY_PROBE_READ = 750,
@@ -133,6 +138,7 @@ const DEVICE_PERFORMANCE PERFORMANCE_PROFILES[DEVICE_ID_MAX + 1] = {
     }, {
         .SZ_DEVICE_NAME = "ScreamerM2",
         .PROBE_MAXPAGES = 0x400,
+        .RX_FLUSH_LIMIT = 0,
         .MAX_SIZE_RX = 0x1c000,
         .MAX_SIZE_TX = 0x3f0,
         .DELAY_PROBE_READ = 500,
@@ -143,6 +149,7 @@ const DEVICE_PERFORMANCE PERFORMANCE_PROFILES[DEVICE_ID_MAX + 1] = {
     }, {
         .SZ_DEVICE_NAME = "NeTV2 RawUDP",
         .PROBE_MAXPAGES = 0x400,
+        .RX_FLUSH_LIMIT = 0,
         .MAX_SIZE_RX = 0x1c000,
         .MAX_SIZE_TX = 0x400,
         .DELAY_PROBE_READ = 0,
@@ -1153,6 +1160,7 @@ VOID DeviceFPGA_ConfigPrint(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ct
     LPSTR szNAME[] = { "CORE-READ-ONLY ", "CORE-READ-WRITE", "PCIE-READ-ONLY ", "PCIE-READ-WRITE" };
     BYTE pb[0x1000];
     WORD i, cb;
+    if(ctx->wFpgaVersionMajor < 4) { return; }
     for(i = 0; i < 4; i++) {
         if(DeviceFPGA_ConfigRead(ctx, 0x0004, (PBYTE)&cb, 2, flags[i])) {
             lcprintf(ctxLC, "\n----- FPGA DEVICE CONFIG REGISTERS: %s    SIZE: %i BYTES -----\n", szNAME[i], cb);
@@ -1634,7 +1642,7 @@ VOID DeviceFPGA_ReadScatter_Impl(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _Inou
     PDEVICE_CONTEXT_FPGA ctx = (PDEVICE_CONTEXT_FPGA)ctxLC->hDevice;
     TLP_CALLBACK_BUF_MRd_SCATTER rxbuf;
     DWORD tx[4] = { 0 };
-    DWORD o, i, j, cb, cbTotalInCycle = 0;
+    DWORD o, i, j, cb, cbFlush, cbTotalInCycle = 0;
     BOOL is32, fTiny = ctx->fAlgorithmReadTiny;
     PTLP_HDR_MRdWr64 hdrRd64 = (PTLP_HDR_MRdWr64)tx;
     PTLP_HDR_MRdWr32 hdrRd32 = (PTLP_HDR_MRdWr32)tx;
@@ -1652,6 +1660,7 @@ VOID DeviceFPGA_ReadScatter_Impl(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _Inou
         rxbuf.cph = cMEMs - i;
         rxbuf.pph = ppMEMs + i;
         // Transmit TLPs
+        cbFlush = 0;
         cbTotalInCycle = 0;
         bTag = ctx->RxEccBit ? 0x80 : 0;
         for(; i < cMEMs; i++) {
@@ -1688,7 +1697,15 @@ VOID DeviceFPGA_ReadScatter_Impl(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _Inou
                 for(j = 0; j < 4; j++) {
                     ENDIAN_SWAP_DWORD(tx[j]);
                 }
-                DeviceFPGA_TxTlp(ctxLC, ctx, (PBYTE)tx, is32 ? 12 : 16, FALSE, FALSE);
+                cbFlush += cb;
+                if(ctx->perf.RX_FLUSH_LIMIT && (cbFlush >= (ctx->fAlgorithmReadTiny ? 0x1000 : ctx->perf.RX_FLUSH_LIMIT))) {
+                    // flush is only used by the SP605.
+                    DeviceFPGA_TxTlp(ctxLC, ctx, (PBYTE)tx, is32 ? 12 : 16, FALSE, TRUE);
+                    usleep(ctx->perf.DELAY_WRITE);
+                    cbFlush = 0;
+                } else {
+                    DeviceFPGA_TxTlp(ctxLC, ctx, (PBYTE)tx, is32 ? 12 : 16, FALSE, FALSE);
+                }
                 o += cb;
                 bTag++;
             }
