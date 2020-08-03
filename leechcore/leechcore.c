@@ -146,8 +146,10 @@ VOID LcCloseAll()
 VOID LcCreate_FetchDeviceParameter(_Inout_ PLC_CONTEXT ctxLC)
 {
     PLC_DEVICE_PARAMETER_ENTRY pe;
+    CHAR szDevice[MAX_PATH] = { 0 };
     LPSTR szDelim, szParameters, szToken, szTokenContext = NULL;
-    if(!(szParameters = strstr(ctxLC->Config.szDevice, "://"))) { return; }
+    memcpy(szDevice, ctxLC->Config.szDevice, _countof(szDevice));
+    if(!(szParameters = strstr(szDevice, "://"))) { return; }
     szParameters += 3;
     while((szToken = strtok_s(szParameters, ",:;", &szTokenContext)) && (ctxLC->cDeviceParameter < LC_DEVICE_PARAMETER_MAX_ENTRIES)) {
         szParameters = NULL;
