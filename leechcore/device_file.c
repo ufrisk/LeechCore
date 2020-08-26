@@ -498,9 +498,10 @@ VOID DeviceFile_Close(_Inout_ PLC_CONTEXT ctxLC)
 }
 
 _Success_(return)
-BOOL DeviceFile_Open(_Inout_ PLC_CONTEXT ctxLC)
+BOOL DeviceFile_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo)
 {
     PDEVICE_CONTEXT_FILE ctx;
+    if(ppLcCreateErrorInfo) { *ppLcCreateErrorInfo = NULL; }
     if(!(ctx = (PDEVICE_CONTEXT_FILE)LocalAlloc(LMEM_ZEROINIT, sizeof(DEVICE_CONTEXT_FILE)))) { return FALSE; }
     lcprintfv(ctxLC, "DEVICE OPEN: %s\n", ctxLC->Config.szDeviceName);
     if(0 == _strnicmp("file://", ctxLC->Config.szDevice, 7)) {

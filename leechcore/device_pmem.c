@@ -319,10 +319,11 @@ BOOL DevicePMEM_GetOption(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _Out_ PQWO
 }
 
 _Success_(return)
-BOOL DevicePMEM_Open(_Inout_ PLC_CONTEXT ctxLC)
+BOOL DevicePMEM_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo)
 {
     BOOL result;
     PDEVICE_CONTEXT_PMEM ctx;
+    if(ppLcCreateErrorInfo) { *ppLcCreateErrorInfo = NULL; }
     // 1: initialize core context.
     ctx = (PDEVICE_CONTEXT_PMEM)LocalAlloc(LMEM_ZEROINIT, sizeof(DEVICE_CONTEXT_PMEM));
     if(!ctx) { return FALSE; }
@@ -349,9 +350,10 @@ BOOL DevicePMEM_Open(_Inout_ PLC_CONTEXT ctxLC)
 #ifdef LINUX
 
 _Success_(return)
-BOOL DevicePMEM_Open(_Inout_ PLC_CONTEXT ctxLC)
+BOOL DevicePMEM_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo)
 {
     lcprintfv(ctxLC, "DEVICE: FAIL: 'pmem' memory acquisition only supported on Windows.\n");
+    if(ppLcCreateErrorInfo) { *ppLcCreateErrorInfo = NULL; }
     return FALSE;
 }
 

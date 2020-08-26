@@ -113,8 +113,6 @@
     </Link>
     <PreBuildEvent>
       <Command>
-copy "$(SolutionDir)leechcore\leechcore.h" "$(ProjectDir)" /y
-
 copy "$(SolutionDir)leechcore\leechrpc.h" "$(ProjectDir)" /y
 
 copy "$(SolutionDir)leechcore\leechrpcshared.c" "$(ProjectDir)" /y
@@ -147,8 +145,6 @@ copy "$(SolutionDir)files\leechcorepyc.pyd" "$(OutDir)" /y</Command>
     </Link>
     <PreBuildEvent>
       <Command>
-copy "$(SolutionDir)leechcore\leechcore.h" "$(ProjectDir)" /y
-
 copy "$(SolutionDir)leechcore\leechrpc.h" "$(ProjectDir)" /y
 
 copy "$(SolutionDir)leechcore\leechrpcshared.c" "$(ProjectDir)" /y
@@ -180,8 +176,6 @@ copy "$(SolutionDir)leechcore\leechrpcshared.c" "$(ProjectDir)" /y
     </Link>
     <PreBuildEvent>
       <Command>
-copy "$(SolutionDir)leechcore\leechcore.h" "$(ProjectDir)" /y
-
 copy "$(SolutionDir)leechcore\leechrpc.h" "$(ProjectDir)" /y
 
 copy "$(SolutionDir)leechcore\leechrpcshared.c" "$(ProjectDir)" /y
@@ -219,8 +213,6 @@ copy "$(SolutionDir)files\leechcorepyc.pyd" "$(OutDir)" /y</Command>
     </Link>
     <PreBuildEvent>
       <Command>
-copy "$(SolutionDir)leechcore\leechcore.h" "$(ProjectDir)" /y
-
 copy "$(SolutionDir)leechcore\leechrpc.h" "$(ProjectDir)" /y
 
 copy "$(SolutionDir)leechcore\leechrpcshared.c" "$(ProjectDir)" /y

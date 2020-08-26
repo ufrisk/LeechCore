@@ -43,7 +43,12 @@ LEECHAGENT_REMOTE_ENTRY g_REMOTE_FILES_OPTIONAL[] = {
     {.f32 = FALSE,.f64 = TRUE,.wsz = L"winpmem_64.sys"},
     {.f32 = FALSE,.f64 = TRUE,.wsz = L"winpmem_x64.sys"},
     // 64-bit HyperV saved state
+    {.f32 = FALSE,.f64 = TRUE,.wsz = L"leechcore_device_hvsavedstate.dll"},
     {.f32 = FALSE,.f64 = TRUE,.wsz = L"vmsavedstatedumpprovider.dll"},
+    // 64-bit HyperV HVMM (LiveCloudKd)
+    {.f32 = FALSE,.f64 = TRUE,.wsz = L"leechcore_device_hvmm.dll"},
+    {.f32 = FALSE,.f64 = TRUE,.wsz = L"LiveCloudKdSdk.dll"},
+    {.f32 = FALSE,.f64 = TRUE,.wsz = L"hvmm.sys"},
     // 32/64-bit FTDI driver (PCIe DMA FPGA)
     {.f32 = TRUE,.f64 = TRUE,.wsz = L"FTD3XX.dll"},
 };

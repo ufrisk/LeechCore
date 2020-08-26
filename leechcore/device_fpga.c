@@ -143,7 +143,7 @@ const DEVICE_PERFORMANCE PERFORMANCE_PROFILES[DEVICE_ID_MAX + 1] = {
         .MAX_SIZE_TX = 0x3f0,
         .DELAY_PROBE_READ = 500,
         .DELAY_PROBE_WRITE = 150,
-        .DELAY_WRITE = 0,
+        .DELAY_WRITE = 25,
         .DELAY_READ = 300,
         .RETRY_ON_ERROR = 0
     }, {
@@ -709,9 +709,17 @@ LPSTR DeviceFPGA_InitializeFTDI(_In_ PDEVICE_CONTEXT_FPGA ctx)
     ctx->dev.pfnFT_Close = (ULONG(*)(HANDLE))
         GetProcAddress(ctx->dev.hModule, "FT_Close");
     ctx->dev.pfnFT_ReadPipe = (ULONG(*)(HANDLE, UCHAR, PUCHAR, ULONG, PULONG, LPOVERLAPPED))
-        GetProcAddress(ctx->dev.hModule, "FT_ReadPipe");
+        GetProcAddress(ctx->dev.hModule, "FT_ReadPipeEx");
+    if(!ctx->dev.pfnFT_ReadPipe) {
+        ctx->dev.pfnFT_ReadPipe = (ULONG(*)(HANDLE, UCHAR, PUCHAR, ULONG, PULONG, LPOVERLAPPED))
+            GetProcAddress(ctx->dev.hModule, "FT_ReadPipe");
+    }
     ctx->dev.pfnFT_WritePipe = (ULONG(*)(HANDLE, UCHAR, PUCHAR, ULONG, PULONG, LPOVERLAPPED))
-        GetProcAddress(ctx->dev.hModule, "FT_WritePipe");
+        GetProcAddress(ctx->dev.hModule, "FT_WritePipeEx");
+    if(!ctx->dev.pfnFT_WritePipe) {
+        ctx->dev.pfnFT_WritePipe = (ULONG(*)(HANDLE, UCHAR, PUCHAR, ULONG, PULONG, LPOVERLAPPED))
+            GetProcAddress(ctx->dev.hModule, "FT_WritePipe");
+    }
     ctx->dev.pfnFT_GetOverlappedResult = (ULONG(*)(HANDLE, LPOVERLAPPED, PULONG, BOOL))
         GetProcAddress(ctx->dev.hModule, "FT_GetOverlappedResult");
     ctx->dev.pfnFT_InitializeOverlapped = (ULONG(*)(HANDLE, LPOVERLAPPED))
@@ -807,10 +815,16 @@ VOID DeviceFPGA_Close(_Inout_ PLC_CONTEXT ctxLC)
     if(ctx->dev.pfnFT_ReleaseOverlapped && ctx->async.fEnabled) {
         ctx->dev.pfnFT_ReleaseOverlapped(ctx->dev.hFTDI, &ctx->async.oOverlapped);
     }
-    if(ctx->dev.hFTDI) {
-        ctx->dev.pfnFT_Close(ctx->dev.hFTDI);
-    }
-    if(ctx->dev.hModule) { FreeLibrary(ctx->dev.hModule); }
+#ifdef WIN32
+    __try {
+#endif /* WIN32 */
+        if(ctx->dev.hFTDI) {
+            ctx->dev.pfnFT_Close(ctx->dev.hFTDI);
+        }
+        if(ctx->dev.hModule) { FreeLibrary(ctx->dev.hModule); }
+#ifdef WIN32
+    } __except(EXCEPTION_EXECUTE_HANDLER) { ; }
+#endif /* WIN32 */
     LocalFree(ctx->rxbuf.pb);
     LocalFree(ctx->txbuf.pb);
     LocalFree(ctx);
@@ -2108,15 +2122,16 @@ BOOL DeviceFPGA_SetOption(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _In_ QWORD
 #define FPGA_PARAMETER_READ_RETRY      "readretry"
 #define FPGA_PARAMETER_DEVICE_INDEX    "devindex"
 
-#define FPGA_PARAMETER_ALGO_SYNCHRONOUS 0x01
-#define FPGA_PARAMETER_ALGO_TINY        0x02
+#define FPGA_PARAMETER_ALGO_TINY        0x01
+#define FPGA_PARAMETER_ALGO_SYNCHRONOUS 0x02
 
 _Success_(return)
-BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC)
+BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo)
 {
     QWORD v;
     LPSTR szDeviceError;
     PDEVICE_CONTEXT_FPGA ctx;
+    if(ppLcCreateErrorInfo) { *ppLcCreateErrorInfo = NULL; }
     ctx = LocalAlloc(LMEM_ZEROINIT, sizeof(DEVICE_CONTEXT_FPGA));
     if(!ctx) { return FALSE; }
     ctxLC->hDevice = (HANDLE)ctx;
@@ -2160,7 +2175,7 @@ BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC)
     ctx->async.fEnabled = ctx->async.fEnabled && !(v & FPGA_PARAMETER_ALGO_SYNCHRONOUS);
     // return
     lcprintfv(ctxLC, 
-        "DEVICE: FPGA: %s PCIe gen%i x%i [%i,%i,%i] [v%i.%i,%04x]\n",
+        "DEVICE: FPGA: %s PCIe gen%i x%i [%i,%i,%i] [v%i.%i,%04x] [%s,%s]\n",
         ctx->perf.SZ_DEVICE_NAME,
         DeviceFPGA_PHY_GetPCIeGen(ctx),
         DeviceFPGA_PHY_GetLinkWidth(ctx),
@@ -2169,7 +2184,10 @@ BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC)
         ctx->perf.DELAY_PROBE_READ,
         ctx->wFpgaVersionMajor,
         ctx->wFpgaVersionMinor,
-        ctx->wDeviceId);
+        ctx->wDeviceId,
+        (ctx->async.fEnabled ? "ASYNC" : "SYNC"),
+        (ctx->fAlgorithmReadTiny ? "TINY" : "NORM")
+        );
     if(ctxLC->fPrintf[LC_PRINTF_VV]) {
         DeviceFPGA_ConfigPrint(ctxLC, ctx);
     }

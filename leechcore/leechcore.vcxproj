@@ -138,7 +138,7 @@ copy "$(ProjectDir)\leechcore.h" "$(SolutionDir)\includes\" /y
     </Link>
     <PostBuildEvent>
       <Command>if not exist "$(SolutionDir)\includes\lib32" mkdir "$(SolutionDir)\includes\lib32"
-copy "$(OutDir)\x86\lib\leechcore.lib" "$(SolutionDir)\includes\lib32\" /y
+copy "$(OutDir)\lib\leechcore.lib" "$(SolutionDir)\includes\lib32\" /y
 copy "$(ProjectDir)\leechcore.h" "$(SolutionDir)\includes\" /y
 </Command>
     </PostBuildEvent>
@@ -212,7 +212,7 @@ copy "$(ProjectDir)\leechcore.h" "$(SolutionDir)\includes\" /y
     </Link>
     <PostBuildEvent>
       <Command>if not exist "$(SolutionDir)\includes\lib32" mkdir "$(SolutionDir)\includes\lib32"
-copy "$(OutDir)\x86\lib\leechcore.lib" "$(SolutionDir)\includes\lib32\" /y
+copy "$(OutDir)\lib\leechcore.lib" "$(SolutionDir)\includes\lib32\" /y
 copy "$(ProjectDir)\leechcore.h" "$(SolutionDir)\includes\" /y
 </Command>
     </PostBuildEvent>

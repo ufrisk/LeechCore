@@ -300,35 +300,43 @@ BOOL LeechRpc_CommandAgent(_In_ QWORD fOption, _In_ DWORD cbDataIn, _In_reads_(c
 
 error_status_t LeechRpc_CommandOpen(_In_ PLEECHRPC_MSG_OPEN pReq, long *pcbOut, byte **ppbOut)
 {
+    DWORD cbRsp;
     HANDLE hLeechCoreExisting;
     PLEECHRPC_MSG_OPEN pRsp = NULL;
-    if(!(pRsp = LocalAlloc(LMEM_ZEROINIT, sizeof(LEECHRPC_MSG_OPEN)))) {
-        *pcbOut = 0;
-        *ppbOut = NULL;
-        return (error_status_t)-1;
-    }
+    PLC_CONFIG_ERRORINFO pLcErrorInfo = NULL;
     if(ctxLeechRpc.hLC) {
         strcpy_s(pReq->cfg.szDevice, MAX_PATH - 1, "existing");
         hLeechCoreExisting = LcCreate(&pReq->cfg);
         // decrement handle refcount (rpc server keeps track of refcount internally)
         if(hLeechCoreExisting) { LcClose(hLeechCoreExisting); }
     } else {
-        ctxLeechRpc.hLC = LcCreate(&pReq->cfg);
+        ctxLeechRpc.hLC = LcCreateEx(&pReq->cfg, &pLcErrorInfo);
     }
     pReq->cfg.pfn_printf_opt = NULL;
-    pRsp->cbMsg = sizeof(LEECHRPC_MSG_OPEN);
+    cbRsp = sizeof(LEECHRPC_MSG_OPEN) + (pLcErrorInfo ? (pLcErrorInfo->cbStruct - sizeof(LC_CONFIG_ERRORINFO)) : 0);
+    if(!(pRsp = LocalAlloc(LMEM_ZEROINIT, cbRsp))) {
+        *pcbOut = 0;
+        *ppbOut = NULL;
+        return (error_status_t)-1;
+    }
+    pRsp->cbMsg = cbRsp;
     pRsp->dwMagic = LEECHRPC_MSGMAGIC;
-    pRsp->fMsgResult = ctxLeechRpc.hLC ? TRUE : FALSE;
-    if(pRsp->fMsgResult) {
+    pRsp->fMsgResult = TRUE;
+    pRsp->fValidOpen = ctxLeechRpc.hLC ? TRUE : FALSE;
+    if(pRsp->fValidOpen) {
         ctxLeechRpc.fLeechCoreValid = TRUE;
         memcpy(&pRsp->cfg, &pReq->cfg, sizeof(LC_CONFIG));
         pRsp->cfg.fRemoteDisableCompress = pRsp->cfg.fRemoteDisableCompress || !ctxLeechRpc.Compress.fValid;
         pRsp->flags = 0;
         LeechRPC_ClientKeepaliveUpdate(pReq->dwRpcClientID, TRUE);
     }
+    if(pLcErrorInfo) {
+        memcpy(&pRsp->errorinfo, pLcErrorInfo, pLcErrorInfo->cbStruct);
+    }
     pRsp->tpMsg = LEECHRPC_MSGTYPE_OPEN_RSP;
     *pcbOut = pRsp->cbMsg;
     *ppbOut = (PBYTE)pRsp;
+    LocalFree(pLcErrorInfo);
     return 0;
 }
 

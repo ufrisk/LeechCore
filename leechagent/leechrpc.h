@@ -7,7 +7,7 @@
 #define __LEECHRPC_H__
 #include "leechcore.h"
 
-#define LEECHRPC_MSGMAGIC                   0xd05a2666
+#define LEECHRPC_MSGMAGIC                   0xd05a2667
 #define LEECHRPC_FLAG_NOCOMPRESS                0x0010
 #define LEECHRPC_FLAG_FNEXIST_ReadScatterMEM    0x0100
 #define LEECHRPC_FLAG_FNEXIST_WriteScatterMEM   0x0200
@@ -104,7 +104,9 @@ typedef struct tdLEECHRPC_MSG_OPEN {
     DWORD dwRpcClientID;
     DWORD flags;
     // MSG
+    BOOL fValidOpen;
     LC_CONFIG cfg;
+    LC_CONFIG_ERRORINFO errorinfo;
 } LEECHRPC_MSG_OPEN, *PLEECHRPC_MSG_OPEN;
 
 typedef struct tdLEECHRPC_MSG_BIN {

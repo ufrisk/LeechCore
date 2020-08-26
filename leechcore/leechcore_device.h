@@ -18,7 +18,7 @@
 // (c) Ulf Frisk, 2020
 // Author: Ulf Frisk, pcileech@frizk.net
 //
-// Header Version: 2.0
+// Header Version: 2.1
 //
 
 #ifndef __LEECHCORE_DEVICE_H__
@@ -38,7 +38,7 @@ typedef struct tdCRITICAL_SECTION {
 #endif /* _LINUX_DEF_CRITICAL_SECTION */
 #endif /* LINUX */
 
-#define LC_CONTEXT_VERSION                  0xc0e10002
+#define LC_CONTEXT_VERSION                  0xc0e10003
 #define LC_MEMMAP_MAX_ENTRIES               0x100
 #define LC_DEVICE_PARAMETER_MAX_ENTRIES     0x10
 
@@ -76,7 +76,7 @@ typedef struct tdLC_READ_CONTIGIOUS_CONTEXT {
 #define LC_PRINTF_VVV               3
 
 typedef struct tdLC_CONTEXT {
-    DWORD version;
+    DWORD version;                  // LC_CONTEXT_VERSION
     DWORD dwHandleCount;
     HANDLE FLink;
     union {
@@ -86,7 +86,7 @@ typedef struct tdLC_CONTEXT {
     QWORD cReadScatterMEM;
     LC_STATISTICS CallStat;
     HANDLE hDeviceModule;
-    BOOL(*pfnCreate)(_Inout_ PLC_CONTEXT ctxLC);
+    BOOL(*pfnCreate)(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo);
     // Config for use by devices below:
     LC_CONFIG Config;
     DWORD cDeviceParameter;

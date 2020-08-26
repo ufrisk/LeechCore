@@ -172,11 +172,12 @@ VOID Device3380_Close(_Inout_ PLC_CONTEXT ctxLC)
 }
 
 _Success_(return)
-BOOL Device3380_Open(_Inout_ PLC_CONTEXT ctxLC)
+BOOL Device3380_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo)
 {
     BOOL result;
     DWORD dwReg;
     QWORD paMax;
+    if(ppLcCreateErrorInfo) { *ppLcCreateErrorInfo = NULL; }
     result = Device3380_Open2(ctxLC);
     if(!result) { return FALSE; }
     Device3380_ReadCsr(ctxLC, REG_USBSTAT, &dwReg, CSR_CONFIGSPACE_MEMM | CSR_BYTEALL);

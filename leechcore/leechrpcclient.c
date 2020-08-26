@@ -132,7 +132,7 @@ BOOL LeechRPC_SubmitCommand(_In_ PLC_CONTEXT ctxLC, _In_ PLEECHRPC_MSG_HDR pMsgI
                 fOK = (*ppMsgOut)->cbMsg == sizeof(LEECHRPC_MSG_HDR);
                 break;
             case LEECHRPC_MSGTYPE_OPEN_RSP:
-                fOK = (*ppMsgOut)->cbMsg == sizeof(LEECHRPC_MSG_OPEN);
+                fOK = (*ppMsgOut)->cbMsg >= sizeof(LEECHRPC_MSG_OPEN);
                 break;
             case LEECHRPC_MSGTYPE_GETOPTION_RSP:
                 fOK = (*ppMsgOut)->cbMsg == sizeof(LEECHRPC_MSG_DATA);
@@ -491,7 +491,7 @@ BOOL LeechRPC_Command(
 //-----------------------------------------------------------------------------
 
 _Success_(return)
-BOOL LeechRpc_Open(_Inout_ PLC_CONTEXT ctxLC)
+BOOL LeechRpc_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo)
 {
     PLEECHRPC_CLIENT_CONTEXT ctx;
     CHAR _szBufferArg[MAX_PATH], _szBufferOpt[MAX_PATH];
@@ -502,6 +502,7 @@ BOOL LeechRpc_Open(_Inout_ PLC_CONTEXT ctxLC)
     DWORD i, dwPort = 0;
     HANDLE hThread;
     int(*pfn_printf_opt_tmp)(_In_z_ _Printf_format_string_ char const* const _Format, ...);
+    if(ppLcCreateErrorInfo) { *ppLcCreateErrorInfo = NULL; }
     ctx = (PLEECHRPC_CLIENT_CONTEXT)LocalAlloc(LMEM_ZEROINIT, sizeof(LEECHRPC_CLIENT_CONTEXT));
     if(!ctx) { return FALSE; }
     ctxLC->hDevice = (HANDLE)ctx;
@@ -571,11 +572,21 @@ BOOL LeechRpc_Open(_Inout_ PLC_CONTEXT ctxLC)
     ZeroMemory(MsgReq.cfg.szRemote, _countof(MsgReq.cfg.szRemote));
     MsgReq.cfg.pfn_printf_opt = 0;
     if(!LeechRPC_SubmitCommand(ctxLC, (PLEECHRPC_MSG_HDR)&MsgReq, LEECHRPC_MSGTYPE_OPEN_RSP, (PPLEECHRPC_MSG_HDR)&pMsgRsp)) {
-        lcprintf(ctxLC, "RPC: ERROR: Unable to open remote device '%s'\n", ctxLC->Config.szDevice);
+        lcprintf(ctxLC, "RPC: ERROR: Unable to open remote device #1 '%s'\n", ctxLC->Config.szDevice);
+        goto fail;
+    }
+    if(!pMsgRsp->fValidOpen) {
+        if((pMsgRsp->errorinfo.dwVersion == LC_CONFIG_ERRORINFO_VERSION) && (pMsgRsp->errorinfo.cbStruct < pMsgRsp->cbMsg) && ((pMsgRsp->errorinfo.cwszUserText * 2ULL) + sizeof(LC_CONFIG_ERRORINFO) < pMsgRsp->errorinfo.cbStruct)) {
+            if((*ppLcCreateErrorInfo = LocalAlloc(LMEM_ZEROINIT, pMsgRsp->errorinfo.cbStruct))) {
+                pMsgRsp->errorinfo.wszUserText[pMsgRsp->errorinfo.cwszUserText] = 0;
+                memcpy(*ppLcCreateErrorInfo, &pMsgRsp->errorinfo, pMsgRsp->errorinfo.cbStruct);
+            }
+        }
+        lcprintf(ctxLC, "RPC: ERROR: Unable to open remote device #2 '%s'\n", ctxLC->Config.szDevice);
         goto fail;
     }
     // sanity check positive result from remote service
-    if((pMsgRsp->cbMsg != sizeof(LEECHRPC_MSG_OPEN)) || (pMsgRsp->cfg.dwVersion != LC_CONFIG_VERSION)) {
+    if(pMsgRsp->cfg.dwVersion != LC_CONFIG_VERSION) {
         lcprintf(ctxLC, "RPC: ERROR: Invalid message received from remote service.\n");
         goto fail;
     }
@@ -600,9 +611,11 @@ BOOL LeechRpc_Open(_Inout_ PLC_CONTEXT ctxLC)
     ctxLC->pfnSetOption = LeechRPC_SetOption;
     ctxLC->pfnCommand = LeechRPC_Command;
     lcprintfv(ctxLC, "RPC: Successfully opened remote device: %s\n", ctxLC->Config.szDeviceName);
+    LocalFree(pMsgRsp);
     return TRUE;
 fail:
     LeechRPC_Close(ctxLC);
+    LocalFree(pMsgRsp);
     return FALSE;
 }
 
@@ -610,8 +623,9 @@ fail:
 #ifdef LINUX
 
 _Success_(return)
-BOOL LeechRpc_Open(_Inout_ PLC_CONTEXT ctxLC)
+BOOL LeechRpc_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo)
 {
+    if(ppLcCreateErrorInfo) { *ppLcCreateErrorInfo = NULL; }
     return FALSE;
 }
 

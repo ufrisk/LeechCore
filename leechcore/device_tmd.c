@@ -216,9 +216,10 @@ VOID DeviceTMD_Close(_Inout_ PLC_CONTEXT ctxLC)
 }
 
 _Success_(return)
-BOOL DeviceTMD_Open(_Inout_ PLC_CONTEXT ctxLC)
+BOOL DeviceTMD_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo)
 {
     PDEVICE_CONTEXT_TMD ctxTMd = NULL;
+    if(ppLcCreateErrorInfo) { *ppLcCreateErrorInfo = NULL; }
     if(!(ctxTMd = (PDEVICE_CONTEXT_TMD)LocalAlloc(LMEM_ZEROINIT, sizeof(DEVICE_CONTEXT_TMD)))) { return FALSE; }
     // 1: Test for vulnerability and set up page tables using for virtual2physical mappings
     if(!DeviceTMD_Identify()) {
@@ -252,9 +253,10 @@ fail:
 #ifdef LINUX
 
 _Success_(return)
-BOOL DeviceTMD_Open(_Inout_ PLC_CONTEXT ctxLC)
+BOOL DeviceTMD_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo)
 {
     lcprintf(ctxLC, "TOTALMELTDOWN: Failed.  System not vulnerable for Total Meltdown attack.\n  Only Windows 7/2008R2 x64 with 2018-01, 2018-02, 2018-03 patches are vulnerable.\n");
+    if(ppLcCreateErrorInfo) { *ppLcCreateErrorInfo = NULL; }
     return FALSE;
 }
 

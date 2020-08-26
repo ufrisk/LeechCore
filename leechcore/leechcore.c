@@ -22,12 +22,12 @@ typedef struct tdLC_MAIN_CONTEXT {
 
 LC_MAIN_CONTEXT g_ctx = { 0 };
 
-_Success_(return) BOOL Device3380_Open(_Inout_ PLC_CONTEXT ctxLC);
-_Success_(return) BOOL DeviceFile_Open(_Inout_ PLC_CONTEXT ctxLC);
-_Success_(return) BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC);
-_Success_(return) BOOL DevicePMEM_Open(_Inout_ PLC_CONTEXT ctxLC);
-_Success_(return) BOOL DeviceTMD_Open(_Inout_ PLC_CONTEXT ctxLC);
-_Success_(return) BOOL LeechRpc_Open(_Inout_ PLC_CONTEXT ctxLC);
+_Success_(return) BOOL Device3380_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo);
+_Success_(return) BOOL DeviceFile_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo);
+_Success_(return) BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo);
+_Success_(return) BOOL DevicePMEM_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo);
+_Success_(return) BOOL DeviceTMD_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo);
+_Success_(return) BOOL LeechRpc_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo);
 
 VOID LcCloseAll();
 _Success_(return) BOOL LcReadContigious_Initialize(_In_ PLC_CONTEXT ctxLC);
@@ -255,7 +255,7 @@ VOID LcCreate_FetchDevice(_Inout_ PLC_CONTEXT ctx)
         strncat_s(szModule, sizeof(szModule), ctx->Config.szDevice, cszDevice);
         strcat_s(szModule, sizeof(szModule), LC_LIBRARY_FILETYPE);
         if(ctx->hDeviceModule = LoadLibraryA(szModule)) {
-            if(ctx->pfnCreate = (BOOL(*)(PLC_CONTEXT))GetProcAddress(ctx->hDeviceModule, "LcPluginCreate")) {
+            if(ctx->pfnCreate = (BOOL(*)(PLC_CONTEXT, PPLC_CONFIG_ERRORINFO))GetProcAddress(ctx->hDeviceModule, "LcPluginCreate")) {
                 strncpy_s(ctx->Config.szDeviceName, sizeof(ctx->Config.szDeviceName), ctx->Config.szDevice, cszDevice);
                 return;
             } else {
@@ -351,14 +351,19 @@ VOID LcCreate_MemMapInitAddressDetect(_Inout_ PLC_CONTEXT ctxLC)
 
 /*
 * Create a new LeechCore device according to the supplied configuration.
+* CALLER LcMemFree: ppLcCreateErrorInfo
 * -- pLcCreateConfig
+* -- ppLcCreateErrorInfo = ptr to receive function allocated struct with error
+*       information upon function failure. This info may contain a user message
+*       requesting user action as an example.
 * -- return
 */
 _Success_(return != NULL)
-EXPORTED_FUNCTION HANDLE LcCreate(_Inout_ PLC_CONFIG pLcCreateConfig)
+EXPORTED_FUNCTION HANDLE LcCreateEx(_Inout_ PLC_CONFIG pLcCreateConfig, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo)
 {
     PLC_CONTEXT ctxLC = NULL;
     QWORD tmStart = LcCallStart();
+    if(ppLcCreateErrorInfo) { *ppLcCreateErrorInfo = NULL; }
     if(!pLcCreateConfig || (pLcCreateConfig->dwVersion != LC_CONFIG_VERSION)) { return NULL; }
     // check if open existing (primary) device:
     if(0 == _strnicmp("existing", pLcCreateConfig->szDevice, 9)) {
@@ -383,7 +388,7 @@ EXPORTED_FUNCTION HANDLE LcCreate(_Inout_ PLC_CONFIG pLcCreateConfig)
     ctxLC->fPrintf[3] = (ctxLC->Config.dwPrintfVerbosity & LC_CONFIG_PRINTF_VVV) ? TRUE : FALSE;
     LcCreate_FetchDeviceParameter(ctxLC);
     LcCreate_FetchDevice(ctxLC);
-    if(!ctxLC->pfnCreate || !ctxLC->pfnCreate(ctxLC) || !LcReadContigious_Initialize(ctxLC)) {
+    if(!ctxLC->pfnCreate || !ctxLC->pfnCreate(ctxLC, ppLcCreateErrorInfo) || !LcReadContigious_Initialize(ctxLC)) {
         LcClose(ctxLC);
         return NULL;
     }
@@ -403,6 +408,12 @@ EXPORTED_FUNCTION HANDLE LcCreate(_Inout_ PLC_CONFIG pLcCreateConfig)
     LeaveCriticalSection(&g_ctx.Lock);
     LcCallEnd(ctxLC, LC_STATISTICS_ID_OPEN, tmStart);
     return ctxLC;
+}
+
+_Success_(return != NULL)
+EXPORTED_FUNCTION HANDLE LcCreate(_Inout_ PLC_CONFIG pLcCreateConfig)
+{
+    return LcCreateEx(pLcCreateConfig, NULL);
 }
 
 
