@@ -144,3 +144,6 @@ v1.0-1.8
 [v2.1](https://github.com/ufrisk/LeechCore/releases/tag/v2.1)
 * Bug fixes.
 * Support for [LiveCloudKd](https://github.com/ufrisk/LeechCore/wiki/Device_LiveCloudKd).
+
+latest:
+* Bug fixes.

@@ -107,7 +107,7 @@ BOOL LeechRPC_SubmitCommand(_In_ PLC_CONTEXT ctxLC, _In_ PLEECHRPC_MSG_HDR pMsgI
             error = LeechRpc_ReservedSubmitCommand(ctx->hRPC, pMsgIn->cbMsg, (PBYTE)pMsgIn, &cbMsgOut, (PBYTE*)ppMsgOut);
         } __except(EXCEPTION_EXECUTE_HANDLER) { error = E_FAIL; }
         if(error) {
-            *ppMsgOut = NULL;
+           *ppMsgOut = NULL;
             return FALSE;
         }
     } else {
@@ -327,7 +327,7 @@ VOID LeechRPC_ReadScatter_Impl(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _Inout_
             pMEM_Dst = pMEM_Dst + 1;
         }
     }
-    pMsgReq->qwData[0] = cMEMs;
+    pMsgReq->qwData[0] = cValidMEMs;
     pMsgReq->qwData[1] = cbTotal;
     // 2: transmit & get result
     result = LeechRPC_SubmitCommand(ctxLC, (PLEECHRPC_MSG_HDR)pMsgReq, LEECHRPC_MSGTYPE_READSCATTER_RSP, (PPLEECHRPC_MSG_HDR)&pMsgRsp);
