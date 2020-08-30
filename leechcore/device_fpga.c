@@ -509,14 +509,18 @@ VOID TLP_CallbackMRd_Scatter(_Inout_ PTLP_CALLBACK_BUF_MRd_SCATTER pBufferMrd_Sc
     buf[1] = _byteswap_ulong(buf[1]);
     buf[2] = _byteswap_ulong(buf[2]);
     if(cb < ((DWORD)hdr->Length << 2) + 12) { return; }
+    if(pBufferMrd_Scatter->bEccBit != (hdrC->Tag >> 7)) { return; }   // ECC bit mismatch
     if(hdr->TypeFmt == TLP_CplD) {
-        if(pBufferMrd_Scatter->bEccBit != (hdrC->Tag >> 7)) { return; } // ECC bit mismatch
         if(pBufferMrd_Scatter->fTiny) {
             // Algoritm: Multiple MRd of size 128 bytes
             i = (hdrC->Tag >> 5) & 0x03;
             if(i >= pBufferMrd_Scatter->cph) { return; }
             pMEM = pBufferMrd_Scatter->pph[i];
-            o = (DWORD)MEM_SCATTER_STACK_PEEK(pMEM, 1);
+            if(pMEM->cb == 0x1000) {
+                o = (hdrC->Tag & 0x1f) << 7;
+            } else {
+                o = (DWORD)MEM_SCATTER_STACK_PEEK(pMEM, 1);
+            }
         } else {
             // Algoritm: Single MRd of page (0x1000) or less, multiple CplD.
             i = hdrC->Tag & 0x7f;
@@ -535,7 +539,6 @@ VOID TLP_CallbackMRd_Scatter(_Inout_ PTLP_CALLBACK_BUF_MRd_SCATTER pBufferMrd_Sc
         pBufferMrd_Scatter->cbReadTotal += c;
     }
     if((hdr->TypeFmt == TLP_Cpl) && hdrC->Status) {
-        if(pBufferMrd_Scatter->bEccBit != (hdrC->Tag >> 7)) { return; } // ECC bit mismatch
         pBufferMrd_Scatter->cbReadTotal += (hdrC->ByteCount ? hdrC->ByteCount : 0x1000);
     }
 }
