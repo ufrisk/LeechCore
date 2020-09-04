@@ -187,11 +187,12 @@ VOID Util_GenRandom(_Out_ PBYTE pb, _In_ DWORD cb)
 
 BOOL Util_IsPlatformBitness64()
 {
-    BOOL f64 = TRUE;
-#ifndef ARCH_64
-    IsWow64Process(GetCurrentProcess(), &f64);
-#endif /* ARCH_64 */
-    return f64;
+    BOOL fWow64 = TRUE;
+    if(Util_IsProgramBitness64()) {
+        return TRUE;
+    }
+    IsWow64Process(GetCurrentProcess(), &fWow64);
+    return fWow64;
 }
 
 BOOL Util_IsProgramBitness64()
