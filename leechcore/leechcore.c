@@ -923,7 +923,7 @@ _Success_(return)
 EXPORTED_FUNCTION BOOL LcWrite(_In_ HANDLE hLC, _In_ QWORD pa, _In_ DWORD cb, _In_reads_(cb) PBYTE pb)
 {
     BOOL fResult = FALSE;
-    PBYTE pbBuffer;
+    PBYTE pbBuffer = NULL;
     DWORD i = 0, oA = 0, cbP, cMEMs;
     PMEM_SCATTER pMEM, pMEMs, *ppMEMs;
     QWORD paTranslated = 0;
@@ -955,6 +955,7 @@ EXPORTED_FUNCTION BOOL LcWrite(_In_ HANDLE hLC, _In_ QWORD pa, _In_ DWORD cb, _I
     }
     fResult = TRUE;
 fail:
+    LocalFree(pbBuffer);
     LcCallEnd(ctxLC, LC_STATISTICS_ID_WRITE, tmStart);
     return fResult;
 }

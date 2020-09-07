@@ -2131,15 +2131,20 @@ BOOL DeviceFPGA_SetOption(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _In_ QWORD
 _Success_(return)
 BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo)
 {
+    DWORD dwIpAddr;
     QWORD v;
     LPSTR szDeviceError;
     PDEVICE_CONTEXT_FPGA ctx;
+    PLC_DEVICE_PARAMETER_ENTRY pIpParam;
     if(ppLcCreateErrorInfo) { *ppLcCreateErrorInfo = NULL; }
     ctx = LocalAlloc(LMEM_ZEROINIT, sizeof(DEVICE_CONTEXT_FPGA));
     if(!ctx) { return FALSE; }
     ctxLC->hDevice = (HANDLE)ctx;
-    if(LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_UDP_ADDRESS)) {
-        szDeviceError = DeviceFPGA_InitializeUDP(ctx, (DWORD)LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_UDP_ADDRESS));
+    if((pIpParam = LcDeviceParameterGet(ctxLC, FPGA_PARAMETER_UDP_ADDRESS)) && pIpParam->szValue) {
+        dwIpAddr = inet_addr(pIpParam->szValue);
+        szDeviceError = ((dwIpAddr == 0) || (dwIpAddr == -1)) ?
+            "Bad IPv4 address" :
+            DeviceFPGA_InitializeUDP(ctx, dwIpAddr);
     } else {
         ctx->qwDeviceIndex = LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_DEVICE_INDEX);
         szDeviceError = DeviceFPGA_InitializeFTDI(ctx);
