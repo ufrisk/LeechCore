@@ -147,8 +147,11 @@ BOOL LcMemMap_SetRangesFromText(_In_ PLC_CONTEXT ctxLC, _In_ PBYTE pb, _In_ DWOR
             szLine += 4;
         }
         for(i = 0, iMax = (DWORD)strlen(szLine); i < iMax; i++) {
-            if((sz[i] == '-') || (sz[i] == '>')) { sz[i] = ' '; }
-            if(sz[i] == '0' && sz[i + 1] == 'x') { sz[i] = ' '; sz[i + 1] = ' '; }
+            if((szLine[i] == '0') && (szLine[i + 1] == 'x')) { szLine[i] = ' '; szLine[i + 1] = ' '; }
+            if((szLine[i] >= '0') && (szLine[i] <= '9')) { continue; }
+            if((szLine[i] >= 'a') && (szLine[i] <= 'f')) { continue; }
+            if((szLine[i] >= 'A') && (szLine[i] <= 'F')) { continue; }
+            szLine[i] = ' ';
         }
         i = 0;
         v[0] = 0, v[1] = 0, v[2] = 0;
