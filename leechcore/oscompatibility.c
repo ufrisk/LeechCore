@@ -348,4 +348,14 @@ DWORD WaitForMultipleObjects(_In_ DWORD nCount, HANDLE *lpHandles, _In_ BOOL bWa
     return -1;
 }
 
+int compat_strncpy_s(char *strDest, size_t numberOfElements, const char *strSource, size_t count)
+{
+    // on windows, strncpy_s always nul-terminates the output. emulate that behavior
+    int ret = strncpy_s(strDest, numberOfElements, strSource, count);
+    if (numberOfElements > count) {
+        strDest[count] = '\0';
+    }
+    return ret;
+}
+
 #endif /* LINUX */

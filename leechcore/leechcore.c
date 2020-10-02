@@ -155,7 +155,7 @@ VOID LcCreate_FetchDeviceParameter(_Inout_ PLC_CONTEXT ctxLC)
         szParameters = NULL;
         if(!(szDelim = strstr(szToken, "="))) { continue; }
         pe = &ctxLC->pDeviceParameter[ctxLC->cDeviceParameter];
-        strncpy_s(pe->szName, _countof(pe->szName), szToken, szDelim - szToken);
+        compat_strncpy_s(pe->szName, _countof(pe->szName), szToken, szDelim - szToken);
         strncpy_s(pe->szValue, _countof(pe->szValue), szDelim + 1, _TRUNCATE);
         pe->qwValue = Util_GetNumericA(pe->szValue);
         if((0 == pe->qwValue) && !_stricmp(pe->szValue, "true")) {

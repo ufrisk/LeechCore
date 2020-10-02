@@ -22,6 +22,8 @@ typedef unsigned __int64                    QWORD, *PQWORD;
 #define LC_LIBRARY_FILETYPE                 ".dll"
 VOID usleep(_In_ DWORD us);
 
+#define compat_strncpy_s strncpy_s
+
 #endif /* _WIN32 */
 #ifdef LINUX
 #include <libusb.h>
@@ -219,6 +221,8 @@ BOOL SetEvent(_In_ HANDLE hEvent);
 HANDLE CreateEvent(_In_opt_ PVOID lpEventAttributes, _In_ BOOL bManualReset, _In_ BOOL bInitialState, _In_opt_ PVOID lpName);
 DWORD WaitForMultipleObjects(_In_ DWORD nCount, HANDLE *lpHandles, _In_ BOOL bWaitAll, _In_ DWORD dwMilliseconds);
 DWORD WaitForSingleObject(_In_ HANDLE hHandle, _In_ DWORD dwMilliseconds);
+
+int compat_strncpy_s(char *strDest, size_t numberOfElements, const char *strSource, size_t count);
 
 #endif /* LINUX */
 
