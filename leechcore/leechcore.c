@@ -786,12 +786,12 @@ EXPORTED_FUNCTION BOOL LcRead(_In_ HANDLE hLC, _In_ QWORD pa, _In_ DWORD cb, _Ou
     if(cb == 0) { return TRUE; }
     cMEMs = ((pa & 0xfff) + cb + 0xfff) >> 12;
     if(cMEMs == 0) { return FALSE; }
-    fFirst = (pa & 0xfff) != 0;
+    fFirst = (pa & 0xfff) || (cb < 0x1000);
     fLast = (cMEMs > 1) && ((pa + cb) & 0xfff);
     f = LcAllocScatter3(
         fFirst ? pbFirst : NULL,
         fLast ? pbLast : NULL,
-        cb - (pa & 0xfff),
+        (fFirst && (cMEMs == 1)) ? 0 : (cb - (pa & 0xfff)),
         pb + (pa & 0xfff),
         (DWORD)cMEMs,
         &ppMEMs
@@ -807,7 +807,7 @@ EXPORTED_FUNCTION BOOL LcRead(_In_ HANDLE hLC, _In_ QWORD pa, _In_ DWORD cb, _Ou
     }
     if(fFirst) {
         o = pa & 0xfff;
-        memcpy(pb, ppMEMs[0]->pb + o, 0x1000 - (SIZE_T)o);
+        memcpy(pb, ppMEMs[0]->pb + o, min(cb, 0x1000 - (SIZE_T)o));
     }
     if(fLast) {
         o = ppMEMs[cMEMs - 1]->qwA;
@@ -974,7 +974,7 @@ BOOL LcGetOption_DoWork(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _Out_ PQWORD
 {
     QWORD v = 0;
     *pqwValue = 0;
-    switch(fOption) {
+    switch(fOption & 0xffffffff00000000) {
         case LC_OPT_CORE_PRINTF_ENABLE:
             *pqwValue = ctxLC->fPrintf[LC_PRINTF_ENABLE] ? 1 : 0;
             return TRUE;
@@ -998,6 +998,14 @@ BOOL LcGetOption_DoWork(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _Out_ PQWORD
             return TRUE;
         case LC_OPT_CORE_ADDR_MAX:
             *pqwValue = LcMemMap_GetMaxAddress(ctxLC);
+            return TRUE;
+        case LC_OPT_CORE_STATISTICS_CALL_COUNT:
+            if((DWORD)fOption > LC_STATISTICS_ID_MAX) { return FALSE; }
+            *pqwValue = ctxLC->CallStat.Call[(DWORD)fOption].c;
+            return TRUE;
+        case LC_OPT_CORE_STATISTICS_CALL_TIME:
+            if((DWORD)fOption > LC_STATISTICS_ID_MAX) { return FALSE; }
+            *pqwValue = ctxLC->CallStat.Call[(DWORD)fOption].tm;
             return TRUE;
     }
     if(ctxLC->pfnGetOption) {

@@ -122,7 +122,7 @@ typedef struct tdEXCEPTION_RECORD64         { CHAR sz[152]; } EXCEPTION_RECORD64
 #define _countof(_Array)                    (sizeof(_Array) / sizeof(_Array[0]))
 #define strnlen_s(s, maxcount)              (strnlen(s, maxcount))
 #define strcpy_s(dst, len, src)             (strncpy(dst, src, len))
-#define strncpy_s(dst, len, src, srclen)    (strncpy(dst, src, len))
+#define strncpy_s(dst, len, src, srclen)    (strncpy(dst, src, min(len, srclen)))
 #define strcat_s(dst, len, src)             (strcat(dst, src))
 #define strncat_s(dst, len, src, srclen)    (strncat(dst, src, srclen))
 #define _stricmp(s1, s2)                    (strcasecmp(s1, s2))
