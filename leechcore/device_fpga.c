@@ -85,7 +85,9 @@ typedef union tdFPGA_HANDLESOCKET {
 #define DEVICE_ID_PCIESCREAMER_R2               3
 #define DEVICE_ID_PCIESCREAMER_M2               4
 #define DEVICE_ID_NETV2_UDP                     5
-#define DEVICE_ID_MAX                           5
+#define DEVICE_ID_RAPTORDMA_R01                 6
+#define DEVICE_ID_RAPTORDMA_R02                 7
+#define DEVICE_ID_MAX                           7
 
 const DEVICE_PERFORMANCE PERFORMANCE_PROFILES[DEVICE_ID_MAX + 1] = {
     {
@@ -156,6 +158,28 @@ const DEVICE_PERFORMANCE PERFORMANCE_PROFILES[DEVICE_ID_MAX + 1] = {
         .DELAY_PROBE_WRITE = 0,
         .DELAY_WRITE = 0,
         .DELAY_READ = 0,
+        .RETRY_ON_ERROR = 0
+    }, {
+        .SZ_DEVICE_NAME = "RaptorDMA",
+        .PROBE_MAXPAGES = 0x400,
+        .RX_FLUSH_LIMIT = 0,
+        .MAX_SIZE_RX = 0x1c000,
+        .MAX_SIZE_TX = 0x3f0,
+        .DELAY_PROBE_READ = 500,
+        .DELAY_PROBE_WRITE = 150,
+        .DELAY_WRITE = 25,
+        .DELAY_READ = 300,
+        .RETRY_ON_ERROR = 0
+    }, {
+        .SZ_DEVICE_NAME = "RaptorDMA",
+        .PROBE_MAXPAGES = 0x400,
+        .RX_FLUSH_LIMIT = 0,
+        .MAX_SIZE_RX = 0x1c000,
+        .MAX_SIZE_TX = 0x3f0,
+        .DELAY_PROBE_READ = 500,
+        .DELAY_PROBE_WRITE = 150,
+        .DELAY_WRITE = 25,
+        .DELAY_READ = 300,
         .RETRY_ON_ERROR = 0
     }
 };
