@@ -146,3 +146,7 @@ v1.0-1.8
 [v2.2](https://github.com/ufrisk/LeechCore/releases/tag/v2.2)
 * Bug fixes.
 * Minor API additions.
+
+[v2.3](https://github.com/ufrisk/LeechCore/releases/tag/v2.3)
+* FPGA: R/W "shadow" config space (requires v4.9+ bitstream).
+* LeechAgent: Full multi-device support.

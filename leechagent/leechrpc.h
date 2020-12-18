@@ -174,7 +174,7 @@ BOOL LeechRPC_Decompress(_In_ PLEECHRPC_COMPRESS ctxCompress, _In_ PLEECHRPC_MSG
 * Utility function to retrieve a time stamp on the format 'YYYY-MM-DD HH:MM:SS'
 * -- szTime = user-allocated buffer to receive result.
 */
-VOID LeechSvc_GetTimeStamp(_Out_writes_(MAX_PATH) LPSTR szTime);
+VOID LeechSvc_GetTimeStamp(_Out_writes_(32) LPSTR szTime);
 
 /*
 * Service functions.

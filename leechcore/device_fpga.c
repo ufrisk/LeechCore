@@ -22,10 +22,11 @@
 #define FPGA_CMD_DEVICE_ID              0x03
 #define FPGA_CMD_VERSION_MINOR          0x05
 
-#define FPGA_CONFIG_CORE                0x0003
-#define FPGA_CONFIG_PCIE                0x0001
-#define FPGA_CONFIG_SPACE_READONLY      0x0000
-#define FPGA_CONFIG_SPACE_READWRITE     0x8000
+#define FPGA_REG_CORE                 0x0003
+#define FPGA_REG_PCIE                 0x0001
+#define FPGA_REG_READONLY             0x0000
+#define FPGA_REG_READWRITE            0x8000
+#define FPGA_REG_SHADOWCFGSPACE       0xC000
 
 #define ENDIAN_SWAP_DWORD(x)    (x = (x << 24) | ((x >> 8) & 0xff00) | ((x << 8) & 0xff0000) | (x >> 24))
 
@@ -878,18 +879,25 @@ BOOL DeviceFPGA_ConfigRead(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ WORD wBaseAddr, _
     DWORD i, j, status, dwStatus, dwData, cbRxTx = 0;
     PDWORD pdwData;
     WORD wAddr;
-    if(!cb || (cb > 0x1000) || (wBaseAddr > 0x1000)) { goto fail; }
+    if(!cb || (wBaseAddr + cb > 0x1000)) { goto fail; }
     if(!(pbRxTx = LocalAlloc(LMEM_ZEROINIT, 0x20000))) { goto fail; }
     // WRITE requests
-    for(wAddr = wBaseAddr; wAddr < wBaseAddr + cb; wAddr += 2) {
-        pbRxTx[cbRxTx + 4] = (wAddr | (flags & 0x8000)) >> 8;
+    for(wAddr = wBaseAddr & 0xfffe; wAddr < wBaseAddr + cb; wAddr += 2) {
+        pbRxTx[cbRxTx + 4] = (wAddr | (flags & 0xC000)) >> 8;
         pbRxTx[cbRxTx + 5] = wAddr & 0xff;
         pbRxTx[cbRxTx + 6] = 0x10 | (flags & 0x03);
         pbRxTx[cbRxTx + 7] = 0x77;
         cbRxTx += 8;
+        if(cbRxTx >= 0x3f0) {
+            status = ctx->dev.pfnFT_WritePipe(ctx->dev.hFTDI, 0x02, pbRxTx, cbRxTx, &cbRxTx, NULL);
+            if(status) { goto fail; }
+            cbRxTx = 0;
+        }
     }
-    status = ctx->dev.pfnFT_WritePipe(ctx->dev.hFTDI, 0x02, pbRxTx, cbRxTx, &cbRxTx, NULL);
-    if(status) { goto fail; }
+    if(cbRxTx) {
+        status = ctx->dev.pfnFT_WritePipe(ctx->dev.hFTDI, 0x02, pbRxTx, cbRxTx, &cbRxTx, NULL);
+        if(status) { goto fail; }
+    }
     Sleep(10);
     // READ and interpret result
     status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, pbRxTx, 0x20000, &cbRxTx, NULL);
@@ -910,11 +918,14 @@ BOOL DeviceFPGA_ConfigRead(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ WORD wBaseAddr, _
             dwStatus >>= 4;                         // move to next status
             if(!f) { continue; }                    // status src flags does not match source
             wAddr = _byteswap_ushort((WORD)dwData);
-            wAddr -= (flags & 0x8000) + wBaseAddr;  // adjust for base address and read-write config memory
+            wAddr -= (flags & 0xC000) + wBaseAddr;  // adjust for base address and read-write config memory
+            if(wAddr == 0xffff) {   // 1st unaligned byte
+                *pb = (dwData >> 24) & 0xff;
+            }
             if(wAddr >= cb) { continue; }           // address read is out of range
-            if(wAddr == cb - 1) {
+            if(wAddr == cb - 1) {   // last byte
                 *(PBYTE)(pb + wAddr) = (dwData >> 16) & 0xff;
-            } else {
+            } else {                // normal two-bytes
                 *(PWORD)(pb + wAddr) = (dwData >> 16) & 0xffff;
             }
         }
@@ -944,7 +955,7 @@ BOOL DeviceFPGA_ConfigWriteEx(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ WORD wBaseAddr
     pbTx[1] = pbData[1];                            // [1] = byte_value_addr+1
     pbTx[2] = pbMask[0];                            // [2] = byte_mask_addr
     pbTx[3] = pbMask[1];                            // [3] = byte_mask_addr+1
-    pbTx[4] = (wBaseAddr | (flags & 0x8000)) >> 8;  // [4] = addr_high = bit[6:0], write_regbank = bit[7]
+    pbTx[4] = (wBaseAddr | (flags & 0xc000)) >> 8;  // [4] = addr_high = bit[6:0], write_regbank = bit[7]
     pbTx[5] = wBaseAddr & 0xff;                     // [5] = addr_low
     pbTx[6] = 0x20 | (flags & 0x03);                // [6] = target = bit[0:1], read = bit[4], write = bit[5]
     pbTx[7] = 0x77;                                 // [7] = MAGIC 0x77
@@ -964,66 +975,54 @@ BOOL DeviceFPGA_ConfigWriteEx(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ WORD wBaseAddr
 _Success_(return)
 BOOL DeviceFPGA_ConfigWrite(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ WORD wBaseAddr, _In_reads_(cb) PBYTE pb, _In_ WORD cb, _In_ WORD flags)
 {
-    BOOL fReturn = FALSE;
     BYTE pbTx[0x800];
     DWORD status, cbTx = 0;
-    WORD i, wAddr;
-    if(!cb || (cb > 0x200) || (wBaseAddr > 0x1000)) { return FALSE; }
-    // WRITE requests
-    for(i = 0; i < cb; i += 2) {
-        wAddr = (wBaseAddr + i) | (flags & 0x8000);
-        pbTx[cbTx + 0] = pb[i];                         // [0] = byte_value_addr
-        pbTx[cbTx + 1] = (cb == i + 1) ? 0 : pb[i + 1]; // [1] = byte_value_addr+1
-        pbTx[cbTx + 2] = 0xff;                          // [2] = byte_mask_addr
-        pbTx[cbTx + 3] = (cb == i + 1) ? 0 : 0xff;      // [3] = byte_mask_addr+1
-        pbTx[cbTx + 4] = wAddr >> 8;                    // [4] = addr_high = bit[6:0], write_regbank = bit[7]
+    WORD i = 0, wAddr;
+    if(!cb || (wBaseAddr + cb > 0x1000)) { return FALSE; }
+    // BYTE ALIGN (if required)
+    if(wBaseAddr % 2) {
+        wAddr = (wBaseAddr - 1) | (flags & 0xC000);
+        pbTx[cbTx + 0] = 0x00;                          // [0] = byte_value = not valid
+        pbTx[cbTx + 1] = pb[0];                         // [1] = byte_value_addr[0]
+        pbTx[cbTx + 2] = 0x00;                          // [2] = mask_addr = not valid
+        pbTx[cbTx + 3] = 0xff;                          // [3] = byte_mask_addr[0]
+        pbTx[cbTx + 4] = wAddr >> 8;                    // [4] = addr_high = bit[5:0], write_regbank = bit[7], shadowpciecfgspace = bit[6]
         pbTx[cbTx + 5] = wAddr & 0xff;                  // [5] = addr_low
         pbTx[cbTx + 6] = 0x20 | (flags & 0x03);         // [6] = target = bit[0:1], read = bit[4], write = bit[5]
         pbTx[cbTx + 7] = 0x77;                          // [7] = MAGIC 0x77
         cbTx += 8;
+        i++;
     }
-    status = ctx->dev.pfnFT_WritePipe(ctx->dev.hFTDI, 0x02, pbTx, cbTx, &cbTx, NULL);
-    return (status == 0);
-}
-
-/*
-* Write a number of DWORDs to the FPGA bistream v4.2 "shadow" PCIe configuration space.
-* -- ctx
-* -- wBaseAddr
-* -- pb
-* -- cb
-* -- return
-*/
-_Success_(return)
-BOOL DeviceFPGA_PCIeCfgSpaceShadowWrite(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ WORD wBaseAddr, _In_ PBYTE pb, _In_ DWORD cb)
-{
-    BOOL fReturn = FALSE;
-    BYTE pbTx[0x2000];
-    DWORD status, cbTx = 0;
-    WORD i, wAddr;
-    if(!cb || (cb > 0x1000) || (wBaseAddr > 0x1000)) { return FALSE; }
     // WRITE requests
-    for(i = 0; i < cb - 3; i += 4) {
-        wAddr = wBaseAddr + i;
-        pbTx[cbTx + 0] = pb[i + 0];                     // [0] = byte_value_addr
-        pbTx[cbTx + 1] = pb[i + 1];                     // [1] = byte_value_addr+1
-        pbTx[cbTx + 2] = pb[i + 2];                     // [2] = byte_value_addr+2
-        pbTx[cbTx + 3] = pb[i + 3];                     // [3] = byte_value_addr+3
-        pbTx[cbTx + 4] = wAddr >> 8;                    // [4] = addr_high
+    for(; i < cb; i += 2) {
+        wAddr = (wBaseAddr + i) | (flags & 0xC000);
+        pbTx[cbTx + 0] = pb[i];                         // [0] = byte_value_addr
+        pbTx[cbTx + 1] = (cb == i + 1) ? 0 : pb[i + 1]; // [1] = byte_value_addr+1
+        pbTx[cbTx + 2] = 0xff;                          // [2] = byte_mask_addr
+        pbTx[cbTx + 3] = (cb == i + 1) ? 0 : 0xff;      // [3] = byte_mask_addr+1
+        pbTx[cbTx + 4] = wAddr >> 8;                    // [4] = addr_high = bit[5:0], write_regbank = bit[7], shadowpciecfgspace = bit[6]
         pbTx[cbTx + 5] = wAddr & 0xff;                  // [5] = addr_low
-        pbTx[cbTx + 6] = 0x21;                          // [6] = target
+        pbTx[cbTx + 6] = 0x20 | (flags & 0x03);         // [6] = target = bit[0:1], read = bit[4], write = bit[5]
         pbTx[cbTx + 7] = 0x77;                          // [7] = MAGIC 0x77
         cbTx += 8;
+        if(cbTx >= 0x3f0) {
+            status = ctx->dev.pfnFT_WritePipe(ctx->dev.hFTDI, 0x02, pbTx, cbTx, &cbTx, NULL);
+            if(status) { return FALSE; }
+            cbTx = 0;
+        }
     }
-    status = ctx->dev.pfnFT_WritePipe(ctx->dev.hFTDI, 0x02, pbTx, cbTx, &cbTx, NULL);
-    return (status == 0);
+    if(cbTx) {
+        status = ctx->dev.pfnFT_WritePipe(ctx->dev.hFTDI, 0x02, pbTx, cbTx, &cbTx, NULL);
+        if(status) { return FALSE; }
+    }
+    return TRUE;
 }
 
 /*
 * Read from the device PCIe configuration space. Only the values used by the
 * xilinx ip core itself is read. Custom "shadow" user-provided configuration
-* space is not readable from USB-side of things. Please use "lspci" on target
-* system to read any custom user-provided "shadow" configuration space.
+* space is read with DeviceFPGA_ConfigWrite(). Please use "lspci" on target
+* system to see result of xilinx + custom "shadow" config space.
 * -- ctx
 * -- pb = only the 1st 0x200 bytes are read
 * -- raSingleDW = Config space register address (in DWORD) to read single DWORD
@@ -1268,10 +1267,10 @@ BOOL DeviceFPGA_PCIeDrpRead(_In_ PDEVICE_CONTEXT_FPGA ctx, _Out_writes_(0x100) P
 VOID DeviceFPGA_ConfigPrint(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx)
 {
     WORD flags[] = {
-        FPGA_CONFIG_CORE | FPGA_CONFIG_SPACE_READONLY,
-        FPGA_CONFIG_CORE | FPGA_CONFIG_SPACE_READWRITE,
-        FPGA_CONFIG_PCIE | FPGA_CONFIG_SPACE_READONLY,
-        FPGA_CONFIG_PCIE | FPGA_CONFIG_SPACE_READWRITE };
+        FPGA_REG_CORE | FPGA_REG_READONLY,
+        FPGA_REG_CORE | FPGA_REG_READWRITE,
+        FPGA_REG_PCIE | FPGA_REG_READONLY,
+        FPGA_REG_PCIE | FPGA_REG_READWRITE };
     LPSTR szNAME[] = { "CORE-READ-ONLY ", "CORE-READ-WRITE", "PCIE-READ-ONLY ", "PCIE-READ-WRITE" };
     BYTE pb[0x1000];
     WORD i, cb;
@@ -1292,6 +1291,10 @@ VOID DeviceFPGA_ConfigPrint(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ct
         lcprintf(ctxLC, "\n----- PCIe CONFIGURATION SPACE (no user set values) SIZE: 0x200 BYTES -----\n");
         Util_PrintHexAscii(ctxLC, pb, 0x200, 0);
     }
+    if(DeviceFPGA_ConfigRead(ctx, 0x0000, pb, 0x1000, FPGA_REG_CORE | FPGA_REG_SHADOWCFGSPACE)) {
+        lcprintf(ctxLC, "\n----- PCIe SHADOW CONFIGURATION SPACE (only user set values) SIZE: 0x1000 BYTES -----\n");
+        Util_PrintHexAscii(ctxLC, pb, 0x1000, 0);
+    }
     lcprintf(ctxLC, "\n");
 }
 
@@ -1299,8 +1302,8 @@ _Success_(return)
 BOOL DeviceFPGA_GetPHYv4(_In_ PDEVICE_CONTEXT_FPGA ctx)
 {
     return
-        DeviceFPGA_ConfigRead(ctx, 0x0016, (PBYTE)&ctx->phy.wr, sizeof(ctx->phy.wr), FPGA_CONFIG_PCIE | FPGA_CONFIG_SPACE_READWRITE) &&
-        DeviceFPGA_ConfigRead(ctx, 0x000a, (PBYTE)&ctx->phy.rd, sizeof(ctx->phy.rd), FPGA_CONFIG_PCIE | FPGA_CONFIG_SPACE_READONLY);
+        DeviceFPGA_ConfigRead(ctx, 0x0016, (PBYTE)&ctx->phy.wr, sizeof(ctx->phy.wr), FPGA_REG_PCIE | FPGA_REG_READWRITE) &&
+        DeviceFPGA_ConfigRead(ctx, 0x000a, (PBYTE)&ctx->phy.rd, sizeof(ctx->phy.rd), FPGA_REG_PCIE | FPGA_REG_READONLY);
 }
 
 _Success_(return)
@@ -1373,7 +1376,7 @@ VOID DeviceFPGA_SetSpeedPCIeGen(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ DWORD dwPCIe
         ctx->phy.wr.pl_directed_link_auton = 1;
         ctx->phy.wr.pl_directed_link_speed = lnk_rate_new;
         ctx->phy.wr.pl_directed_link_change = 2;
-        DeviceFPGA_ConfigWrite(ctx, 0x0016, (PBYTE)&ctx->phy.wr, sizeof(ctx->phy.wr), FPGA_CONFIG_PCIE | FPGA_CONFIG_SPACE_READWRITE);
+        DeviceFPGA_ConfigWrite(ctx, 0x0016, (PBYTE)&ctx->phy.wr, sizeof(ctx->phy.wr), FPGA_REG_PCIE | FPGA_REG_READWRITE);
         for(i = 0; i < 32; i++) {
             if(!DeviceFPGA_GetPHYv4(ctx) || ctx->phy.rd.pl_directed_change_done) { break; }
             Sleep(10);
@@ -1381,7 +1384,7 @@ VOID DeviceFPGA_SetSpeedPCIeGen(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ DWORD dwPCIe
         ctx->phy.wr.pl_directed_link_auton = 0;
         ctx->phy.wr.pl_directed_link_speed = 0;
         ctx->phy.wr.pl_directed_link_change = 0;
-        DeviceFPGA_ConfigWrite(ctx, 0x0016, (PBYTE)&ctx->phy.wr, sizeof(ctx->phy.wr), FPGA_CONFIG_PCIE | FPGA_CONFIG_SPACE_READWRITE);
+        DeviceFPGA_ConfigWrite(ctx, 0x0016, (PBYTE)&ctx->phy.wr, sizeof(ctx->phy.wr), FPGA_REG_PCIE | FPGA_REG_READWRITE);
         DeviceFPGA_GetPHYv4(ctx);
     }
     // v3 bitstream - keep old slightly faulty way of doing things
@@ -1409,7 +1412,7 @@ VOID DeviceFPGA_GetDeviceId_FpgaVersion_ClearPipe(_In_ PDEVICE_CONTEXT_FPGA ctx)
     };
     if(ctx->fRestartDevice) {
         ctx->fRestartDevice = FALSE;
-        DeviceFPGA_ConfigWriteEx(ctx, 0x0002, pbCoreResetSYS, pbCoreResetSYS, FPGA_CONFIG_CORE | FPGA_CONFIG_SPACE_READWRITE);
+        DeviceFPGA_ConfigWriteEx(ctx, 0x0002, pbCoreResetSYS, pbCoreResetSYS, FPGA_REG_CORE | FPGA_REG_READWRITE);
         Sleep(1000);
         DeviceFPGA_ReInitializeFTDI(ctx);
     }
@@ -1427,7 +1430,7 @@ VOID DeviceFPGA_GetDeviceId_FpgaVersion_ClearPipe(_In_ PDEVICE_CONTEXT_FPGA ctx)
             // with trash data. Solution is to issue a "Global System Reset" of
             // the FPGA (supported on v4.6+ bitstreams). After the core and the
             // FT601 is back online try re-initialize the USB connection.
-            DeviceFPGA_ConfigWriteEx(ctx, 0x0002, pbCoreResetSYS, pbCoreResetSYS, FPGA_CONFIG_CORE | FPGA_CONFIG_SPACE_READWRITE);
+            DeviceFPGA_ConfigWriteEx(ctx, 0x0002, pbCoreResetSYS, pbCoreResetSYS, FPGA_REG_CORE | FPGA_REG_READWRITE);
             Sleep(1000);
             DeviceFPGA_ReInitializeFTDI(ctx);
         }
@@ -1440,10 +1443,10 @@ VOID DeviceFPGA_HotResetV4(_In_ PDEVICE_CONTEXT_FPGA ctx)
 {
     DeviceFPGA_GetPHYv4(ctx);
     ctx->phy.wr.pl_transmit_hot_rst = 1;
-    DeviceFPGA_ConfigWrite(ctx, 0x0016, (PBYTE)&ctx->phy.wr, sizeof(ctx->phy.wr), FPGA_CONFIG_PCIE | FPGA_CONFIG_SPACE_READWRITE);
+    DeviceFPGA_ConfigWrite(ctx, 0x0016, (PBYTE)&ctx->phy.wr, sizeof(ctx->phy.wr), FPGA_REG_PCIE | FPGA_REG_READWRITE);
     Sleep(250);     // sloppy w/ sleep instead of poll pl_ltssm_state - but 250ms should be plenty of time ...
     ctx->phy.wr.pl_transmit_hot_rst = 0;
-    DeviceFPGA_ConfigWrite(ctx, 0x0016, (PBYTE)& ctx->phy.wr, sizeof(ctx->phy.wr), FPGA_CONFIG_PCIE | FPGA_CONFIG_SPACE_READWRITE);
+    DeviceFPGA_ConfigWrite(ctx, 0x0016, (PBYTE)& ctx->phy.wr, sizeof(ctx->phy.wr), FPGA_REG_PCIE | FPGA_REG_READWRITE);
 }
 
 _Success_(return)
@@ -1451,16 +1454,16 @@ BOOL DeviceFPGA_GetDeviceID_FpgaVersionV4(_In_ PDEVICE_CONTEXT_FPGA ctx)
 {
     WORD wbsDeviceId, wMagicPCIe;
     DWORD dwInactivityTimer = 0x000186a0;       // set inactivity timer to 1ms ( 0x0186a0 * 100MHz ) [only later activated on UDP bitstreams]
-    if(!DeviceFPGA_ConfigRead(ctx, 0x0008, (PBYTE)&ctx->wFpgaVersionMajor, 1, FPGA_CONFIG_CORE | FPGA_CONFIG_SPACE_READONLY) || ctx->wFpgaVersionMajor < 4) { return FALSE; }
-    DeviceFPGA_ConfigRead(ctx, 0x0009, (PBYTE)&ctx->wFpgaVersionMinor, 1, FPGA_CONFIG_CORE | FPGA_CONFIG_SPACE_READONLY);
-    DeviceFPGA_ConfigRead(ctx, 0x000a, (PBYTE)&ctx->wFpgaID, 1, FPGA_CONFIG_CORE | FPGA_CONFIG_SPACE_READONLY);
-    DeviceFPGA_ConfigWrite(ctx, 0x0008, (PBYTE)&dwInactivityTimer, 4, FPGA_CONFIG_CORE | FPGA_CONFIG_SPACE_READWRITE);
+    if(!DeviceFPGA_ConfigRead(ctx, 0x0008, (PBYTE)&ctx->wFpgaVersionMajor, 1, FPGA_REG_CORE | FPGA_REG_READONLY) || ctx->wFpgaVersionMajor < 4) { return FALSE; }
+    DeviceFPGA_ConfigRead(ctx, 0x0009, (PBYTE)&ctx->wFpgaVersionMinor, 1, FPGA_REG_CORE | FPGA_REG_READONLY);
+    DeviceFPGA_ConfigRead(ctx, 0x000a, (PBYTE)&ctx->wFpgaID, 1, FPGA_REG_CORE | FPGA_REG_READONLY);
+    DeviceFPGA_ConfigWrite(ctx, 0x0008, (PBYTE)&dwInactivityTimer, 4, FPGA_REG_CORE | FPGA_REG_READWRITE);
     // PCIe
-    DeviceFPGA_ConfigRead(ctx, 0x0008, (PBYTE)&wbsDeviceId, 2, FPGA_CONFIG_PCIE | FPGA_CONFIG_SPACE_READONLY);
-    if(!wbsDeviceId && DeviceFPGA_ConfigRead(ctx, 0x0000, (PBYTE)&wMagicPCIe, 2, FPGA_CONFIG_PCIE | FPGA_CONFIG_SPACE_READWRITE) && (wMagicPCIe == 0x6745)) {
+    DeviceFPGA_ConfigRead(ctx, 0x0008, (PBYTE)&wbsDeviceId, 2, FPGA_REG_PCIE | FPGA_REG_READONLY);
+    if(!wbsDeviceId && DeviceFPGA_ConfigRead(ctx, 0x0000, (PBYTE)&wMagicPCIe, 2, FPGA_REG_PCIE | FPGA_REG_READWRITE) && (wMagicPCIe == 0x6745)) {
         // failed getting device id - assume device is connected -> try recover the bad link with hot-reset.
         DeviceFPGA_HotResetV4(ctx);
-        DeviceFPGA_ConfigRead(ctx, 0x0008, (PBYTE)&wbsDeviceId, 2, FPGA_CONFIG_PCIE | FPGA_CONFIG_SPACE_READONLY);
+        DeviceFPGA_ConfigRead(ctx, 0x0008, (PBYTE)&wbsDeviceId, 2, FPGA_REG_PCIE | FPGA_REG_READONLY);
     }
     ctx->wDeviceId = _byteswap_ushort(wbsDeviceId);
     ctx->phySupported = DeviceFPGA_GetPHYv4(ctx);
@@ -1853,6 +1856,7 @@ VOID DeviceFPGA_ReadScatter(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _Inout_ PP
     DWORD i, iRetry;
     BOOL fRetry;
     PMEM_SCATTER pMEM;
+    if(!ctx->wDeviceId) { return; }
     for(iRetry = 0, fRetry = TRUE; (fRetry && (iRetry <= ctx->perf.RETRY_ON_ERROR)); iRetry++) {
         fRetry = FALSE;
         for(i = 0; i < cMEMs; i++) {
@@ -1997,6 +2001,7 @@ BOOL DeviceFPGA_Write(_In_ PLC_CONTEXT ctxLC, _In_ QWORD pa, _In_ DWORD cb, _In_
     BOOL result = TRUE;
     BYTE be, pbb[4];
     DWORD cbtx;
+    if(!ctx->wDeviceId) { return FALSE; }
     // TX 1st dword if not aligned
     if(cb && (pa & 0x3)) {
         be = (cb < 3) ? (0xf >> (4 - cb)) : 0xf;
@@ -2075,8 +2080,8 @@ BOOL DeviceFPGA_Command(
             if(ctx->wFpgaVersionMajor < 4) { return FALSE; }
             if(pbDataIn && (cbDataIn > 0x100)) { return FALSE; }
             fCfgRegConfig =
-                ((qwOptionHi == LC_CMD_FPGA_CFGREGCFG) ? FPGA_CONFIG_CORE : FPGA_CONFIG_PCIE) |
-                ((qwOptionLo & 0x8000) ? FPGA_CONFIG_SPACE_READWRITE : FPGA_CONFIG_SPACE_READONLY);
+                ((qwOptionHi == LC_CMD_FPGA_CFGREGCFG) ? FPGA_REG_CORE : FPGA_REG_PCIE) |
+                ((qwOptionLo & 0x8000) ? FPGA_REG_READWRITE : FPGA_REG_READONLY);
             if(pbDataIn) {
                 DeviceFPGA_ConfigWrite(ctx, qwOptionLo & 0x3fff, pbDataIn, (WORD)cbDataIn, fCfgRegConfig);
             }
@@ -2097,15 +2102,17 @@ BOOL DeviceFPGA_Command(
             if(ctx->wFpgaVersionMajor < 4) { return FALSE; }
             if(!pbDataIn || (cbDataIn != 4)) { return FALSE; }
             fCfgRegConfig =
-                ((qwOptionHi == LC_CMD_FPGA_CFGREGCFG_MARKWR) ? FPGA_CONFIG_CORE : FPGA_CONFIG_PCIE) |
-                FPGA_CONFIG_SPACE_READWRITE;
+                ((qwOptionHi == LC_CMD_FPGA_CFGREGCFG_MARKWR) ? FPGA_REG_CORE : FPGA_REG_PCIE) |
+                FPGA_REG_READWRITE;
             return DeviceFPGA_ConfigWriteEx(ctx, qwOptionLo & 0x3fff, pbDataIn, pbDataIn + 2, fCfgRegConfig);
-        case LC_CMD_FPGA_PCIECFGSPACE_WR:
-            if(!pbDataIn) { return FALSE; }
-            if(ctx->wFpgaVersionMajor < 4) { return FALSE; }
-            if((ctx->wFpgaVersionMajor == 4) && (ctx->wFpgaVersionMinor == 2)) { return FALSE; }
-            if(pbDataIn || !cbDataIn || !(cbDataIn % 4) || (cbDataIn > 0x1000)) { return FALSE; }
-            return DeviceFPGA_PCIeCfgSpaceShadowWrite(ctx, qwOptionLo & 0x3fff, pbDataIn, cbDataIn);
+        case LC_CMD_FPGA_CFGSPACE_SHADOW_RD:
+            if(!ppbDataOut || (ctx->wFpgaVersionMinor < 8)) { return FALSE; }
+            if(!(*ppbDataOut = LocalAlloc(LMEM_ZEROINIT, 0x1000))) { return FALSE; }
+            if(pcbDataOut) { *pcbDataOut = 0x1000; }
+            return DeviceFPGA_ConfigRead(ctx, 0, *ppbDataOut, 0x1000, FPGA_REG_CORE | FPGA_REG_SHADOWCFGSPACE);
+        case LC_CMD_FPGA_CFGSPACE_SHADOW_WR:
+            if(!pbDataIn || (ctx->wFpgaVersionMinor < 8)) { return FALSE; }
+            return DeviceFPGA_ConfigWrite(ctx, (WORD)qwOptionLo, pbDataIn, (WORD)cbDataIn, FPGA_REG_CORE | FPGA_REG_SHADOWCFGSPACE);
         case LC_CMD_FPGA_CFGREG_DEBUGPRINT:
             DeviceFPGA_ConfigPrint(ctxLC, ctx);
             return TRUE;
@@ -2219,6 +2226,7 @@ BOOL DeviceFPGA_SetOption(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _In_ QWORD
 
 #define FPGA_PARAMETER_UDP_ADDRESS     "ip"
 #define FPGA_PARAMETER_PCIE            "pciegen"
+#define FPGA_PARAMETER_PCIE_NOCONNECT  "pcienotconnected"
 #define FPGA_PARAMETER_RESTART_DEVICE  "devreload"
 #define FPGA_PARAMETER_DELAY_READ      "tmread"
 #define FPGA_PARAMETER_DELAY_WRITE     "tmwrite"
@@ -2255,9 +2263,13 @@ BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
     if(szDeviceError) { goto fail; }
     ctx->fRestartDevice = (1 == LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_RESTART_DEVICE));
     DeviceFPGA_GetDeviceID_FpgaVersion(ctx);
+    if(!ctx->wFpgaVersionMajor) {
+        szDeviceError = "Unable to connect to FPGA device";
+        goto fail;
+    }
     // verify parameters and set version&speed
     DeviceFPGA_SetSpeedPCIeGen(ctx, (DWORD)LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_PCIE));
-    if(!ctx->wDeviceId) {
+    if(!ctx->wDeviceId && !LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_PCIE_NOCONNECT)) {
         szDeviceError = "Unable to retrieve required Device PCIe ID";
         goto fail;
     }

@@ -133,13 +133,13 @@ BOOL LeechRPC_Decompress(_In_ PLEECHRPC_COMPRESS ctxCompress, _In_ PLEECHRPC_MSG
 // GENERAL FUNCTIONALITY BELOW:
 //-----------------------------------------------------------------------------
 
-VOID LeechSvc_GetTimeStamp(_Out_writes_(MAX_PATH) LPSTR szTime)
+VOID LeechSvc_GetTimeStamp(_Out_writes_(32) LPSTR szTime)
 {
     SYSTEMTIME time;
     GetLocalTime(&time);
     sprintf_s(
         szTime,
-        MAX_PATH,
+        32,
         "%04i-%02i-%02i %02i:%02i:%02i",
         time.wYear,
         time.wMonth,

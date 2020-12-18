@@ -12,122 +12,135 @@
 
 typedef struct tdLEECHRPC_SERVER_CONTEXT {
     BOOL fValid;
-    HANDLE hLC;
     LEECHRPC_COMPRESS Compress;
-    BOOL fLeechCoreValid;
-    BOOL fHousekeeperThread;
-    BOOL fHousekeeperThreadIsRunning;
-    CRITICAL_SECTION LockUpdateKeepalive;
+    BOOL fInactivityWatcherThread;
+    BOOL fInactivityWatcherThreadIsRunning;
+    CRITICAL_SECTION LockClientList;
     struct {
+        HANDLE hLC;
         DWORD dwRpcClientID;
+        DWORD cActiveRequests;
         QWORD qwLastTickCount64;
-    } ClientKeepalive[LEECHAGENT_CLIENTKEEPALIVE_MAX_CLIENTS];
+    } ClientList[LEECHAGENT_CLIENTKEEPALIVE_MAX_CLIENTS];
 } LEECHRPC_SERVER_CONTEXT, *PLEECHRPC_SERVER_CONTEXT;
 
 LEECHRPC_SERVER_CONTEXT ctxLeechRpc = { 0 };
-
-/*
-* Close any connection to 'LeechCore' and the embedded Python/VMM environments
-* if they should exist.
-*/
-VOID LeechRPC_FinalConnectionCleanup()
-{
-    LcClose(ctxLeechRpc.hLC);
-    ctxLeechRpc.hLC = NULL;
-}
 
 //-----------------------------------------------------------------------------
 // CLIENT TRACK / KEEPALIVE FUNCTIONALITY BELOW:
 //-----------------------------------------------------------------------------
 
-DWORD LeechRPC_ClientKeepaliveRemove(_In_ DWORD dwRpcClientID)
-{
-    DWORD i, c;
-    CHAR szTime[MAX_PATH];
-    EnterCriticalSection(&ctxLeechRpc.LockUpdateKeepalive);
-    for(c = 0, i = 0; i < LEECHAGENT_CLIENTKEEPALIVE_MAX_CLIENTS; i++) {
-        if(dwRpcClientID && (dwRpcClientID == ctxLeechRpc.ClientKeepalive[i].dwRpcClientID)) {
-            LeechSvc_GetTimeStamp(szTime);
-            printf("[%s] LeechAgent: CLOSE: Client ID %08X\n", szTime, dwRpcClientID);
-            ctxLeechRpc.ClientKeepalive[i].dwRpcClientID = 0;
-        }
-        if(ctxLeechRpc.ClientKeepalive[i].dwRpcClientID) {
-            c++;
-        }
-    }
-    LeaveCriticalSection(&ctxLeechRpc.LockUpdateKeepalive);
-    return c;
-}
-
-VOID LeechRPC_ClientKeepaliveThread(PVOID pv)
+_Success_(return != NULL)
+HANDLE LeechRPC_LcHandle_GetExisting(_In_ DWORD dwRpcClientID)
 {
     DWORD i;
-    CHAR szTime[MAX_PATH];
-    ctxLeechRpc.fHousekeeperThread = TRUE;
-    ctxLeechRpc.fHousekeeperThreadIsRunning = TRUE;
-    while(ctxLeechRpc.fHousekeeperThread) {
-        Sleep(100);
-        EnterCriticalSection(&ctxLeechRpc.LockUpdateKeepalive);
-        for(i = 0; i < LEECHAGENT_CLIENTKEEPALIVE_MAX_CLIENTS; i++) {
-            if(ctxLeechRpc.ClientKeepalive[i].dwRpcClientID && (ctxLeechRpc.ClientKeepalive[i].qwLastTickCount64 + LEECHAGENT_CLIENTKEEPALIVE_TIMEOUT_MS < GetTickCount64())) {
-                if(0 == LeechRPC_ClientKeepaliveRemove(ctxLeechRpc.ClientKeepalive[i].dwRpcClientID)) {
-                    LeechSvc_GetTimeStamp(szTime);
-                    printf("[%s] LeechAgent: CLOSE: Last connected client timed out after %is.\n", szTime, (LEECHAGENT_CLIENTKEEPALIVE_TIMEOUT_MS / 1000));
-                    ctxLeechRpc.fLeechCoreValid = FALSE;
-                    LeechRPC_FinalConnectionCleanup();
-                }
-            }
-        }
-        LeaveCriticalSection(&ctxLeechRpc.LockUpdateKeepalive);
-    }
-    ctxLeechRpc.fHousekeeperThreadIsRunning = FALSE;
-}
-
-/*
-* -- qwClientID
-* -- return = number of clients registered after keepalive update, (DWORD)-1 on fail.
-*/
-DWORD LeechRPC_ClientKeepaliveUpdate(_In_ DWORD dwRpcClientID, _In_ BOOL fAdd)
-{
-    DWORD i, c;
-    CHAR szTime[MAX_PATH];
-    BOOL fUpdated = FALSE;
-    if(!dwRpcClientID) { return (DWORD)-1; }
-    EnterCriticalSection(&ctxLeechRpc.LockUpdateKeepalive);
-    // 1: update existing entry
+    HANDLE hLC = NULL;
+    if(!dwRpcClientID) { return NULL; }
+    EnterCriticalSection(&ctxLeechRpc.LockClientList);
     for(i = 0; i < LEECHAGENT_CLIENTKEEPALIVE_MAX_CLIENTS; i++) {
-        if(dwRpcClientID == ctxLeechRpc.ClientKeepalive[i].dwRpcClientID) {
-            ctxLeechRpc.ClientKeepalive[i].qwLastTickCount64 = GetTickCount64();
-            fUpdated = TRUE;
+        if(ctxLeechRpc.ClientList[i].dwRpcClientID == dwRpcClientID) {
+            ctxLeechRpc.ClientList[i].cActiveRequests++;
+            ctxLeechRpc.ClientList[i].qwLastTickCount64 = GetTickCount64();
+            hLC = ctxLeechRpc.ClientList[i].hLC;
             break;
         }
     }
-    // 2: find new entry and insert into (if needed)
-    if(!fUpdated && fAdd) {
+    LeaveCriticalSection(&ctxLeechRpc.LockClientList);
+    return hLC;
+}
+
+_Success_(return)
+BOOL LeechRPC_LcHandle_New(_In_ DWORD dwRpcClientID, _In_ HANDLE hLC)
+{
+    DWORD i;
+    EnterCriticalSection(&ctxLeechRpc.LockClientList);
+    for(i = 0; i < LEECHAGENT_CLIENTKEEPALIVE_MAX_CLIENTS; i++) {
+        if(!ctxLeechRpc.ClientList[i].dwRpcClientID) {
+            ctxLeechRpc.ClientList[i].hLC = hLC;
+            ctxLeechRpc.ClientList[i].dwRpcClientID = dwRpcClientID;
+            ctxLeechRpc.ClientList[i].cActiveRequests = 0;
+            ctxLeechRpc.ClientList[i].qwLastTickCount64 = GetTickCount64();
+            LeaveCriticalSection(&ctxLeechRpc.LockClientList);
+            return TRUE;
+        }
+    }
+    LeaveCriticalSection(&ctxLeechRpc.LockClientList);
+    return FALSE;
+}
+
+VOID LeechRPC_LcHandle_Return(_In_opt_ HANDLE hLC)
+{
+    DWORD i;
+    if(!hLC) { return; }
+    for(i = 0; i < LEECHAGENT_CLIENTKEEPALIVE_MAX_CLIENTS; i++) {
+        if(ctxLeechRpc.ClientList[i].hLC == hLC) {
+            EnterCriticalSection(&ctxLeechRpc.LockClientList);
+            ctxLeechRpc.ClientList[i].cActiveRequests--;
+            LeaveCriticalSection(&ctxLeechRpc.LockClientList);
+            break;
+        }
+    }
+}
+
+VOID LeechRPC_LcHandle_Close(_In_ DWORD dwRpcClientID, _In_ BOOL fReasonTimeout)
+{
+    DWORD i;
+    CHAR szTime[32];
+    HANDLE hLC = NULL;
+    EnterCriticalSection(&ctxLeechRpc.LockClientList);
+    for(i = 0; i < LEECHAGENT_CLIENTKEEPALIVE_MAX_CLIENTS; i++) {
+        if(ctxLeechRpc.ClientList[i].dwRpcClientID == dwRpcClientID) {
+            while(ctxLeechRpc.ClientList[i].cActiveRequests) {
+                LeaveCriticalSection(&ctxLeechRpc.LockClientList);
+                Sleep(10);
+                EnterCriticalSection(&ctxLeechRpc.LockClientList);
+            }
+            hLC = ctxLeechRpc.ClientList[i].hLC;
+            ctxLeechRpc.ClientList[i].hLC = NULL;
+            ctxLeechRpc.ClientList[i].dwRpcClientID = 0;
+            ctxLeechRpc.ClientList[i].qwLastTickCount64 = 0;
+            break;
+        }
+    }
+    LeaveCriticalSection(&ctxLeechRpc.LockClientList);
+    if(hLC) {
+        LcClose(hLC);
+        LeechSvc_GetTimeStamp(szTime);
+        if(fReasonTimeout) {
+            printf("[%s] LeechAgent: CLOSE: Client ID %08X timeout after %is.\n", szTime, dwRpcClientID, (LEECHAGENT_CLIENTKEEPALIVE_TIMEOUT_MS / 1000));
+        } else {
+            printf("[%s] LeechAgent: CLOSE: Client ID %08X\n", szTime, dwRpcClientID);
+        }
+    }
+}
+
+VOID LeechRPC_LcHandle_CloseAll()
+{
+    DWORD i;
+    for(i = 0; i < LEECHAGENT_CLIENTKEEPALIVE_MAX_CLIENTS; i++) {
+        if(ctxLeechRpc.ClientList[i].dwRpcClientID) {
+            LeechRPC_LcHandle_Close(ctxLeechRpc.ClientList[i].dwRpcClientID, FALSE);
+        }
+    }
+}
+
+VOID LeechRPC_LcHandle_InactivityWatcherThread(PVOID pv)
+{
+    DWORD i;
+    ctxLeechRpc.fInactivityWatcherThread = TRUE;
+    ctxLeechRpc.fInactivityWatcherThreadIsRunning = TRUE;
+    while(ctxLeechRpc.fInactivityWatcherThread) {
+        Sleep(1000);
         for(i = 0; i < LEECHAGENT_CLIENTKEEPALIVE_MAX_CLIENTS; i++) {
-            if(0 == ctxLeechRpc.ClientKeepalive[i].dwRpcClientID) {
-                LeechSvc_GetTimeStamp(szTime);
-                printf("[%s] LeechAgent:  OPEN: Client ID %08X\n", szTime, dwRpcClientID);
-                ctxLeechRpc.ClientKeepalive[i].dwRpcClientID = dwRpcClientID;
-                ctxLeechRpc.ClientKeepalive[i].qwLastTickCount64 = GetTickCount64();
-                fUpdated = TRUE;
-                break;
+            if(ctxLeechRpc.ClientList[i].qwLastTickCount64 && (ctxLeechRpc.ClientList[i].qwLastTickCount64 + LEECHAGENT_CLIENTKEEPALIVE_TIMEOUT_MS < GetTickCount64())) {
+                LeechRPC_LcHandle_Close(ctxLeechRpc.ClientList[i].dwRpcClientID, TRUE);
             }
         }
     }
-    if(!fUpdated) {
-        LeaveCriticalSection(&ctxLeechRpc.LockUpdateKeepalive);
-        return (DWORD)-1;
-    }
-    // 3: count entries
-    for(c = 0, i = 0; i < LEECHAGENT_CLIENTKEEPALIVE_MAX_CLIENTS; i++) {
-        if(ctxLeechRpc.ClientKeepalive[i].dwRpcClientID) {
-            c++;
-        }
-    }
-    LeaveCriticalSection(&ctxLeechRpc.LockUpdateKeepalive);
-    return c;
+    ctxLeechRpc.fInactivityWatcherThreadIsRunning = FALSE;
 }
+
+
 
 //-----------------------------------------------------------------------------
 // GENERAL FUNCTIONALITY BELOW:
@@ -135,25 +148,25 @@ DWORD LeechRPC_ClientKeepaliveUpdate(_In_ DWORD dwRpcClientID, _In_ BOOL fAdd)
 
 VOID LeechRpcOnLoadInitialize()
 {
-    ctxLeechRpc.fLeechCoreValid = TRUE;
+    ctxLeechRpc.fValid = TRUE;
     LeechRPC_CompressInitialize(&ctxLeechRpc.Compress);
-    InitializeCriticalSection(&ctxLeechRpc.LockUpdateKeepalive);
-    CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)LeechRPC_ClientKeepaliveThread, NULL, 0, NULL);
+    InitializeCriticalSection(&ctxLeechRpc.LockClientList);
+    CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)LeechRPC_LcHandle_InactivityWatcherThread, NULL, 0, NULL);
 }
 
 VOID LeechRpcOnUnloadClose()
 {
-    ctxLeechRpc.fHousekeeperThread = FALSE;
-    while(ctxLeechRpc.fHousekeeperThreadIsRunning) {
+    ctxLeechRpc.fInactivityWatcherThread = FALSE;
+    while(ctxLeechRpc.fInactivityWatcherThreadIsRunning) {
         SwitchToThread();
     }
-    LeechRPC_FinalConnectionCleanup();
-    DeleteCriticalSection(&ctxLeechRpc.LockUpdateKeepalive);
+    LeechRPC_LcHandle_CloseAll();
+    DeleteCriticalSection(&ctxLeechRpc.LockClientList);
     LeechRPC_CompressClose(&ctxLeechRpc.Compress);
     ZeroMemory(&ctxLeechRpc, sizeof(LEECHRPC_SERVER_CONTEXT));
 }
 
-error_status_t LeechRpc_CommandReadScatter(_In_ PLEECHRPC_MSG_BIN pReq, long *pcbOut, byte **ppbOut)
+error_status_t LeechRpc_CommandReadScatter(_In_ HANDLE hLC, _In_ PLEECHRPC_MSG_BIN pReq, long *pcbOut, byte **ppbOut)
 {
     BOOL fOK;
     PLEECHRPC_MSG_BIN pRsp = NULL;
@@ -180,7 +193,7 @@ error_status_t LeechRpc_CommandReadScatter(_In_ PLEECHRPC_MSG_BIN pReq, long *pc
     }
     if(cbDataOffset > cbMax) { goto fail; }
     // 4: call & count read data
-    LcReadScatter(ctxLeechRpc.hLC, cMEMs, ppMEMs);
+    LcReadScatter(hLC, cMEMs, ppMEMs);
     pMEM_Src = (PMEM_SCATTER)pReq->pb;
     for(i = 0, cbRead = 0; i < cMEMs; i++) {
         if(pMEM_Src->f) {
@@ -224,7 +237,7 @@ fail:
     return (error_status_t)-1;
 }
 
-error_status_t LeechRpc_CommandWriteScatter(_In_ PLEECHRPC_MSG_BIN pReq, long *pcbOut, byte **ppbOut)
+error_status_t LeechRpc_CommandWriteScatter(_In_ HANDLE hLC, _In_ PLEECHRPC_MSG_BIN pReq, long *pcbOut, byte **ppbOut)
 {
     PBOOL pfRsp;
     PLEECHRPC_MSG_BIN pRsp = NULL;
@@ -245,7 +258,7 @@ error_status_t LeechRpc_CommandWriteScatter(_In_ PLEECHRPC_MSG_BIN pReq, long *p
         pbData += pMEM->cb;
     }
     // 2: call & return result
-    LcWriteScatter(ctxLeechRpc.hLC, cMEMs, ppMEMs);
+    LcWriteScatter(hLC, cMEMs, ppMEMs);
     cbRsp = sizeof(LEECHRPC_MSG_BIN) + cMEMs * sizeof(BOOL);
     if(!(pRsp = LocalAlloc(LMEM_ZEROINIT, cbRsp))) { goto fail; }
     pRsp->cbMsg = cbRsp;
@@ -270,7 +283,6 @@ fail:
     LocalFree(ppMEMs);
     return (error_status_t)-1;
 }
-
 
 /*
 * Transfer commands/data to/from the remote service (if it exists).
@@ -301,16 +313,14 @@ BOOL LeechRpc_CommandAgent(_In_ QWORD fOption, _In_ DWORD cbDataIn, _In_reads_(c
 error_status_t LeechRpc_CommandOpen(_In_ PLEECHRPC_MSG_OPEN pReq, long *pcbOut, byte **ppbOut)
 {
     DWORD cbRsp;
-    HANDLE hLeechCoreExisting;
+    CHAR szTime[32];
+    HANDLE hLC = NULL;
     PLEECHRPC_MSG_OPEN pRsp = NULL;
     PLC_CONFIG_ERRORINFO pLcErrorInfo = NULL;
-    if(ctxLeechRpc.hLC) {
-        strcpy_s(pReq->cfg.szDevice, MAX_PATH - 1, "existing");
-        hLeechCoreExisting = LcCreate(&pReq->cfg);
-        // decrement handle refcount (rpc server keeps track of refcount internally)
-        if(hLeechCoreExisting) { LcClose(hLeechCoreExisting); }
-    } else {
-        ctxLeechRpc.hLC = LcCreateEx(&pReq->cfg, &pLcErrorInfo);
+    hLC = LcCreateEx(&pReq->cfg, &pLcErrorInfo);
+    if(hLC && !LeechRPC_LcHandle_New(pReq->dwRpcClientID, hLC)) {
+        LcClose(hLC);
+        hLC = NULL;
     }
     pReq->cfg.pfn_printf_opt = NULL;
     cbRsp = sizeof(LEECHRPC_MSG_OPEN) + (pLcErrorInfo ? (pLcErrorInfo->cbStruct - sizeof(LC_CONFIG_ERRORINFO)) : 0);
@@ -322,13 +332,13 @@ error_status_t LeechRpc_CommandOpen(_In_ PLEECHRPC_MSG_OPEN pReq, long *pcbOut, 
     pRsp->cbMsg = cbRsp;
     pRsp->dwMagic = LEECHRPC_MSGMAGIC;
     pRsp->fMsgResult = TRUE;
-    pRsp->fValidOpen = ctxLeechRpc.hLC ? TRUE : FALSE;
+    pRsp->fValidOpen = hLC ? TRUE : FALSE;
     if(pRsp->fValidOpen) {
-        ctxLeechRpc.fLeechCoreValid = TRUE;
+        LeechSvc_GetTimeStamp(szTime);
+        printf("[%s] LeechAgent:  OPEN: Client ID %08X\n", szTime, pReq->dwRpcClientID);
         memcpy(&pRsp->cfg, &pReq->cfg, sizeof(LC_CONFIG));
         pRsp->cfg.fRemoteDisableCompress = pRsp->cfg.fRemoteDisableCompress || !ctxLeechRpc.Compress.fValid;
         pRsp->flags = 0;
-        LeechRPC_ClientKeepaliveUpdate(pReq->dwRpcClientID, TRUE);
     }
     if(pLcErrorInfo) {
         memcpy(&pRsp->errorinfo, pLcErrorInfo, pLcErrorInfo->cbStruct);
@@ -347,12 +357,12 @@ error_status_t LeechRpc_ReservedSubmitCommand(
     /* [out] */ long *pcbOut,
     /* [size_is][size_is][out] */ byte **ppbOut)
 {
+    HANDLE hLC = NULL;
     BOOL fTMP = FALSE;
     DWORD cbTMP = 0;
     PBYTE pbTMP = NULL;
     BOOL fFreeReqBin = FALSE;
-    CHAR szTime[MAX_PATH];
-    error_status_t status;
+    error_status_t status = 0;
     PLEECHRPC_MSG_HDR pReq = NULL;
     PLEECHRPC_MSG_HDR pRsp = NULL;
     PLEECHRPC_MSG_OPEN pReqOpen = NULL;
@@ -362,10 +372,12 @@ error_status_t LeechRpc_ReservedSubmitCommand(
     PLEECHRPC_MSG_BIN pReqBin = NULL;
     PLEECHRPC_MSG_BIN pRspBin = NULL;
     // 1: sanity checks in incoming data
+    if(!ctxLeechRpc.fValid) { goto fail; }
     if(cbIn < sizeof(LEECHRPC_MSG_HDR)) { goto fail; }
     pReq = (PLEECHRPC_MSG_HDR)pbIn;
     if((pReq->dwMagic != LEECHRPC_MSGMAGIC) || (pReq->tpMsg > LEECHRPC_MSGTYPE_MAX) || (pReq->cbMsg < sizeof(LEECHRPC_MSG_HDR))) { goto fail; }
-    if(!ctxLeechRpc.fLeechCoreValid && !((pReq->tpMsg == LEECHRPC_MSGTYPE_PING_REQ) || (pReq->tpMsg == LEECHRPC_MSGTYPE_OPEN_REQ) || (pReq->tpMsg == LEECHRPC_MSGTYPE_CLOSE_REQ))) { goto fail; }
+    hLC = LeechRPC_LcHandle_GetExisting(pReq->dwRpcClientID);
+    if(!hLC && !((pReq->tpMsg == LEECHRPC_MSGTYPE_PING_REQ) || (pReq->tpMsg == LEECHRPC_MSGTYPE_OPEN_REQ) || (pReq->tpMsg == LEECHRPC_MSGTYPE_CLOSE_REQ))) { goto fail; }
     switch(pReq->tpMsg) {
         case LEECHRPC_MSGTYPE_PING_REQ:
         case LEECHRPC_MSGTYPE_CLOSE_REQ:
@@ -405,67 +417,63 @@ error_status_t LeechRpc_ReservedSubmitCommand(
             pRsp->tpMsg = LEECHRPC_MSGTYPE_PING_RSP;
             *pcbOut = pRsp->cbMsg;
             *ppbOut = (PBYTE)pRsp;
-            return 0;
+            goto finish;
         case LEECHRPC_MSGTYPE_KEEPALIVE_REQ:
             if(!(pRsp = LocalAlloc(0, sizeof(LEECHRPC_MSG_HDR)))) { goto fail; }
             pRsp->cbMsg = sizeof(LEECHRPC_MSG_HDR);
             pRsp->dwMagic = LEECHRPC_MSGMAGIC;
             pRsp->fMsgResult = TRUE;
-            LeechRPC_ClientKeepaliveUpdate(pReq->dwRpcClientID, FALSE);
             pRsp->tpMsg = LEECHRPC_MSGTYPE_KEEPALIVE_RSP;
             *pcbOut = pRsp->cbMsg;
             *ppbOut = (PBYTE)pRsp;
-            return 0;
+            goto finish;
         case LEECHRPC_MSGTYPE_OPEN_REQ:
             if(pReqOpen) {
                 LeechRpc_CommandOpen(pReqOpen, pcbOut, ppbOut);
             }
-            return 0;
+            goto finish;
         case LEECHRPC_MSGTYPE_READSCATTER_REQ:
-            status = LeechRpc_CommandReadScatter(pReqBin, pcbOut, ppbOut);
+            status = LeechRpc_CommandReadScatter(hLC, pReqBin, pcbOut, ppbOut);
             if(fFreeReqBin) { LocalFree(pReqBin); pReqBin = NULL; } // only free locally allocated decompressed bindata
-            return status;
+            goto finish;
         case LEECHRPC_MSGTYPE_WRITESCATTER_REQ:
-            status = LeechRpc_CommandWriteScatter(pReqBin, pcbOut, ppbOut);
+            status = LeechRpc_CommandWriteScatter(hLC, pReqBin, pcbOut, ppbOut);
             if(fFreeReqBin) { LocalFree(pReqBin); pReqBin = NULL; } // only free locally allocated decompressed bindata
-            return status;
+            goto finish;
         case LEECHRPC_MSGTYPE_CLOSE_REQ:
+            LeechRPC_LcHandle_Return(hLC);
+            hLC = NULL;
+            LeechRPC_LcHandle_Close(pReq->dwRpcClientID, FALSE);
             if(!(pRsp = LocalAlloc(0, sizeof(LEECHRPC_MSG_HDR)))) { goto fail; }
             pRsp->cbMsg = sizeof(LEECHRPC_MSG_HDR);
             pRsp->dwMagic = LEECHRPC_MSGMAGIC;
             pRsp->fMsgResult = TRUE;
-            if(pReq->dwRpcClientID && (0 == LeechRPC_ClientKeepaliveRemove(pReq->dwRpcClientID))) {
-                LeechSvc_GetTimeStamp(szTime);
-                printf("[%s] LeechAgent: CLOSE: Last connected client requested close.\n", szTime);
-                ctxLeechRpc.fLeechCoreValid = FALSE;
-                LeechRPC_FinalConnectionCleanup();
-            }
             pRsp->tpMsg = LEECHRPC_MSGTYPE_CLOSE_RSP;
             *pcbOut = pRsp->cbMsg;
             *ppbOut = (PBYTE)pRsp;
-            return 0;
+            goto finish;
         case LEECHRPC_MSGTYPE_GETOPTION_REQ:
             if(!(pRspData = LocalAlloc(0, sizeof(LEECHRPC_MSG_DATA)))) { goto fail; }
             pRspData->cbMsg = sizeof(LEECHRPC_MSG_DATA);
             pRspData->dwMagic = LEECHRPC_MSGMAGIC;
-            pRspData->fMsgResult = pReqData && LcGetOption(ctxLeechRpc.hLC, pReqData->qwData[0], &pRspData->qwData[0]);
+            pRspData->fMsgResult = pReqData && LcGetOption(hLC, pReqData->qwData[0], &pRspData->qwData[0]);
             pRspData->tpMsg = LEECHRPC_MSGTYPE_GETOPTION_RSP;
             *pcbOut = pRspData->cbMsg;
             *ppbOut = (PBYTE)pRspData;
-            return 0;
+            goto finish;
         case LEECHRPC_MSGTYPE_SETOPTION_REQ:
             if(!(pRsp = LocalAlloc(0, sizeof(LEECHRPC_MSG_HDR)))) { goto fail; }
             pRsp->cbMsg = sizeof(LEECHRPC_MSG_HDR);
             pRsp->dwMagic = LEECHRPC_MSGMAGIC;
-            pRsp->fMsgResult = pReqData && LcSetOption(ctxLeechRpc.hLC, pReqData->qwData[0], pReqData->qwData[1]);
+            pRsp->fMsgResult = pReqData && LcSetOption(hLC, pReqData->qwData[0], pReqData->qwData[1]);
             pRsp->tpMsg = LEECHRPC_MSGTYPE_SETOPTION_RSP;
             *pcbOut = pRsp->cbMsg;
             *ppbOut = (PBYTE)pRsp;
-            return 0;
+            goto finish;
         case LEECHRPC_MSGTYPE_COMMAND_REQ:
             fTMP = (pReqBin->qwData[0] >> 63) ?
                 LeechRpc_CommandAgent(pReqBin->qwData[0], pReqBin->cb, pReqBin->pb, &pbTMP, &cbTMP) :
-                LcCommand(ctxLeechRpc.hLC, pReqBin->qwData[0], pReqBin->cb, pReqBin->pb, &pbTMP, &cbTMP);
+                LcCommand(hLC, pReqBin->qwData[0], pReqBin->cb, pReqBin->pb, &pbTMP, &cbTMP);
             if(!fTMP) { cbTMP = 0; }
             if(!(pRspBin = LocalAlloc(LMEM_ZEROINIT, sizeof(LEECHRPC_MSG_BIN) + cbTMP))) {
                 goto fail;
@@ -481,12 +489,15 @@ error_status_t LeechRpc_ReservedSubmitCommand(
             *pcbOut = pRspBin->cbMsg;
             *ppbOut = (PBYTE)pRspBin;
             if(fFreeReqBin) { LocalFree(pReqBin); pReqBin = NULL; } // only free locally allocated decompressed bindata
-            return 0;
+            goto finish;
         default:
             goto fail;
     }
-    return 0;
+finish:
+    LeechRPC_LcHandle_Return(hLC);
+    return status;
 fail:
+    LeechRPC_LcHandle_Return(hLC);
     if(fFreeReqBin) { LocalFree(pReqBin); pReqBin = NULL; } // only free locally allocated decompressed bindata
     *pcbOut = 0;
     *ppbOut = NULL;
