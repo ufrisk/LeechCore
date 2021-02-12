@@ -6,24 +6,27 @@
 #define Py_LIMITED_API 0x03060000
 #ifdef _DEBUG
 #undef _DEBUG
-#include <python.h>
+#include <Python.h>
 #define _DEBUG
 #else
-#include <python.h>
+#include <Python.h>
 #endif
+#ifdef _WIN32
 #include <Windows.h>
+#endif
 #include <leechcore.h>
+#include "../leechcore/oscompatibility.h"
 
 HANDLE g_hLC = NULL;
 
-inline int PyDict_SetItemString_DECREF(PyObject *dp, const char *key, PyObject *item)
+int PyDict_SetItemString_DECREF(PyObject *dp, const char *key, PyObject *item)
 {
     int i = PyDict_SetItemString(dp, key, item);
     Py_XDECREF(item);
     return i;
 }
 
-inline int PyList_Append_DECREF(PyObject *dp, PyObject *item)
+int PyList_Append_DECREF(PyObject *dp, PyObject *item)
 {
     int i = PyList_Append(dp, item);
     Py_XDECREF(item);
