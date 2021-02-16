@@ -28,6 +28,7 @@ VOID usleep(_In_ DWORD us);
 #include <byteswap.h>
 #include <ctype.h>
 #include <dirent.h>
+#include <dlfcn.h>
 #include <errno.h>
 #include <inttypes.h>
 #include <stdio.h>

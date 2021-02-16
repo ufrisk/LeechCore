@@ -17,12 +17,14 @@ VOID Util_GetPathLib(_Out_writes_(MAX_PATH) PCHAR szPath)
     ZeroMemory(szPath, MAX_PATH);
 #ifdef _WIN32
     HMODULE hModuleLeechCore;
-    hModuleLeechCore = LoadLibraryA("lc.dll");
+    hModuleLeechCore = LoadLibraryA("leechcore.dll");
     GetModuleFileNameA(hModuleLeechCore, szPath, MAX_PATH - 4);
     if(hModuleLeechCore) { FreeLibrary(hModuleLeechCore); }
 #endif /* _WIN32 */
 #ifdef LINUX
-    readlink("/proc/self/exe", szPath, MAX_PATH - 4);
+    Dl_info Info = { 0 };
+    if(!dladdr((void *)Util_GetPathLib, &Info) || !Info.dli_fname) { return; }
+    strncpy(szPath, Info.dli_fname, MAX_PATH - 1);
 #endif /* LINUX */
     for(i = strlen(szPath) - 1; i > 0; i--) {
         if(szPath[i] == '/' || szPath[i] == '\\') {
