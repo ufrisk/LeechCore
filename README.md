@@ -2,13 +2,16 @@ The LeechCore Physical Memory Acquisition Library:
 =========================================
 The LeechCore Memory Acquisition Library focuses on Physical Memory Acquisition using various hardware and software based methods.
 
+LeechCore provides API-based access to various hardware and software based memory sources via its `C/C++`, `Python` and `C#` APIs. Download the latest [release](https://github.com/ufrisk/LeechCore/releases/latest) of the library here on Github. If using Python it's recommended to install the [`leechcorepyc`](https://pypi.org/project/leechcorepyc/) **python pip** package which is available for 64-bit Linux and Windows.
+
 Use the LeechCore library locally or connect to, over the network, a LeechAgent to acquire physical memory or run commands remotely. The connection is by default compressed and secured with mutually authenticated kerberos - making it ideal in incident response when combined with analysis and live memory capture using Comae DumpIt or WinPMEM - even over high latency low-bandwidth connections!
 
 The LeechCore library is used by [PCILeech](https://github.com/ufrisk/pcileech) and [The Memory Process File System (MemProcFS)](https://github.com/ufrisk/MemProcFS).
 
 The LeechCore library is supported on 32/64-bit **Windows** (`.dll`) and 64-bit **Linux** (`.so`). No executable exists for LeechCore - the library is always loaded by other applications using it - such as PCILeech and The Memory Process File System `MemProcFS.exe`.
 
-For detailed information about individual memory acquisition methods or the LeechCore API please check out the [LeechCore wiki](https://github.com/ufrisk/LeechCore/wiki).
+For detailed information about individual memory acquisition methods, the API and related examples please check out the [LeechCore wiki](https://github.com/ufrisk/LeechCore/wiki).
+
 
 Memory Acquisition Methods:
 ===========================
@@ -44,6 +47,7 @@ Please find a summary of the supported hardware based memory acquisition methods
 | [PP3380](https://github.com/ufrisk/LeechCore/wiki/Device_USB3380)      | USB3380 | USB3 | 150MB/s | No  | No  | No  |
 | [SP605/TCP](https://github.com/ufrisk/LeechCore/wiki/Device_SP605TCP)  | FPGA    | TCP  | 100kB/s | Yes | Yes | Yes |
 | [DMA patched HP iLO](https://github.com/ufrisk/LeechCore/wiki/Device_RawTCP) | BMC | TCP |  1MB/s | Yes | No  | Yes |
+
 
 The LeechAgent Memory Acquisition and Analysis Agent:
 =====================================================
@@ -88,22 +92,16 @@ Start the LeechAgent in interactive mode with DumpIt LIVEKD to allow connecting 
 Start the LeechAgent in interactive mode with DumpIt LIVEKD to allow connecting clients to access live memory. Start as elevated administrator. Accept connections from all clients with access to port `tcp/28473` without any form of authentication.
 * `DumpIt.exe /LIVEKD /A LeechAgent.exe /C "-interactive -insecure"`
 
+
 Building:
 =========
 <b>Pre-built [binaries, modules and configuration files](https://github.com/ufrisk/LeechCore/releases/latest) are found in the latest release.</b> Build instructions are found in the [Wiki](https://github.com/ufrisk/LeechCore/wiki) in the [Building](https://github.com/ufrisk/LeechCore/wiki/Dev_Building) section.
+
 
 Contributing:
 =============
 PCILeech, MemProcFS and LeechCore are open source but not open contribution. PCILeech, MemProcFS and LeechCore offers a highly flexible plugin architecture that will allow for contributions in the form of plugins. If you wish to make a contribution, other than a plugin, to the core projects please contact me before starting to develop.
 
-Support PCILeech/MemProcFS development:
-=======================================
-PCILeech and MemProcFS are hobby projects of mine. I put a lot of time and energy into my projects. The time being most of my spare time - since I'm not able to work with this. Unfortunately since some aspects also relate to hardware I also put quite some of money into my projects. If you think PCILeech and/or MemProcFS are awesome tools and/or if you had a use for them it's now possible to contribute.
-
-Please do note that PCILeech and MemProcFS are free and open source - as such I'm not expecting donations; even though a donation would be very much appreciated. I'm also not able to promise product features, consultancy or other things in return for a donation. A donation will have to stay donation and no more.  I'll set up the Github sponsors as soon as I'm able to; but for now it's possible to contribute with:
-
- - Paypal: `paypal@ulffrisk.com` 
- - Bitcoin: `bc1q9kur5pym8wmh5yxkf65792rdqm0guncd2gl4tu`
 
 Links:
 ======
@@ -116,6 +114,7 @@ Links:
 * YouTube: https://www.youtube.com/channel/UC2aAi-gjqvKiC7s7Opzv9rg
 * Blog: http://blog.frizk.net
 
+
 Support PCILeech/MemProcFS development:
 =======================================
 PCILeech and MemProcFS are hobby projects of mine. I put a lot of time and energy into my projects. The time being most of my spare time - since I'm not able to work with this. Unfortunately since some aspects also relate to hardware I also put quite some of money into my projects. If you think PCILeech and/or MemProcFS are awesome tools and/or if you had a use for them it's now possible to contribute.
@@ -123,6 +122,9 @@ PCILeech and MemProcFS are hobby projects of mine. I put a lot of time and energ
 Please do note that PCILeech and MemProcFS are free and open source - as such I'm not expecting sponsorships; even though a sponsorship would be very much appreciated. I'm also not able to promise product features, consultancy or other things in return for a donation. A sponsorship will have to stay a sponsorship and no more. It's possible to sponsor via Github Sponsors.
 
  - Github Sponsors: [`https://github.com/sponsors/ufrisk`](https://github.com/sponsors/ufrisk)
+ 
+To all my sponsors, Thank You :sparkling_heart:
+
 
 Changelog:
 ===================
@@ -151,5 +153,6 @@ v1.0-1.8
 * FPGA: R/W "shadow" config space (requires v4.9+ bitstream).
 * LeechAgent: Full multi-device support.
 
-Latest:
-* Bug fixes: Linux.
+[v2.4](https://github.com/ufrisk/LeechCore/releases/tag/v2.4)
+* Bug fixes.
+* Remake of Python package `leechcorepyc` now also available on [pip](https://pypi.org/project/leechcorepyc/).

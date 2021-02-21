@@ -29,6 +29,9 @@
     <ClCompile Include="leechcorepyemb.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="oscompatibility.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="version.h">
@@ -40,5 +43,16 @@
     <ClInclude Include="..\includes\leechcore.h">
       <Filter>Header Files\leechcore</Filter>
     </ClInclude>
+    <ClInclude Include="oscompatibility.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Makefile">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="pkggen_linux.sh">
+      <Filter>Resource Files</Filter>
+    </None>
   </ItemGroup>
 </Project>

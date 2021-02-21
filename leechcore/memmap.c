@@ -90,6 +90,25 @@ VOID LcMemMap_TranslateMEMs(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _Inout_ PP
 }
 
 /*
+* Retrieve the memory ranges as an array of LC_MEMMAP_ENTRY.
+* -- ctxLC
+* -- ppbDataOut
+* -- pcbDataOut
+*/
+_Success_(return)
+BOOL LcMemMap_GetRangesAsStruct(_In_ PLC_CONTEXT ctxLC, _Out_ PBYTE *ppbDataOut, _Out_opt_ PDWORD pcbDataOut)
+{
+    PBYTE pb;
+    DWORD cb;
+    cb = ctxLC->cMemMap * sizeof(LC_MEMMAP_ENTRY);
+    if(!(pb = LocalAlloc(LMEM_ZEROINIT, cb))) { return FALSE; }
+    memcpy(pb, ctxLC->MemMap, cb);
+    *ppbDataOut = pb;
+    if(pcbDataOut) { *pcbDataOut = cb; }
+    return TRUE;
+}
+
+/*
 * Retrieve the memory ranges as ascii text in a null-terminated text buffer.
 * CALLER LcFreeMem: *ppbDataOut
 * -- ctxLC

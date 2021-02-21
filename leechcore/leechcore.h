@@ -14,7 +14,7 @@
 // (c) Ulf Frisk, 2020
 // Author: Ulf Frisk, pcileech@frizk.net
 //
-// Header Version: 2.3
+// Header Version: 2.4
 //
 
 #ifndef __LEECHCORE_H__
@@ -361,8 +361,9 @@ EXPORTED_FUNCTION BOOL LcWrite(
 #define LC_CMD_FILE_DUMPHEADER_GET                  0x0000020100000000  // R
 
 #define LC_CMD_STATISTICS_GET                       0x4000010000000000  // R
-#define LC_CMD_MEMMAP_GET                           0x4000020000000000  // R
-#define LC_CMD_MEMMAP_SET                           0x4000030000000000  // W
+#define LC_CMD_MEMMAP_GET                           0x4000020000000000  // R  - MEMMAP as LPSTR
+#define LC_CMD_MEMMAP_SET                           0x4000030000000000  // W  - MEMMAP as LPSTR
+#define LC_CMD_MEMMAP_GET_STRUCT                    0x4000040000000000  // R  - MEMMAP as LC_MEMMAP_ENTRY[]
 
 #define LC_CMD_AGENT_EXEC_PYTHON                    0x8000000100000000  // RW - [lo-dword: optional timeout in ms]
 #define LC_CMD_AGENT_EXIT_PROCESS                   0x8000000200000000  // N/A - [lo-dword: process exit code]
@@ -398,6 +399,12 @@ typedef struct tdLC_STATISTICS {
         QWORD tm;   // total time in qwFreq ticks
     } Call[LC_STATISTICS_ID_MAX + 1];
 } LC_STATISTICS, *PLC_STATISTICS;
+
+typedef struct tdLC_MEMMAP_ENTRY {
+    QWORD pa;
+    QWORD cb;
+    QWORD paRemap;
+} LC_MEMMAP_ENTRY, *PLC_MEMMAP_ENTRY;
 
 /*
 * Set an option as defined by LC_OPT_*.  (R option).

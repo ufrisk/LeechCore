@@ -104,11 +104,17 @@
   <ItemGroup>
     <ClCompile Include="leechcorepyc.c" />
     <ClCompile Include="leechcorepyemb.c" />
+    <ClCompile Include="oscompatibility.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\includes\leechcore.h" />
     <ClInclude Include="leechcorepyc.h" />
+    <ClInclude Include="oscompatibility.h" />
     <ClInclude Include="version.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Makefile" />
+    <None Include="pkggen_linux.sh" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

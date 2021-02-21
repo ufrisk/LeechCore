@@ -791,8 +791,8 @@ EXPORTED_FUNCTION BOOL LcRead(_In_ HANDLE hLC, _In_ QWORD pa, _In_ DWORD cb, _Ou
     f = LcAllocScatter3(
         fFirst ? pbFirst : NULL,
         fLast ? pbLast : NULL,
-        (fFirst && (cMEMs == 1)) ? 0 : (cb - (pa & 0xfff)),
-        pb + (pa & 0xfff),
+        cb - (fFirst ? 0x1000 - (pa & 0xfff) : 0) - (fLast ? (pa + cb) & 0xfff : 0),
+        pb + ((pa & 0xfff) ? 0x1000 - (pa & 0xfff) : 0),
         (DWORD)cMEMs,
         &ppMEMs
     );
@@ -1102,6 +1102,9 @@ BOOL LcCommand_DoWork(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _In_ DWORD cbD
             if(pcbDataOut) { *pcbDataOut = sizeof(LC_STATISTICS); }
             memcpy(*ppbDataOut, &ctxLC->CallStat, sizeof(LC_STATISTICS));
             return TRUE;
+        case LC_CMD_MEMMAP_GET_STRUCT:
+            if(!ppbDataOut) { return FALSE; }
+            return LcMemMap_GetRangesAsStruct(ctxLC, ppbDataOut, pcbDataOut);
         case LC_CMD_MEMMAP_GET:
             if(!ppbDataOut) { return FALSE; }
             return LcMemMap_GetRangesAsText(ctxLC, ppbDataOut, pcbDataOut);

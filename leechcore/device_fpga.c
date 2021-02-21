@@ -715,17 +715,50 @@ LPSTR DeviceFPGA_InitializeUDP(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ DWORD dwIpv4A
 // FPGA implementation below:
 //-------------------------------------------------------------------------------
 
+// Helper functions to avoid multiple connections in parallel on
+// linux systems resulting in potential segfault errors. On Windows
+// this is handled transparantly by the driver.
+static BOOL g_fDeviceFpgaMultiHandleLock[0x10] = { 0 };
+
+BOOL DeviceFPGA_InitializeFTDI_LinuxMultiHandle_LockCheck(_In_ QWORD qwDeviceIndex)
+{
+#ifdef LINUX
+    if(g_fDeviceFpgaMultiHandleLock[min(0x10 - 1, qwDeviceIndex)]) { return TRUE; }
+#endif /* LINUX */
+    return FALSE;
+}
+
+VOID DeviceFPGA_InitializeFTDI_LinuxMultiHandle_LockAcquire(_In_ QWORD qwDeviceIndex)
+{
+    g_fDeviceFpgaMultiHandleLock[min(0x10 - 1, qwDeviceIndex)] = TRUE;
+}
+
+VOID DeviceFPGA_InitializeFTDI_LinuxMultiHandle_LockRelease(_In_ QWORD qwDeviceIndex)
+{
+    g_fDeviceFpgaMultiHandleLock[min(0x10 - 1, qwDeviceIndex)] = FALSE;
+}
+
+
 LPSTR DeviceFPGA_InitializeFTDI(_In_ PDEVICE_CONTEXT_FPGA ctx)
 {
     LPSTR szErrorReason;
-    CHAR c;
+    CHAR c, szModuleFTDI[MAX_PATH + 1] = { 0 };
     DWORD status;
     ULONG(*pfnFT_GetChipConfiguration)(HANDLE ftHandle, PVOID pvConfiguration);
     ULONG(*pfnFT_SetChipConfiguration)(HANDLE ftHandle, PVOID pvConfiguration);
     ULONG(*pfnFT_SetSuspendTimeout)(HANDLE ftHandle, ULONG Timeout);
     FT_60XCONFIGURATION oCfgNew, oCfgOld;
+    if(DeviceFPGA_InitializeFTDI_LinuxMultiHandle_LockCheck(ctx->qwDeviceIndex)) {
+        szErrorReason = "FPGA linux handle already open";
+        goto fail;
+    }
     // Load FTDI Library
     ctx->dev.hModule = LoadLibraryA("FTD3XX.dll");
+    if(!ctx->dev.hModule) {
+        Util_GetPathLib(szModuleFTDI);
+        strcat_s(szModuleFTDI, sizeof(szModuleFTDI) - 1, "FTD3XX.dll");
+        ctx->dev.hModule = LoadLibraryA(szModuleFTDI);
+    }
     if(!ctx->dev.hModule) {
         szErrorReason = "Unable to load FTD3XX.dll";
         goto fail;
@@ -814,6 +847,7 @@ LPSTR DeviceFPGA_InitializeFTDI(_In_ PDEVICE_CONTEXT_FPGA ctx)
         ctx->dev.pfnFT_GetOverlappedResult && ctx->dev.pfnFT_InitializeOverlapped && ctx->dev.pfnFT_ReleaseOverlapped &&
         !ctx->dev.pfnFT_InitializeOverlapped(ctx->dev.hFTDI, &ctx->async.oOverlapped);
     ctx->dev.fInitialized = TRUE;
+    DeviceFPGA_InitializeFTDI_LinuxMultiHandle_LockAcquire(ctx->qwDeviceIndex);
     return NULL;
 fail:
     if(ctx->dev.hFTDI && ctx->dev.pfnFT_Close) { ctx->dev.pfnFT_Close(ctx->dev.hFTDI); }
@@ -848,6 +882,7 @@ VOID DeviceFPGA_Close(_Inout_ PLC_CONTEXT ctxLC)
 #endif /* WIN32 */
         if(ctx->dev.hFTDI) {
             ctx->dev.pfnFT_Close(ctx->dev.hFTDI);
+            DeviceFPGA_InitializeFTDI_LinuxMultiHandle_LockRelease(ctx->qwDeviceIndex);
         }
         if(ctx->dev.hModule) { FreeLibrary(ctx->dev.hModule); }
 #ifdef WIN32

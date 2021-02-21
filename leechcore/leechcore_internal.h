@@ -20,6 +20,15 @@
 VOID LcMemMap_TranslateMEMs(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _Inout_ PPMEM_SCATTER ppMEMs);
 
 /*
+* Retrieve the memory ranges as an array of LC_MEMMAP_ENTRY.
+* -- ctxLC
+* -- ppbDataOut
+* -- pcbDataOut
+*/
+_Success_(return)
+BOOL LcMemMap_GetRangesAsStruct(_In_ PLC_CONTEXT ctxLC, _Out_ PBYTE * ppbDataOut, _Out_opt_ PDWORD pcbDataOut);
+
+/*
 * Retrieve the memory ranges as ascii text in a null-terminated text buffer.
 * CALLER LcFreeMem: *ppbDataOut
 * -- ctxLC

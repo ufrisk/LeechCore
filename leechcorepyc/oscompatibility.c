@@ -38,7 +38,6 @@ BOOL Util_GetPathExe(_Out_writes_(MAX_PATH) PCHAR szPath)
 #ifdef LINUX
 
 #include "oscompatibility.h"
-#include "util.h"
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -50,6 +49,33 @@ typedef struct tdINTERNAL_HANDLE {
     QWORD type;
     HANDLE handle;
 } INTERNAL_HANDLE, *PINTERNAL_HANDLE;
+
+/*
+* Retrieve the operating system path of the directory which is containing this:
+* a) .dll file (Windows)
+* b) executable file (Linux)
+* -- szPath
+*/
+VOID Util_GetPathLib(_Out_writes_(MAX_PATH) PCHAR szPath)
+{
+    SIZE_T i;
+    ZeroMemory(szPath, MAX_PATH);
+#ifdef _WIN32
+    HMODULE hModuleLeechCore;
+    hModuleLeechCore = LoadLibraryA("lc.dll");
+    GetModuleFileNameA(hModuleLeechCore, szPath, MAX_PATH - 4);
+    if(hModuleLeechCore) { FreeLibrary(hModuleLeechCore); }
+#endif /* _WIN32 */
+#ifdef LINUX
+    readlink("/proc/self/exe", szPath, MAX_PATH - 4);
+#endif /* LINUX */
+    for(i = strlen(szPath) - 1; i > 0; i--) {
+        if(szPath[i] == '/' || szPath[i] == '\\') {
+            szPath[i + 1] = '\0';
+            return;
+        }
+    }
+}
 
 HANDLE LocalAlloc(DWORD uFlags, SIZE_T uBytes)
 {
@@ -156,35 +182,6 @@ BOOL FindNextFileA(HANDLE hFindFile, LPWIN32_FIND_DATAA lpFindFileData)
     return FALSE;
 }
 
-BOOL __WinUsb_ReadWritePipe(
-    WINUSB_INTERFACE_HANDLE InterfaceHandle,
-    UCHAR    PipeID,
-    PUCHAR    Buffer,
-    ULONG    BufferLength,
-    PULONG    LengthTransferred,
-    PVOID    Overlapped
-) {
-    int result, cbTransferred;
-    result = libusb_bulk_transfer(
-        InterfaceHandle,
-        PipeID,
-        Buffer,
-        BufferLength,
-        &cbTransferred,
-        500);
-    *LengthTransferred = (ULONG)cbTransferred;
-    return result ? FALSE : TRUE;
-}
-
-BOOL WinUsb_Free(WINUSB_INTERFACE_HANDLE InterfaceHandle)
-{
-    if(!InterfaceHandle) { return TRUE; }
-    libusb_release_interface(InterfaceHandle, 0);
-    libusb_reset_device(InterfaceHandle);
-    libusb_close(InterfaceHandle);
-    return TRUE;
-}
-
 DWORD InterlockedAdd(DWORD *Addend, DWORD Value)
 {
     return __sync_add_and_fetch(Addend, Value);
@@ -205,11 +202,16 @@ BOOL IsWow64Process(HANDLE hProcess, PBOOL Wow64Process)
 
 HMODULE LoadLibraryA(LPSTR lpFileName)
 {
+    HMODULE h;
     CHAR szFileName[2 * MAX_PATH];
     if(lpFileName && (0 == memcmp(lpFileName, "FTD3XX.dll", 10))) {
         lpFileName = "leechcore_ft601_driver_linux.so";
     }
-    Util_GetPathLib(szFileName);
+    if((h = dlopen(lpFileName, RTLD_NOW))) {
+        return h;
+    }
+    //Util_GetPathLib(szFileName);
+    strcpy(szFileName, "/usr/local/lib/python3.8/dist-packages/");
     strncat(szFileName, lpFileName, MAX_PATH);
     return dlopen(szFileName, RTLD_NOW);
 }

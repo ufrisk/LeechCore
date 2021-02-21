@@ -18,7 +18,7 @@
 // (c) Ulf Frisk, 2020
 // Author: Ulf Frisk, pcileech@frizk.net
 //
-// Header Version: 2.1
+// Header Version: 2.4
 //
 
 #ifndef __LEECHCORE_DEVICE_H__
@@ -41,12 +41,6 @@ typedef struct tdCRITICAL_SECTION {
 #define LC_CONTEXT_VERSION                  0xc0e10003
 #define LC_MEMMAP_MAX_ENTRIES               0x100
 #define LC_DEVICE_PARAMETER_MAX_ENTRIES     0x10
-
-typedef struct tdLC_MEMMAP_ENTRY {
-    QWORD pa;
-    QWORD cb;
-    QWORD paRemap;
-} LC_MEMMAP_ENTRY, *PLC_MEMMAP_ENTRY;
 
 typedef struct tdLC_DEVICE_PARAMETER_ENTRY {
     CHAR szName[MAX_PATH];
