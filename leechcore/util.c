@@ -1,6 +1,6 @@
 // util.c : implementation of various utility functions.
 //
-// (c) Ulf Frisk, 2018-2020
+// (c) Ulf Frisk, 2018-2021
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include "util.h"
@@ -58,14 +58,18 @@ QWORD Util_GetNumericA(_In_ LPSTR sz)
 
 BOOL Util_FillHexAscii(_In_ PBYTE pb, _In_ DWORD cb, _In_ DWORD cbInitialOffset, _Inout_opt_ LPSTR sz, _Out_ PDWORD pcsz)
 {
-    DWORD i, j, o = 0, szMax, iMod;
+    DWORD i, j, o = 0, iMod, cRows;
     // checks
     if((cbInitialOffset > cb) || (cbInitialOffset > 0x1000) || (cbInitialOffset & 0xf)) { return FALSE; }
-    *pcsz = szMax = cb * 5 + 80;
-    if(cb > szMax) { return FALSE; }
-    if(!sz) { return TRUE; }
+    cRows = (cb + 0xf) >> 4;
+    if(!sz) {
+        *pcsz = 1 + cRows * 76;
+        return TRUE;
+    }
+    if(!pb || (*pcsz <= cRows * 76)) { return FALSE; }
     // fill buffer with bytes
-    for(i = cbInitialOffset; i < cb + ((cb % 16) ? (16 - cb % 16) : 0); i++) {
+    for(i = cbInitialOffset; i < cb + ((cb % 16) ? (16 - cb % 16) : 0); i++)
+    {
         // address
         if(0 == i % 16) {
             iMod = i % 0x10000;
@@ -104,7 +108,8 @@ BOOL Util_FillHexAscii(_In_ PBYTE pb, _In_ DWORD cb, _In_ DWORD cbInitialOffset,
             sz[o++] = '\n';
         }
     }
-    sz[o++] = 0;
+    sz[o] = 0;
+    *pcsz = o;
     return TRUE;
 }
 

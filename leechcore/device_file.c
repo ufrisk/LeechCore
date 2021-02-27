@@ -1,6 +1,6 @@
 // device_file.c : implementation related to file backed memory acquisition device.
 //
-// (c) Ulf Frisk, 2018-2020
+// (c) Ulf Frisk, 2018-2021
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include "leechcore.h"
@@ -152,7 +152,7 @@ VOID DeviceFile_ReadScatter(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cpMEMs, _Inout_ P
     for(i = 0; i < cpMEMs; i++) {
         pMEM = ppMEMs[i];
         if(pMEM->f || (pMEM->qwA == (QWORD)-1)) { continue; }
-        if(pMEM->qwA != _ftelli64(ctx->pFile)) {
+        if(pMEM->qwA != (QWORD)_ftelli64(ctx->pFile)) {
             if(_fseeki64(ctx->pFile, pMEM->qwA, SEEK_SET)) { continue; }
         }
         pMEM->f = pMEM->cb == (DWORD)fread(pMEM->pb, 1, pMEM->cb, ctx->pFile);
@@ -466,7 +466,6 @@ BOOL DeviceFile_Command(
     _Out_opt_ PDWORD pcbDataOut
 ) {
     PDEVICE_CONTEXT_FILE ctx = (PDEVICE_CONTEXT_FILE)ctxLC->hDevice;
-    BOOL f32 = ctx->CrashOrCoreDump.f32;
     PBYTE pb;
     DWORD cb;
     UNREFERENCED_PARAMETER(cbDataIn);

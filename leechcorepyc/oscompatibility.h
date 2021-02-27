@@ -1,6 +1,6 @@
 // oscompatibility.h : LeechCore Windows/Linux compatibility layer.
 //
-// (c) Ulf Frisk, 2017-2020
+// (c) Ulf Frisk, 2017-2021
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #ifndef __OSCOMPATIBILITY_H__
@@ -19,6 +19,7 @@ typedef unsigned __int64                    QWORD, *PQWORD;
 #pragma warning( disable : 4477)
 
 #define LC_LIBRARY_FILETYPE                 ".dll"
+#define LINUX_NO_OPTIMIZE
 VOID usleep(_In_ DWORD us);
 
 #endif /* _WIN32 */
@@ -204,6 +205,11 @@ BOOL SetEvent(_In_ HANDLE hEvent);
 HANDLE CreateEvent(_In_opt_ PVOID lpEventAttributes, _In_ BOOL bManualReset, _In_ BOOL bInitialState, _In_opt_ PVOID lpName);
 DWORD WaitForMultipleObjects(_In_ DWORD nCount, HANDLE *lpHandles, _In_ BOOL bWaitAll, _In_ DWORD dwMilliseconds);
 DWORD WaitForSingleObject(_In_ HANDLE hHandle, _In_ DWORD dwMilliseconds);
+
+// for some unexplainable reasons the gcc on -O2 will optimize out functionality
+// and destroy the proper workings on some functions due to an unexplainable
+// reason disable optimization on a function level resolves the issues ...
+#define LINUX_NO_OPTIMIZE __attribute__((optimize("O0")))
 
 #endif /* LINUX */
 

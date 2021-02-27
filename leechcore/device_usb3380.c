@@ -1,6 +1,6 @@
 // device_usb3380.c : implementation related to the USB3380 hardware device.
 //
-// (c) Ulf Frisk, 2017-2020
+// (c) Ulf Frisk, 2017-2021
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include "leechcore.h"

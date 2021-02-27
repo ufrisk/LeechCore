@@ -1,6 +1,6 @@
 // leechcore.c : core implementation of the the LeechCore physical memory acquisition library.
 //
-// (c) Ulf Frisk, 2020
+// (c) Ulf Frisk, 2020-2021
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 
@@ -103,8 +103,8 @@ EXPORTED_FUNCTION VOID LcClose(_In_opt_ _Post_ptr_invalid_ HANDLE hLC)
     PLC_CONTEXT ctxLC = (PLC_CONTEXT)hLC;
     if(!ctxLC || (ctxLC->version != LC_CONTEXT_VERSION)) { return; }
     EnterCriticalSection(&g_ctx.Lock);
-    LcReadContigious_Close(ctxLC);
     if(0 == --ctxLC->dwHandleCount) {
+        LcReadContigious_Close(ctxLC);
         if(ctxLC->pfnClose) { ctxLC->pfnClose(ctxLC); }
         // detach from handles list
         if(g_ctx.FLink == ctxLC) {
@@ -254,8 +254,8 @@ VOID LcCreate_FetchDevice(_Inout_ PLC_CONTEXT ctx)
         strcat_s(szModule, sizeof(szModule), "leechcore_device_");
         strncat_s(szModule, sizeof(szModule), ctx->Config.szDevice, cszDevice);
         strcat_s(szModule, sizeof(szModule), LC_LIBRARY_FILETYPE);
-        if(ctx->hDeviceModule = LoadLibraryA(szModule)) {
-            if(ctx->pfnCreate = (BOOL(*)(PLC_CONTEXT, PPLC_CONFIG_ERRORINFO))GetProcAddress(ctx->hDeviceModule, "LcPluginCreate")) {
+        if((ctx->hDeviceModule = LoadLibraryA(szModule))) {
+            if((ctx->pfnCreate = (BOOL(*)(PLC_CONTEXT, PPLC_CONFIG_ERRORINFO))GetProcAddress(ctx->hDeviceModule, "LcPluginCreate"))) {
                 strncpy_s(ctx->Config.szDeviceName, sizeof(ctx->Config.szDeviceName), ctx->Config.szDevice, cszDevice);
                 return;
             } else {
@@ -370,7 +370,7 @@ EXPORTED_FUNCTION HANDLE LcCreateEx(_Inout_ PLC_CONFIG pLcCreateConfig, _Out_opt
         EnterCriticalSection(&g_ctx.Lock);
         if((ctxLC = (PLC_CONTEXT)g_ctx.FLink)) {
             memcpy(pLcCreateConfig, &ctxLC->Config, sizeof(LC_CONFIG));
-            ctxLC->dwHandleCount++;
+            InterlockedIncrement(&ctxLC->dwHandleCount);
         }
         LeaveCriticalSection(&g_ctx.Lock);
         return ctxLC;
@@ -926,7 +926,6 @@ EXPORTED_FUNCTION BOOL LcWrite(_In_ HANDLE hLC, _In_ QWORD pa, _In_ DWORD cb, _I
     PBYTE pbBuffer = NULL;
     DWORD i = 0, oA = 0, cbP, cMEMs;
     PMEM_SCATTER pMEM, pMEMs, *ppMEMs;
-    QWORD paTranslated = 0;
     PLC_CONTEXT ctxLC = (PLC_CONTEXT)hLC;
     QWORD tmStart = LcCallStart();
     if(!ctxLC || ctxLC->version != LC_CONTEXT_VERSION) { goto fail; }
@@ -939,12 +938,13 @@ EXPORTED_FUNCTION BOOL LcWrite(_In_ HANDLE hLC, _In_ QWORD pa, _In_ DWORD cb, _I
     while(oA < cb) {
         cbP = 0x1000 - ((pa + oA) & 0xfff);
         cbP = min(cbP, cb - oA);
-        ppMEMs[i++] = pMEM = pMEMs + i;
+        ppMEMs[i] = pMEM = pMEMs + i;
         pMEM->version = MEM_SCATTER_VERSION;
         pMEM->qwA = pa + oA;
         pMEM->cb = cbP;
         pMEM->pb = pb + oA;
         oA += cbP;
+        i++;
     }
     // write and verify result
     LcWriteScatter(hLC, cMEMs, ppMEMs);
@@ -972,7 +972,6 @@ fail:
 _Success_(return)
 BOOL LcGetOption_DoWork(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _Out_ PQWORD pqwValue)
 {
-    QWORD v = 0;
     *pqwValue = 0;
     switch(fOption & 0xffffffff00000000) {
         case LC_OPT_CORE_PRINTF_ENABLE:
@@ -1124,14 +1123,14 @@ BOOL LcCommand_DoWork(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _In_ DWORD cbD
 *     by calling LcMemFree().
 * CALLER LcFreeMem: *ppbDataOut
 * -- hLC
-* -- fOption
+* -- fCommand
 * -- cbDataIn
 * -- pbDataIn
 * -- ppbDataOut
 * -- pcbDataOut
 */
 _Success_(return)
-EXPORTED_FUNCTION BOOL LcCommand(_In_ HANDLE hLC, _In_ QWORD fOption, _In_ DWORD cbDataIn, _In_reads_opt_(cbDataIn) PBYTE pbDataIn, _Out_opt_ PBYTE *ppbDataOut, _Out_opt_ PDWORD pcbDataOut)
+EXPORTED_FUNCTION BOOL LcCommand(_In_ HANDLE hLC, _In_ QWORD fCommand, _In_ DWORD cbDataIn, _In_reads_opt_(cbDataIn) PBYTE pbDataIn, _Out_opt_ PBYTE *ppbDataOut, _Out_opt_ PDWORD pcbDataOut)
 {
     PLC_CONTEXT ctxLC = (PLC_CONTEXT)hLC;
     QWORD tmStart = LcCallStart();
@@ -1139,8 +1138,8 @@ EXPORTED_FUNCTION BOOL LcCommand(_In_ HANDLE hLC, _In_ QWORD fOption, _In_ DWORD
     if(!ctxLC || ctxLC->version != LC_CONTEXT_VERSION) { return FALSE; }
     LcLockAcquire(ctxLC);
     fResult = ctxLC->Config.fRemote ?
-        ctxLC->pfnCommand(ctxLC, fOption, cbDataIn, pbDataIn, ppbDataOut, pcbDataOut) :
-        LcCommand_DoWork(ctxLC, fOption, cbDataIn, pbDataIn, ppbDataOut, pcbDataOut);
+        ctxLC->pfnCommand(ctxLC, fCommand, cbDataIn, pbDataIn, ppbDataOut, pcbDataOut) :
+        LcCommand_DoWork(ctxLC, fCommand, cbDataIn, pbDataIn, ppbDataOut, pcbDataOut);
     LcLockRelease(ctxLC);
     LcCallEnd(ctxLC, LC_STATISTICS_ID_COMMAND, tmStart);
     return fResult;

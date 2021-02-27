@@ -1,6 +1,6 @@
 // leechagent.h : definitions related to the leech agent.
 //
-// (c) Ulf Frisk, 2018-2020
+// (c) Ulf Frisk, 2018-2021
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #ifndef __LEECHAGENT_H__

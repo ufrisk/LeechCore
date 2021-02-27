@@ -156,3 +156,7 @@ v1.0-1.8
 [v2.4](https://github.com/ufrisk/LeechCore/releases/tag/v2.4)
 * Bug fixes.
 * Remake of Python package `leechcorepyc` now also available on [pip](https://pypi.org/project/leechcorepyc/).
+
+[v2.5](https://github.com/ufrisk/LeechCore/releases/tag/v2.5)
+* Bug fixes.
+* Read/Write PCI Express Transaction Layer Packets, PCIe TLPs, FPGA devices only.

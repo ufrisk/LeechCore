@@ -1,6 +1,6 @@
 // oscompatibility.c : LeechCore Windows/Linux compatibility layer.
 //
-// (c) Ulf Frisk, 2017-2020
+// (c) Ulf Frisk, 2017-2021
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #ifdef _WIN32
@@ -216,7 +216,7 @@ HMODULE LoadLibraryA(LPSTR lpFileName)
 
 BOOL FreeLibrary(_In_ HMODULE hLibModule)
 {
-    dlclose(hLibModule);
+    return 0 == dlclose(hLibModule);
 }
 
 FARPROC GetProcAddress(HMODULE hModule, LPSTR lpProcName)
@@ -324,7 +324,7 @@ DWORD WaitForSingleObject(_In_ HANDLE hHandle, _In_ DWORD dwMilliseconds)
 DWORD WaitForMultipleObjects(_In_ DWORD nCount, HANDLE *lpHandles, _In_ BOOL bWaitAll, _In_ DWORD dwMilliseconds)
 {
     struct pollfd fds[MAXIMUM_WAIT_OBJECTS];
-    int i;
+    DWORD i;
     uint64_t v;
     if(bWaitAll) {
         for(i = 0; i < nCount; i++) {

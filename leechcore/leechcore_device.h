@@ -15,10 +15,10 @@
 // device may be created/opened - if only one instance may be open at the same
 // time this should be handled by the plugin module itself.
 //
-// (c) Ulf Frisk, 2020
+// (c) Ulf Frisk, 2020-2021
 // Author: Ulf Frisk, pcileech@frizk.net
 //
-// Header Version: 2.4
+// Header Version: 2.5
 //
 
 #ifndef __LEECHCORE_DEVICE_H__

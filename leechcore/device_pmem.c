@@ -1,6 +1,6 @@
 // device_pmem.c : implementation of the rekall winpmem memory acquisition device.
 //
-// (c) Ulf Frisk, 2018-2020
+// (c) Ulf Frisk, 2018-2021
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include "leechcore.h"

@@ -1,6 +1,6 @@
 // util.h : definitions of various utility functions.
 //
-// (c) Ulf Frisk, 2018-2020
+// (c) Ulf Frisk, 2018-2021
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #ifndef __UTIL_H__
@@ -40,7 +40,8 @@ VOID Util_PrintHexAscii(_In_opt_ PLC_CONTEXT ctxLC, _In_ PBYTE pb, _In_ DWORD cb
 * -- cb
 * -- cbInitialOffset = offset, must be max 0x1000 and multiple of 0x10.
 * -- sz = buffer to fill, NULL to retrieve size in pcsz parameter.
-* -- pcsz = ptr to size of buffer on entry, size of characters on exit.
+* -- pcsz = IF sz==NULL :: size of buffer (including space for terminating NULL) on exit
+*           IF sz!=NULL :: size of buffer on entry, size of characters (excluding terminating NULL) on exit.
 */
 BOOL Util_FillHexAscii(_In_ PBYTE pb, _In_ DWORD cb, _In_ DWORD cbInitialOffset, _Inout_opt_ LPSTR sz, _Out_ PDWORD pcsz);
 

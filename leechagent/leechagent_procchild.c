@@ -2,7 +2,7 @@
 //                 Child processes host execution environments such as the
 //                 Python environment which allows for execution of scripts.
 //
-// (c) Ulf Frisk, 2020
+// (c) Ulf Frisk, 2020-2021
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 // In general, this child process is meant to be a temporary host process to

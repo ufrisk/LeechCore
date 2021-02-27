@@ -17,10 +17,8 @@
 #ifdef _WIN32
 #include <Windows.h>
 #endif /* _WIN32 */
-#ifdef LINUX
-#include "oscompatibility.h"
-#endif /* LINUX */
 #include <leechcore.h>
+#include "oscompatibility.h"
 
 typedef struct tdPyObjectLeechCore {
     PyObject_HEAD
@@ -28,6 +26,7 @@ typedef struct tdPyObjectLeechCore {
     HANDLE hLC;
     LC_CONFIG cfg;
     PHANDLE phLCkeepalive;
+    PyObject *fnTlpReadCB;
 } PyObjectLeechCore;
 
 static PyObject *g_pPyTypeObjectLeechCore = NULL;
@@ -47,12 +46,16 @@ int PyList_Append_DECREF(PyObject *dp, PyObject *item)
     return i;
 }
 
-// () -> STR
+
+//-----------------------------------------------------------------------------
+// LeechCorePYC HELPER FUNCTIONS BELOW:
+//-----------------------------------------------------------------------------
+
 /*
 * () -> STR
 * Retrieve the last error (on create).
 */
-static PyObject *
+static PyObject*
 LeechCorePYC_GetLastError(PyObject *self, PyObject *args)
 {
     return g_LEECHCORE_LAST_ERRORINFO ?
@@ -70,8 +73,8 @@ LeechCorePYC_GetLastError(PyObject *self, PyObject *args)
 * -- pb
 * -- return = TRUE if at least 1 bytes of memory is successfully read.
 */
-_Success_(return) BOOL
-LeechCorePYC_ReadZeroPad(_In_ HANDLE hLC, _In_ QWORD pa, _In_ DWORD cb, _Out_writes_(cb) PBYTE pb)
+_Success_(return)
+BOOL LeechCorePYC_ReadZeroPad(_In_ HANDLE hLC, _In_ QWORD pa, _In_ DWORD cb, _Out_writes_(cb) PBYTE pb)
 {
     // Similar to LcRead implementation but with zero padding:
     QWORD i, o, paBase, cMEMs;
@@ -118,13 +121,133 @@ fail:
     return fResult;
 }
 
-// (ULONG64, DWORD, (BOOL)) -> PBYTE
+
+
+//-----------------------------------------------------------------------------
+// FPGA-ONLY PCIe TLP FUNCTIONS BELOW:
+//-----------------------------------------------------------------------------
+
+/*
+* LeechCore callback function for read TLP. Callback calls into a Python
+* function set by the user when the LeechCore callback was set up.
+* NOTE! CALLBACK FUNCTION MUST NEVER CALL LEECHCORE DUE TO RISK OF DEADLOCK!
+*/
+VOID LcPy_TlpReadCB(PVOID ctx, _In_ DWORD cbTlp, _In_ PBYTE pbTlp, _In_opt_ DWORD cbInfo, _In_opt_ LPSTR szInfo)
+{
+    PyObjectLeechCore *self = (PyObjectLeechCore*)ctx;
+    PyGILState_STATE gstate;
+    PyObject *pyReturn, *pyArgs = NULL;
+    gstate = PyGILState_Ensure();
+    if(!cbTlp || !self || !self->fnTlpReadCB) { goto cleanup; }
+    pyArgs = Py_BuildValue("y#s", pbTlp, cbTlp, szInfo);
+    pyReturn = PyObject_CallObject(self->fnTlpReadCB, pyArgs);
+    Py_XDECREF(pyArgs);
+    Py_XDECREF(pyReturn);
+cleanup:
+    PyGILState_Release(gstate);
+}
+
+// (FUNCTION_CALLBACK, (BOOL, BOOL)) -> None
 static PyObject*
-#ifdef LINUX
-// for some unexplainable reason 'pa' will always be 0 on some optimization
-// levels on linux; but disabling optimization for the function solves issue.
-__attribute__((optimize("O0")))
-#endif /* LINUX */
+LcPy_TlpRead(PyObjectLeechCore *self, PyObject *args)
+{
+    PyObject *pyCallback = NULL, *pyCallbackOld = NULL;
+    BOOL fCallback = FALSE, fFilterCpl = FALSE, fThread = FALSE;
+    LC_TLP_CALLBACK LcTlpCallback;
+    if(!self->fValid) { return PyErr_Format(PyExc_RuntimeError, "tlp_read: LeechCore object not initialized."); }
+    if(!PyArg_ParseTuple(args, "|Opp", &pyCallback, &fFilterCpl, &fThread)) { return PyErr_Format(PyExc_RuntimeError, "tlp_read: Illegal argument."); }    // borrowed reference
+    fCallback = PyCallable_Check(pyCallback);
+    if(fCallback) {
+        pyCallbackOld = self->fnTlpReadCB;
+        self->fnTlpReadCB = pyCallback;
+        Py_XINCREF(pyCallback);
+        Py_XDECREF(pyCallbackOld);
+    }
+    // call c-dll for LeechCore
+    Py_BEGIN_ALLOW_THREADS;
+    if(fCallback) {
+        LcSetOption(self->hLC, LC_OPT_FPGA_TLP_READ_CB_WITHINFO, 1);
+        LcSetOption(self->hLC, LC_OPT_FPGA_TLP_READ_CB_FILTERCPL, fFilterCpl ? 1 : 0);
+        LcTlpCallback.ctx = self;
+        LcTlpCallback.pfn = LcPy_TlpReadCB;
+        if(LcCommand(self->hLC, LC_CMD_FPGA_TLP_READ_FUNCTION_CALLBACK, sizeof(LC_TLP_CALLBACK), (PBYTE)&LcTlpCallback, NULL, 0)) {
+            LcSetOption(self->hLC, LC_OPT_FPGA_TLP_READ_CB_BACKGROUND_THREAD, fThread ? 1 : 0);
+        }
+    } else {
+        LcCommand(self->hLC, LC_CMD_FPGA_TLP_READ_FUNCTION_CALLBACK, 0, NULL, NULL, 0);
+    }
+    Py_END_ALLOW_THREADS;
+    if(!fCallback) {
+        pyCallbackOld = self->fnTlpReadCB;
+        self->fnTlpReadCB = NULL;
+        Py_XDECREF(pyCallbackOld);
+    }
+    Py_RETURN_NONE;
+}
+
+// ([PBYTE]) -> None
+static PyObject*
+LcPy_TlpWrite(PyObjectLeechCore *self, PyObject *args)
+{
+    PyObject *pyListSrc, *pyListItemSrc;
+    DWORD i, cTLPs;
+    PLC_TLP pTLPs;
+    if(!self->fValid) { return PyErr_Format(PyExc_RuntimeError, "tlp_write: LeechCore object not initialized."); }
+    if(!PyArg_ParseTuple(args, "O!", &PyList_Type, &pyListSrc)) { return PyErr_Format(PyExc_RuntimeError, "tlp_write: Illegal argument."); }    // borrowed reference
+    cTLPs = (DWORD)PyList_Size(pyListSrc);
+    // verify, allocate & initialize
+    if((cTLPs == 0) || !(pTLPs = LocalAlloc(LMEM_ZEROINIT, cTLPs * sizeof(LC_TLP)))) {
+        Py_RETURN_NONE;
+    }
+    for(i = 0; i < cTLPs; i++) {
+        pyListItemSrc = PyList_GetItem(pyListSrc, i); // borrowed reference
+        if(!pyListItemSrc || !PyBytes_Check(pyListItemSrc)) {
+            LocalFree(pTLPs);
+            return PyErr_Format(PyExc_RuntimeError, "tlp_write: Argument list contains non bytes item.");
+        }
+        pTLPs[i].cb = (DWORD)PyBytes_Size(pyListItemSrc);
+        pTLPs[i].pb = (PBYTE)PyBytes_AsString(pyListItemSrc);
+    }
+    // call c-dll for LeechCore
+    Py_BEGIN_ALLOW_THREADS;
+    LcCommand(self->hLC, LC_CMD_FPGA_TLP_WRITE_MULTIPLE, cTLPs * sizeof(LC_TLP), (PBYTE)pTLPs, NULL, NULL);
+    LocalFree(pTLPs);
+    Py_END_ALLOW_THREADS;
+    Py_RETURN_NONE;
+}
+
+// (PBYTE) -> STRING
+static PyObject*
+LcPy_TlpToString(PyObjectLeechCore *self, PyObject *args)
+{
+    PyObject *pyString;
+    PBYTE pb, sz = NULL;
+    Py_ssize_t cb;
+    BOOL result;
+    if(!self->fValid) { return PyErr_Format(PyExc_RuntimeError, "tlp_tostring: LeechCore object not initialized."); }
+    if(!PyArg_ParseTuple(args, "y#", &pb, &cb)) { return PyErr_Format(PyExc_RuntimeError, "tlp_tostring: Illegal arguments."); }
+    if(cb == 0) {
+        return PyUnicode_FromFormat("%s", "");
+    }
+    Py_BEGIN_ALLOW_THREADS;
+    result = LcCommand(self->hLC, LC_CMD_FPGA_TLP_TOSTRING, (DWORD)cb, pb, &sz, NULL);
+    Py_END_ALLOW_THREADS;
+    if(!result) {
+        return PyErr_Format(PyExc_RuntimeError, "tlp_tostring: Failed.");
+    }
+    pyString = PyUnicode_FromFormat("%s", (LPSTR)sz);
+    LcMemFree(sz);
+    return pyString;
+}
+
+
+
+//-----------------------------------------------------------------------------
+// GENERAL LEECHCORE FUNCTIONS BELOW:
+//-----------------------------------------------------------------------------
+
+// (ULONG64, DWORD, (BOOL)) -> PBYTE
+static PyObject* LINUX_NO_OPTIMIZE
 LcPy_Read(PyObjectLeechCore *self, PyObject *args)
 {
     PyObject *pyBytes;
@@ -132,8 +255,8 @@ LcPy_Read(PyObjectLeechCore *self, PyObject *args)
     ULONG64 pa;
     DWORD cb;
     PBYTE pb;
-    if(!self->fValid) { return PyErr_Format(PyExc_RuntimeError, "LeechCore object not initialized."); }
-    if(!PyArg_ParseTuple(args, "Kk|p", &pa, &cb, &fZeroPadFail)) { return PyErr_Format(PyExc_RuntimeError, "Illegal arguments."); }
+    if(!self->fValid) { return PyErr_Format(PyExc_RuntimeError, "read: LeechCore object not initialized."); }
+    if(!PyArg_ParseTuple(args, "Kk|p", &pa, &cb, &fZeroPadFail)) { return PyErr_Format(PyExc_RuntimeError, "read: Illegal arguments."); }
     pb = LocalAlloc(0, cb);
     if(!pb) { return PyErr_NoMemory(); }
     Py_BEGIN_ALLOW_THREADS;
@@ -143,7 +266,7 @@ LcPy_Read(PyObjectLeechCore *self, PyObject *args)
     Py_END_ALLOW_THREADS;
     if(!result) {
         LocalFree(pb);
-        return PyErr_Format(PyExc_RuntimeError, "Read: Failed.");
+        return PyErr_Format(PyExc_RuntimeError, "read: Failed.");
     }
     pyBytes = PyBytes_FromStringAndSize((char *)pb, cb);
     LocalFree(pb);
@@ -157,20 +280,18 @@ LcPy_ReadScatter(PyObjectLeechCore *self, PyObject *args)
     PyObject *pyListSrc, *pyListItemSrc, *pyListDst, *pyDict;
     DWORD i, cMEMs;
     PMEM_SCATTER pMEM, *ppMEMs;
-    if(!self->fValid) { return PyErr_Format(PyExc_RuntimeError, "LeechCore object not initialized."); }
-    if(!PyArg_ParseTuple(args, "O!", &PyList_Type, &pyListSrc)) { return PyErr_Format(PyExc_RuntimeError, "Illegal argument."); }
+    if(!self->fValid) { return PyErr_Format(PyExc_RuntimeError, "read_scatter: LeechCore object not initialized."); }
+    if(!PyArg_ParseTuple(args, "O!", &PyList_Type, &pyListSrc)) { return PyErr_Format(PyExc_RuntimeError, "read_scatter: Illegal argument."); } // borrowed reference
     cMEMs = (DWORD)PyList_Size(pyListSrc);
     // verify, allocate & initialize
     if((cMEMs == 0) || !LcAllocScatter1(cMEMs, &ppMEMs)) {
-        Py_DECREF(pyListSrc);
         return PyList_New(0);
     }
     for(i = 0; i < cMEMs; i++) {
         pyListItemSrc = PyList_GetItem(pyListSrc, i); // borrowed reference
         if(!pyListItemSrc || !PyLong_Check(pyListItemSrc)) {
-            Py_DECREF(pyListSrc);
             LcMemFree(ppMEMs);
-            return PyErr_Format(PyExc_RuntimeError, "ReadScatter: Argument list contains non numeric item.");
+            return PyErr_Format(PyExc_RuntimeError, "read_scatter: Argument list contains non numeric item.");
         }
         ppMEMs[i]->qwA = PyLong_AsUnsignedLongLong(pyListItemSrc) & ~0xfff;
     }
@@ -201,23 +322,17 @@ LcPy_Write(PyObjectLeechCore *self, PyObject *args)
 {
     BOOL result;
     ULONG64 va;
-    PBYTE pb, pbPy;
-    SIZE_T cb;
-    if(!self->fValid) { return PyErr_Format(PyExc_RuntimeError, "LeechCore object not initialized."); }
-    if(!PyArg_ParseTuple(args, "Ky#", &va, &pbPy, &cb)) { return PyErr_Format(PyExc_RuntimeError, "Illegal argument."); }
+    PBYTE pb;
+    Py_ssize_t cb;
+    if(!self->fValid) { return PyErr_Format(PyExc_RuntimeError, "write: LeechCore object not initialized."); }
+    if(!PyArg_ParseTuple(args, "Ky#", &va, &pb, &cb)) { return PyErr_Format(PyExc_RuntimeError, "write: Illegal argument."); }
     if(cb == 0) {
         return Py_BuildValue("s", NULL);    // zero-byte write is always successful.
     }
-    pb = LocalAlloc(0, cb);
-    if(!pb) {
-        return PyErr_NoMemory();
-    }
-    memcpy(pb, pbPy, cb);
     Py_BEGIN_ALLOW_THREADS;
     result = LcWrite(self->hLC, va, (DWORD)cb, pb);
-    LocalFree(pb);
     Py_END_ALLOW_THREADS;
-    if(!result) { return PyErr_Format(PyExc_RuntimeError, "Write: Failed."); }
+    if(!result) { return PyErr_Format(PyExc_RuntimeError, "write: Failed."); }
     return Py_BuildValue("s", NULL);    // None returned on success.
 }
 
@@ -227,12 +342,12 @@ LcPy_GetOption(PyObjectLeechCore *self, PyObject *args)
 {
     BOOL result;
     ULONG64 fOption, qwValue = 0;
-    if(!self->fValid) { return PyErr_Format(PyExc_RuntimeError, "LeechCore object not initialized."); }
-    if(!PyArg_ParseTuple(args, "K", &fOption)) { return PyErr_Format(PyExc_RuntimeError, "Illegal argument."); }
+    if(!self->fValid) { return PyErr_Format(PyExc_RuntimeError, "get_option: LeechCore object not initialized."); }
+    if(!PyArg_ParseTuple(args, "K", &fOption)) { return PyErr_Format(PyExc_RuntimeError, "get_option: Illegal argument."); }
     Py_BEGIN_ALLOW_THREADS;
     result = LcGetOption(self->hLC, fOption, &qwValue);
     Py_END_ALLOW_THREADS;
-    if(!result) { return PyErr_Format(PyExc_RuntimeError, "GetOption: Unable to retrieve value for option."); }
+    if(!result) { return PyErr_Format(PyExc_RuntimeError, "get_option: Unable to retrieve value for option."); }
     return PyLong_FromUnsignedLongLong(qwValue);
 }
 
@@ -242,12 +357,12 @@ LcPy_SetOption(PyObjectLeechCore *self, PyObject *args)
 {
     BOOL result;
     ULONG64 fOption, qwValue = 0;
-    if(!self->fValid) { return PyErr_Format(PyExc_RuntimeError, "LeechCore object not initialized."); }
-    if(!PyArg_ParseTuple(args, "KK", &fOption, &qwValue)) { return PyErr_Format(PyExc_RuntimeError, "Illegal argument."); }
+    if(!self->fValid) { return PyErr_Format(PyExc_RuntimeError, "set_option: LeechCore object not initialized."); }
+    if(!PyArg_ParseTuple(args, "KK", &fOption, &qwValue)) { return PyErr_Format(PyExc_RuntimeError, "set_option: Illegal argument."); }
     Py_BEGIN_ALLOW_THREADS;
     result = LcSetOption(self->hLC, fOption, qwValue);
     Py_END_ALLOW_THREADS;
-    if(!result) { return PyErr_Format(PyExc_RuntimeError, "SetOption: Unable to set value for option."); }
+    if(!result) { return PyErr_Format(PyExc_RuntimeError, "set_option: Unable to set value for option."); }
     return Py_BuildValue("s", NULL);    // None returned on success.
 }
 
@@ -261,15 +376,15 @@ LcPy_CommandData(PyObjectLeechCore *self, PyObject *args)
     PBYTE pb, pbPy, pbDataOut;
     SIZE_T cb;
     DWORD cbDataOut = 0;
-    if(!self->fValid) { return PyErr_Format(PyExc_RuntimeError, "LeechCore object not initialized."); }
-    if(!PyArg_ParseTuple(args, "Ky#", &fOption, &pbPy, &cb)) { return PyErr_Format(PyExc_RuntimeError, "Illegal argument."); }
+    if(!self->fValid) { return PyErr_Format(PyExc_RuntimeError, "command_data: LeechCore object not initialized."); }
+    if(!PyArg_ParseTuple(args, "Ky#", &fOption, &pbPy, &cb)) { return PyErr_Format(PyExc_RuntimeError, "command_data: Illegal argument."); }
     if(!(pb = LocalAlloc(0, cb))) { return PyErr_NoMemory(); }
     memcpy(pb, pbPy, cb);
     Py_BEGIN_ALLOW_THREADS;
     result = LcCommand(self->hLC, fOption, (DWORD)cb, pb, &pbDataOut, &cbDataOut);
     LocalFree(pb);
     Py_END_ALLOW_THREADS;
-    if(!result) { return PyErr_Format(PyExc_RuntimeError, "CommandData: Failed."); }
+    if(!result) { return PyErr_Format(PyExc_RuntimeError, "command_data: Failed."); }
     pyBytes = PyBytes_FromStringAndSize((char*)pbDataOut, cbDataOut);
     LcMemFree(pbDataOut);
     return pyBytes;
@@ -399,7 +514,7 @@ LcPy_SetMemMap(PyObjectLeechCore *self, PyObject *pyRuns, void *closure)
 fail:
     LocalFree(sz);
     if(!fResult) {
-        PyErr_SetString(PyExc_TypeError, "Cannot set memory map attribute");
+        PyErr_SetString(PyExc_TypeError, "Cannot set memory map attribute.");
         return -1;
     }
     return 0;
@@ -463,6 +578,12 @@ fail:
     }
     return 0;
 }
+
+
+
+//-----------------------------------------------------------------------------
+// LcPy INITIALIZATION AND CORE FUNCTIONALITY BELOW:
+//-----------------------------------------------------------------------------
 
 // -> True|False
 static PyObject*
@@ -533,11 +654,18 @@ static void
 LcPy_dealloc(PyObjectLeechCore *self)
 {
     self->fValid = FALSE;
+    if(self->fnTlpReadCB) {
+        Py_BEGIN_ALLOW_THREADS;
+        LcCommand(self->hLC, LC_CMD_FPGA_TLP_READ_FUNCTION_CALLBACK, 0, NULL, NULL, 0);
+        Sleep(5);
+        Py_END_ALLOW_THREADS;
+    }
     Py_BEGIN_ALLOW_THREADS;
     if(self->phLCkeepalive) { *self->phLCkeepalive = 0; }     // keepalive memory allocation is free'd by keepalive thread
     LcClose(self->hLC);
     self->hLC = 0;
     Py_END_ALLOW_THREADS;
+    Py_XDECREF(self->fnTlpReadCB);
 }
 
 // () -> None
@@ -565,6 +693,10 @@ BOOL LcPy_InitializeType(PyObject *pModule)
         {"get_option", (PyCFunction)LcPy_GetOption, METH_VARARGS, "Get option value"},
         {"set_option", (PyCFunction)LcPy_SetOption, METH_VARARGS, "Set option value"},
         {"command_data", (PyCFunction)LcPy_CommandData, METH_VARARGS, "Send/Receive command/data"},
+        // fpga-only functions below:
+        {"tlp_tostring", (PyCFunction)LcPy_TlpToString, METH_VARARGS, "Convert binary PCIe TLP to string"},
+        {"tlp_read", (PyCFunction)LcPy_TlpRead, METH_VARARGS, "Read PCIe TLPs using callback function"},
+        {"tlp_write", (PyCFunction)LcPy_TlpWrite, METH_VARARGS, "Write a number of raw PCIe TLPs"},
         {NULL, NULL, 0, NULL}
     };
     static PyMemberDef PyMembers[] = {
