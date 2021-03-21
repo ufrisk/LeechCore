@@ -562,6 +562,9 @@ BOOL LeechRpc_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO pp
     } else {
         goto fail;
     }
+    if(!strcmp(ctxLC->Config.szDevice, "existingremote")) {
+        strcpy_s(ctxLC->Config.szDevice, _countof(ctxLC->Config.szDevice), "existing");
+    }
     // try enable compression (if required)
     ctxLC->Rpc.fCompress = ctxLC->Rpc.fCompress && LeechRPC_CompressInitialize(&ctx->Compress);
     ctxLC->Config.fRemoteDisableCompress = ctxLC->Config.fRemoteDisableCompress && !ctxLC->Rpc.fCompress;

@@ -68,12 +68,12 @@ BOOL LeechRPC_LcHandle_New(_In_ DWORD dwRpcClientID, _In_ HANDLE hLC)
     return FALSE;
 }
 
-VOID LeechRPC_LcHandle_Return(_In_opt_ HANDLE hLC)
+VOID LeechRPC_LcHandle_Return(_In_opt_ HANDLE hLC, _In_ DWORD dwRpcClientID)
 {
     DWORD i;
     if(!hLC) { return; }
     for(i = 0; i < LEECHAGENT_CLIENTKEEPALIVE_MAX_CLIENTS; i++) {
-        if(ctxLeechRpc.ClientList[i].hLC == hLC) {
+        if((ctxLeechRpc.ClientList[i].hLC == hLC) && (ctxLeechRpc.ClientList[i].dwRpcClientID == dwRpcClientID)) {
             EnterCriticalSection(&ctxLeechRpc.LockClientList);
             ctxLeechRpc.ClientList[i].cActiveRequests--;
             LeaveCriticalSection(&ctxLeechRpc.LockClientList);
@@ -372,10 +372,10 @@ error_status_t LeechRpc_ReservedSubmitCommand(
     PLEECHRPC_MSG_BIN pReqBin = NULL;
     PLEECHRPC_MSG_BIN pRspBin = NULL;
     // 1: sanity checks in incoming data
-    if(!ctxLeechRpc.fValid) { goto fail; }
-    if(cbIn < sizeof(LEECHRPC_MSG_HDR)) { goto fail; }
+    if(!ctxLeechRpc.fValid) { return status; }
+    if(cbIn < sizeof(LEECHRPC_MSG_HDR)) { return status; }
     pReq = (PLEECHRPC_MSG_HDR)pbIn;
-    if((pReq->dwMagic != LEECHRPC_MSGMAGIC) || (pReq->tpMsg > LEECHRPC_MSGTYPE_MAX) || (pReq->cbMsg < sizeof(LEECHRPC_MSG_HDR))) { goto fail; }
+    if((pReq->dwMagic != LEECHRPC_MSGMAGIC) || (pReq->tpMsg > LEECHRPC_MSGTYPE_MAX) || (pReq->cbMsg < sizeof(LEECHRPC_MSG_HDR))) { return status; }
     hLC = LeechRPC_LcHandle_GetExisting(pReq->dwRpcClientID);
     if(!hLC && !((pReq->tpMsg == LEECHRPC_MSGTYPE_PING_REQ) || (pReq->tpMsg == LEECHRPC_MSGTYPE_OPEN_REQ) || (pReq->tpMsg == LEECHRPC_MSGTYPE_CLOSE_REQ))) { goto fail; }
     switch(pReq->tpMsg) {
@@ -441,7 +441,7 @@ error_status_t LeechRpc_ReservedSubmitCommand(
             if(fFreeReqBin) { LocalFree(pReqBin); pReqBin = NULL; } // only free locally allocated decompressed bindata
             goto finish;
         case LEECHRPC_MSGTYPE_CLOSE_REQ:
-            LeechRPC_LcHandle_Return(hLC);
+            LeechRPC_LcHandle_Return(hLC, pReq->dwRpcClientID);
             hLC = NULL;
             LeechRPC_LcHandle_Close(pReq->dwRpcClientID, FALSE);
             if(!(pRsp = LocalAlloc(0, sizeof(LEECHRPC_MSG_HDR)))) { goto fail; }
@@ -494,10 +494,10 @@ error_status_t LeechRpc_ReservedSubmitCommand(
             goto fail;
     }
 finish:
-    LeechRPC_LcHandle_Return(hLC);
+    if(pReq) { LeechRPC_LcHandle_Return(hLC, pReq->dwRpcClientID); }
     return status;
 fail:
-    LeechRPC_LcHandle_Return(hLC);
+    LeechRPC_LcHandle_Return(hLC, pReq->dwRpcClientID);
     if(fFreeReqBin) { LocalFree(pReqBin); pReqBin = NULL; } // only free locally allocated decompressed bindata
     *pcbOut = 0;
     *ppbOut = NULL;

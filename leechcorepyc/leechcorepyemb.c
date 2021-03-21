@@ -70,10 +70,10 @@ BOOL LeechCorePyC_EmbPythonInitialize(_In_ HMODULE hDllPython)
     Py_SetPath(wszPathPython);
     //wprintf(L"LeechSvc: Python Path: %s\n", wszPathPython);
     Py_Initialize();
-    PyEval_InitThreads();
+    //PyEval_InitThreads();
     g_PyRun_SimpleString(
         "try:                           \n" \
-        "    from vmmpy import *        \n" \
+        "    import memprocfs           \n" \
         "except:                        \n" \
         "    pass                       \n" \
         "try:                           \n" \

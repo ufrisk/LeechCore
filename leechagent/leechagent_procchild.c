@@ -50,7 +50,7 @@ _Success_(return)
 BOOL LeechAgent_ProcChild_InitializeVmm()
 {
     BOOL result;
-    LPSTR szVMM_ARGUMENTS[] = { "", "-device", "existingremote", "-remote", "" };
+    LPSTR szVMM_ARGUMENTS[] = { "", "-device", "existingremote", "-remote", "pipe://" };
     szVMM_ARGUMENTS[4] = ctxProcChild.szRemote;
     ctxProcChild.hDllVmm = LoadLibraryExA("vmm.dll", NULL, LOAD_LIBRARY_SEARCH_APPLICATION_DIR);
     if(!ctxProcChild.hDllVmm) {
@@ -81,7 +81,7 @@ BOOL LeechAgent_ProcChild_InitializePython()
     BOOL result;
     DWORD i;
     WCHAR wszPythonPath[MAX_PATH];
-    LPWSTR wszPYTHON_VERSIONS_SUPPORTED[] = { L"python36.dll", L"python37.dll", L"python38.dll" };
+    LPWSTR wszPYTHON_VERSIONS_SUPPORTED[] = { L"python315.dll", L"python314.dll", L"python313.dll", L"python312.dll", L"python311.dll", L"python310.dll", L"python39.dll", L"python38.dll", L"python37.dll", L"python36.dll" };
     DWORD cszPYTHON_VERSIONS_SUPPORTED = (sizeof(wszPYTHON_VERSIONS_SUPPORTED) / sizeof(LPSTR));
     // Locate Python
     for(i = 0; i < cszPYTHON_VERSIONS_SUPPORTED; i++) {
@@ -133,26 +133,19 @@ VOID LeechAgent_ProcChild_Close_ForceTerminateThread(PVOID pv)
 
 /*
 * Exit / Shut down this child process. Before shutdown an attempt to shut down
-* Python (to flush remaining buffers) is made. Also the MemProcFS will be shut
-* down for the memory reader to unregister from the parent process.
-* All other cleaning of pipe handles and buffers are left to the OS to manage
-* on process shutdown.
-* If orderly shutdown takes too long a forceful process termination is requested.
+* Python (to flush remaining buffers) is made.
 */
 VOID LeechAgent_ProcChild_Close()
 {
-    HANDLE hThread;
-    ctxProcChild.fStateRunning = FALSE;
-    hThread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)LeechAgent_ProcChild_Close_ForceTerminateThread, NULL, 0, NULL);
-    if(hThread) { CloseHandle(hThread); }
+    fflush(stdout);
+    fflush(stderr);
+    CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)LeechAgent_ProcChild_Close_ForceTerminateThread, NULL, 0, NULL);
     if(ctxProcChild.pfnLeechCorePyC_EmbClose) {
         ctxProcChild.pfnLeechCorePyC_EmbClose();
     }
     fflush(stdout);
     fflush(stderr);
-    if(ctxProcChild.pfnVMMDLL_Close) {
-        ctxProcChild.pfnVMMDLL_Close();
-    }
+    TerminateProcess(GetCurrentProcess(), 0);
     Sleep(200);
     ExitProcess(0);
 }
