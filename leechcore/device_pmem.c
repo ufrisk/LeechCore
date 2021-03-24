@@ -13,22 +13,23 @@ DWORD g_cDevicePMEM = 0;
 
 //-----------------------------------------------------------------------------
 // MEMORY INFO STRUCT FROM WINPMEM HEADER BELOW:
-// https://github.com/google/rekall/blob/master/tools/windows/winpmem/executable/winpmem.h
+// https://github.com/Velocidex/WinPmem/blob/master/kernel/userspace_interface/winpmem_shared.h
 //-----------------------------------------------------------------------------
 
 #pragma pack(push, 2)
 
-#define PMEM_MODE_IOSPACE 0
-#define PMEM_MODE_PHYSICAL 1
-#define PMEM_MODE_PTE 2
-#define PMEM_MODE_PTE_PCI 3
-#define PMEM_MODE_AUTO 99
+#define PMEM_MODE_IOSPACE   0
+#define PMEM_MODE_PHYSICAL  1
+#define PMEM_MODE_PTE       2
+#define PMEM_MODE_AUTO      99
 
-#define PMEM_CTRL_IOCTRL CTL_CODE(0x22, 0x101, 0, 3)
-#define PMEM_WRITE_ENABLE CTL_CODE(0x22, 0x102, 0, 3)
-#define PMEM_INFO_IOCTRL CTL_CODE(0x22, 0x103, 0, 3)
+#define NUMBER_OF_RUNS      (20)
 
-typedef struct pmem_info_runs {
+#define PMEM_CTRL_IOCTRL CTL_CODE(0x22, 0x101, 3, 3)
+#define PMEM_WRITE_ENABLE CTL_CODE(0x22, 0x102, 3, 3)
+#define PMEM_INFO_IOCTRL CTL_CODE(0x22, 0x103, 3, 3)
+
+typedef struct tdPHYSICAL_MEMORY_RANGE {
     __int64 start;
     __int64 length;
 } PHYSICAL_MEMORY_RANGE;
@@ -38,14 +39,18 @@ struct PmemMemoryInfo {
     LARGE_INTEGER NtBuildNumber;
     LARGE_INTEGER KernBase;
     LARGE_INTEGER KDBG;
+#ifdef _WIN64
+    LARGE_INTEGER KPCR[64];
+#else
     LARGE_INTEGER KPCR[32];
+#endif
     LARGE_INTEGER PfnDataBase;
     LARGE_INTEGER PsLoadedModuleList;
     LARGE_INTEGER PsActiveProcessHead;
     LARGE_INTEGER NtBuildNumberAddr;
     LARGE_INTEGER Padding[0xfe];
     LARGE_INTEGER NumberOfRuns;
-    PHYSICAL_MEMORY_RANGE Run[100];
+    PHYSICAL_MEMORY_RANGE Run[NUMBER_OF_RUNS];
 };
 
 #pragma pack(pop)
@@ -57,8 +62,8 @@ struct PmemMemoryInfo {
 #define DEVICEPMEM_SERVICENAME      "pmem"
 #define DEVICEPMEM_MEMORYFILE       "\\\\.\\pmem"
 LPCSTR szDEVICEPMEM_DRIVERFILE[2][3] = {
-    {"att_winpmem_32.sys", "winpmem_32.sys", "winpmem_x86.sys"},
-    {"att_winpmem_64.sys", "winpmem_64.sys", "winpmem_x64.sys"}
+    {"winpmem_x86.sys"},
+    {"winpmem_x64.sys"}
 };
 
 typedef struct tdDEVICE_CONTEXT_PMEM {
@@ -121,16 +126,30 @@ VOID DevicePMEM_SvcClose()
 /*
 * Is pmem service running (kernel driver loaded).
 */
-BOOL DevicePMEM_SvcStatusRunning()
+BOOL DevicePMEM_SvcStatusRunning(_In_ PLC_CONTEXT ctxLC)
 {
+    PDEVICE_CONTEXT_PMEM ctx = (PDEVICE_CONTEXT_PMEM)ctxLC->hDevice;
     BOOL fResult = FALSE;
     SC_HANDLE hSCM, hSvcPMem;
+    // 1: check if driver is already loaded
     if((hSCM = OpenSCManager(NULL, NULL, SC_MANAGER_CREATE_SERVICE))) {
         if((hSvcPMem = OpenServiceA(hSCM, DEVICEPMEM_SERVICENAME, SERVICE_ALL_ACCESS))) {
             if(hSvcPMem) { CloseServiceHandle(hSvcPMem); }
             fResult = TRUE;
         }
         CloseServiceHandle(hSCM);
+    }
+    // 2: on success - open file handle to driver
+    if(fResult) {
+        ctx->hFile = CreateFileA(
+            DEVICEPMEM_MEMORYFILE,
+            GENERIC_READ | GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            NULL,
+            OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL,
+            NULL);
+        fResult = ctx->hFile ? TRUE : FALSE;
     }
     return fResult;
 }
@@ -335,7 +354,7 @@ BOOL DevicePMEM_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
     ctxLC->pfnGetOption = DevicePMEM_GetOption;
     // 2: load winpmem kernel driver.
     g_cDevicePMEM++;
-    result = DevicePMEM_SvcStatusRunning() || DevicePMEM_SvcStart(ctxLC);
+    result = DevicePMEM_SvcStatusRunning(ctxLC) || DevicePMEM_SvcStart(ctxLC);
     // 3: retrieve memory map.
     result = result && DevicePMEM_GetMemoryInformation(ctxLC);
     if(!result) {
