@@ -58,9 +58,14 @@ int PyList_Append_DECREF(PyObject *dp, PyObject *item)
 static PyObject*
 LeechCorePYC_GetLastError(PyObject *self, PyObject *args)
 {
+#ifdef _WIN32
     return g_LEECHCORE_LAST_ERRORINFO ?
         PyUnicode_FromWideChar(g_LEECHCORE_LAST_ERRORINFO->wszUserText, -1) :
         PyUnicode_FromFormat("%s", "");
+#endif /* _WIN32 */
+#ifdef LINUX
+    return PyUnicode_FromFormat("%s", "");
+#endif /* LINUX */ 
 }
 
 /*

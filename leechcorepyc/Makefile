@@ -10,10 +10,11 @@ OBJ = leechcorepyc.o oscompatibility.o
 leechcorepyc: $(OBJ)
 	cp ../files/leechcore.so . || true
 	$(CC) -o $@ $^ $(CFLAGS) -o leechcorepyc.so $(LDFLAGS)
-	rm -f *.o
 	mv leechcorepyc.so ../files/ || true
+	rm -f *.o || true
+	rm -f *.so || true
 	true
 
 clean:
-	rm -f *.o
-	rm -f *.so
+	rm -f *.o || true
+	rm -f *.so || true

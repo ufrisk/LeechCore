@@ -9,9 +9,13 @@ OBJ = oscompatibility.o leechcore.o util.o memmap.o device_file.o device_fpga.o 
 
 leechcore: $(OBJ)
 	$(CC) -o $@ $^ $(CFLAGS) -o leechcore.so $(LDFLAGS)
-	rm *.o
 	mv leechcore.so ../files/
+	rm -f *.o || true
+	rm -f */*.o || true
+	rm -f *.so || true
 	true
 
 clean:
-	rm -f *.o
+	rm -f *.o || true
+	rm -f */*.o || true
+	rm -f *.so || true

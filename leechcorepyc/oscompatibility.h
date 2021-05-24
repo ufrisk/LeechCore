@@ -5,15 +5,16 @@
 //
 #ifndef __OSCOMPATIBILITY_H__
 #define __OSCOMPATIBILITY_H__
+#include "leechcore.h"
 
 #ifdef _WIN32
 
 #include <Windows.h>
 #include <stdio.h>
+#include <winusb.h>
 #include <setupapi.h>
 #include <conio.h>
 
-typedef unsigned __int64                    QWORD, *PQWORD;
 #define SOCK_NONBLOCK                       0
 
 #pragma warning( disable : 4477)
@@ -27,6 +28,7 @@ VOID usleep(_In_ DWORD us);
 #include <byteswap.h>
 #include <ctype.h>
 #include <dirent.h>
+#include <dlfcn.h>
 #include <errno.h>
 #include <inttypes.h>
 #include <stdio.h>
@@ -44,16 +46,14 @@ VOID usleep(_In_ DWORD us);
 #define LC_LIBRARY_FILETYPE                 ".so"
 
 typedef void                                VOID, *PVOID;
-typedef void                                *HANDLE, **PHANDLE;
-typedef void                                *HMODULE, *FARPROC;
+typedef void                                *HANDLE, **PHANDLE, *HMODULE, *FARPROC;
 typedef uint32_t                            BOOL, *PBOOL;
 typedef uint8_t                             BYTE, *PBYTE;
 typedef uint8_t                             UCHAR, *PUCHAR;
 typedef char                                CHAR, *PCHAR, *PSTR, *LPSTR;
 typedef uint16_t                            WORD, *PWORD, USHORT, *PUSHORT;
-typedef wchar_t                             WCHAR, *PWCHAR, *LPWSTR;
-typedef uint32_t                            DWORD, *PDWORD;
-typedef uint32_t                            ULONG, *PULONG;
+typedef uint16_t                            WCHAR, *PWCHAR, *LPWSTR, *LPCWSTR;
+typedef uint32_t                            DWORD, *PDWORD, ULONG, *PULONG;
 typedef long long unsigned int              QWORD, *PQWORD, ULONG64, *PULONG64;
 typedef uint64_t                            LARGE_INTEGER, *PLARGE_INTEGER, FILETIME;
 typedef uint64_t                            SIZE_T, *PSIZE_T;
@@ -80,6 +80,7 @@ typedef struct tdEXCEPTION_RECORD64         { CHAR sz[152]; } EXCEPTION_RECORD64
 #define INVALID_FILE_SIZE                   (0xffffffffL)
 #define _TRUNCATE                           ((SIZE_T)-1LL)
 #define LPTHREAD_START_ROUTINE              PVOID
+#define WINUSB_INTERFACE_HANDLE             libusb_device_handle*
 #define PIPE_TRANSFER_TIMEOUT               0x03
 #define CONSOLE_SCREEN_BUFFER_INFO          PVOID    // TODO: remove this dummy
 #define SOCKET                              int
@@ -118,15 +119,17 @@ typedef struct tdEXCEPTION_RECORD64         { CHAR sz[152]; } EXCEPTION_RECORD64
 #define _byteswap_ulong(v)                  (bswap_32(v))
 #define _byteswap_uint64(v)                 (bswap_64(v))
 #define _countof(_Array)                    (sizeof(_Array) / sizeof(_Array[0]))
+#define sprintf_s(s, maxcount, ...)         (snprintf(s, maxcount, __VA_ARGS__))
 #define strnlen_s(s, maxcount)              (strnlen(s, maxcount))
 #define strcpy_s(dst, len, src)             (strncpy(dst, src, len))
-#define strncpy_s(dst, len, src, srclen)    (strncpy(dst, src, min(len, srclen)))
-#define strcat_s(dst, len, src)             (strcat(dst, src))
-#define strncat_s(dst, len, src, srclen)    (strncat(dst, src, srclen))
+#define strncpy_s(dst, len, src, srclen)    (strncpy(dst, src, min((QWORD)(max(1, len)) - 1, (QWORD)(srclen))))
+#define strncat_s(dst, dstlen, src, srclen) (strncat(dst, src, min((((strlen(dst) + 1 >= (QWORD)(dstlen)) || ((QWORD)(dstlen) == 0)) ? 0 : ((QWORD)(dstlen) - strlen(dst) - 1)), (QWORD)(srclen))))
+#define strcat_s(dst, dstlen, src)          (strncat_s(dst, dstlen, src, _TRUNCATE))
+#define _vsnprintf_s(dst, len, cnt, fmt, a) (vsnprintf(dst, min((QWORD)(len), (QWORD)(cnt)), fmt, a))
 #define _stricmp(s1, s2)                    (strcasecmp(s1, s2))
 #define _strnicmp(s1, s2, maxcount)         (strncasecmp(s1, s2, maxcount))
 #define strtok_s(s, d, c)                   (strtok_r(s, d, c))
-#define _snprintf_s(s, l, _l, f, ...)       (snprintf(s, l, f, __VA_ARGS__))
+#define _snprintf_s(s,l,c,...)              (snprintf(s,min((QWORD)(l), (QWORD)(c)),__VA_ARGS__))
 #define sscanf_s(s, f, ...)                 (sscanf(s, f, __VA_ARGS__))
 #define SwitchToThread()                    (sched_yield())
 #define ExitThread(dwExitCode)              (pthread_exit(dwExitCode))
@@ -141,8 +144,9 @@ typedef struct tdEXCEPTION_RECORD64         { CHAR sz[152]; } EXCEPTION_RECORD64
 #define _fseeki64(f, o, w)                  (fseeko(f, o, w))
 #define _chsize_s(fd, cb)                   (ftruncate64(fd, cb))
 #define _fileno(f)                          (fileno(f))
-#define InterlockedAdd64(p, v)              (__sync_fetch_and_add(p, v))
-#define InterlockedIncrement64(p)           (__sync_fetch_and_add(p, 1))
+#define InterlockedAdd64(p, v)              (__sync_add_and_fetch(p, v))
+#define InterlockedIncrement64(p)           (__sync_add_and_fetch(p, 1))
+#define InterlockedIncrement(p)             (__sync_add_and_fetch_4(p, 1))
 #define GetCurrentProcess()					((HANDLE)-1)
 #define closesocket(s)                      close(s)
 
@@ -194,10 +198,6 @@ HANDLE CreateThread(
     DWORD    dwCreationFlags,
     PDWORD    lpThreadId
 );
-
-HMODULE LoadLibraryA(LPSTR lpFileName);
-BOOL FreeLibrary(_In_ HMODULE hLibModule);
-FARPROC GetProcAddress(HMODULE hModule, LPSTR lpProcName);
 
 BOOL CloseHandle(_In_ HANDLE hObject);
 BOOL ResetEvent(_In_ HANDLE hEvent);

@@ -108,16 +108,16 @@ HANDLE CreateThread(
 VOID GetLocalTime(LPSYSTEMTIME lpSystemTime)
 {
     time_t curtime;
-    struct tm *t;
+    struct tm t = { 0 };
     curtime = time(NULL);
-    t = localtime(&curtime);
-    lpSystemTime->wYear = t->tm_year;
-    lpSystemTime->wMonth = t->tm_mon;
-    lpSystemTime->wDayOfWeek = t->tm_wday;
-    lpSystemTime->wDay = t->tm_yday;
-    lpSystemTime->wHour = t->tm_hour;
-    lpSystemTime->wMinute = t->tm_min;
-    lpSystemTime->wSecond = t->tm_sec;
+    localtime_r(&curtime, &t);
+    lpSystemTime->wYear = t.tm_year;
+    lpSystemTime->wMonth = t.tm_mon;
+    lpSystemTime->wDayOfWeek = t.tm_wday;
+    lpSystemTime->wDay = t.tm_mday;
+    lpSystemTime->wHour = t.tm_hour;
+    lpSystemTime->wMinute = t.tm_min;
+    lpSystemTime->wSecond = t.tm_sec;
     lpSystemTime->wMilliseconds = 0;
 }
 
@@ -281,8 +281,7 @@ BOOL SetEvent(_In_ HANDLE hEvent)
 {
     PHANDLE_INTERNAL hi = (PHANDLE_INTERNAL)hEvent;
     uint64_t v = 1;
-    write(hi->handle, &v, sizeof(v));
-    return TRUE;
+    return -1 != write(hi->handle, &v, sizeof(v));
 }
 
 // function is not thread-safe, but use case in leechcore is single-threaded

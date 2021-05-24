@@ -61,7 +61,7 @@ struct PmemMemoryInfo {
 
 #define DEVICEPMEM_SERVICENAME      "pmem"
 #define DEVICEPMEM_MEMORYFILE       "\\\\.\\pmem"
-LPCSTR szDEVICEPMEM_DRIVERFILE[2][3] = {
+LPCSTR szDEVICEPMEM_DRIVERFILE[2][1] = {
     {"winpmem_x86.sys"},
     {"winpmem_x64.sys"}
 };
@@ -272,7 +272,7 @@ _Success_(return)
 BOOL DevicePMEM_GetMemoryInformation(_Inout_ PLC_CONTEXT ctxLC)
 {
     PDEVICE_CONTEXT_PMEM ctx = (PDEVICE_CONTEXT_PMEM)ctxLC->hDevice;
-    DWORD i, cbRead;
+    DWORD i, cbRead, dwMode = PMEM_MODE_PTE;
     // 1: retrieve information from kernel driver
     if(!DeviceIoControl(ctx->hFile, PMEM_INFO_IOCTRL, NULL, 0, &ctx->MemoryInfo, sizeof(ctx->MemoryInfo), &cbRead, NULL)) {
         lcprintf(ctxLC, "DEVICE: ERROR: Unable to communicate with winpmem driver.\n");
@@ -289,6 +289,10 @@ BOOL DevicePMEM_GetMemoryInformation(_Inout_ PLC_CONTEXT ctxLC)
             lcprintf(ctxLC, "DEVICE: FAIL: unable to add range to memory map. (%016llx %016llx %016llx)\n", ctx->MemoryInfo.Run[i].start, ctx->MemoryInfo.Run[i].length, ctx->MemoryInfo.Run[i].start);
             return FALSE;
         }
+    }
+    // 4: set acquisition mode to PTE (this seems to be working with VSM).
+    if(!DeviceIoControl(ctx->hFile, PMEM_CTRL_IOCTRL, &dwMode, sizeof(DWORD), NULL, 0, &cbRead, NULL)) {
+        return FALSE;
     }
     return TRUE;
 }

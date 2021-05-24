@@ -50,33 +50,6 @@ typedef struct tdINTERNAL_HANDLE {
     HANDLE handle;
 } INTERNAL_HANDLE, *PINTERNAL_HANDLE;
 
-/*
-* Retrieve the operating system path of the directory which is containing this:
-* a) .dll file (Windows)
-* b) executable file (Linux)
-* -- szPath
-*/
-VOID Util_GetPathLib(_Out_writes_(MAX_PATH) PCHAR szPath)
-{
-    SIZE_T i;
-    ZeroMemory(szPath, MAX_PATH);
-#ifdef _WIN32
-    HMODULE hModuleLeechCore;
-    hModuleLeechCore = LoadLibraryA("lc.dll");
-    GetModuleFileNameA(hModuleLeechCore, szPath, MAX_PATH - 4);
-    if(hModuleLeechCore) { FreeLibrary(hModuleLeechCore); }
-#endif /* _WIN32 */
-#ifdef LINUX
-    readlink("/proc/self/exe", szPath, MAX_PATH - 4);
-#endif /* LINUX */
-    for(i = strlen(szPath) - 1; i > 0; i--) {
-        if(szPath[i] == '/' || szPath[i] == '\\') {
-            szPath[i + 1] = '\0';
-            return;
-        }
-    }
-}
-
 HANDLE LocalAlloc(DWORD uFlags, SIZE_T uBytes)
 {
     HANDLE h = malloc(uBytes);
@@ -134,16 +107,16 @@ HANDLE CreateThread(
 VOID GetLocalTime(LPSYSTEMTIME lpSystemTime)
 {
     time_t curtime;
-    struct tm *t;
+    struct tm t = { 0 };
     curtime = time(NULL);
-    t = localtime(&curtime);
-    lpSystemTime->wYear = t->tm_year;
-    lpSystemTime->wMonth = t->tm_mon;
-    lpSystemTime->wDayOfWeek = t->tm_wday;
-    lpSystemTime->wDay = t->tm_yday;
-    lpSystemTime->wHour = t->tm_hour;
-    lpSystemTime->wMinute = t->tm_min;
-    lpSystemTime->wSecond = t->tm_sec;
+    localtime_r(&curtime, &t);
+    lpSystemTime->wYear = t.tm_year;
+    lpSystemTime->wMonth = t.tm_mon;
+    lpSystemTime->wDayOfWeek = t.tm_wday;
+    lpSystemTime->wDay = t.tm_mday;
+    lpSystemTime->wHour = t.tm_hour;
+    lpSystemTime->wMinute = t.tm_min;
+    lpSystemTime->wSecond = t.tm_sec;
     lpSystemTime->wMilliseconds = 0;
 }
 
@@ -194,36 +167,6 @@ BOOL IsWow64Process(HANDLE hProcess, PBOOL Wow64Process)
         return TRUE;
     }
     return FALSE;
-}
-
-// ----------------------------------------------------------------------------
-// LoadLibrary / GetProcAddress facades (for FPGA functionality) below:
-// ----------------------------------------------------------------------------
-
-HMODULE LoadLibraryA(LPSTR lpFileName)
-{
-    HMODULE h;
-    CHAR szFileName[2 * MAX_PATH];
-    if(lpFileName && (0 == memcmp(lpFileName, "FTD3XX.dll", 10))) {
-        lpFileName = "leechcore_ft601_driver_linux.so";
-    }
-    if((h = dlopen(lpFileName, RTLD_NOW))) {
-        return h;
-    }
-    //Util_GetPathLib(szFileName);
-    strcpy(szFileName, "/usr/local/lib/python3.8/dist-packages/");
-    strncat(szFileName, lpFileName, MAX_PATH);
-    return dlopen(szFileName, RTLD_NOW);
-}
-
-BOOL FreeLibrary(_In_ HMODULE hLibModule)
-{
-    dlclose(hLibModule);
-}
-
-FARPROC GetProcAddress(HMODULE hModule, LPSTR lpProcName)
-{
-    return dlsym(hModule, lpProcName);
 }
 
 // ----------------------------------------------------------------------------
@@ -283,8 +226,7 @@ BOOL SetEvent(_In_ HANDLE hEvent)
 {
     PHANDLE_INTERNAL hi = (PHANDLE_INTERNAL)hEvent;
     uint64_t v = 1;
-    write(hi->handle, &v, sizeof(v));
-    return TRUE;
+    return -1 != write(hi->handle, &v, sizeof(v));
 }
 
 // function is not thread-safe, but use case in leechcore is single-threaded
@@ -326,7 +268,7 @@ DWORD WaitForSingleObject(_In_ HANDLE hHandle, _In_ DWORD dwMilliseconds)
 DWORD WaitForMultipleObjects(_In_ DWORD nCount, HANDLE *lpHandles, _In_ BOOL bWaitAll, _In_ DWORD dwMilliseconds)
 {
     struct pollfd fds[MAXIMUM_WAIT_OBJECTS];
-    int i;
+    DWORD i;
     uint64_t v;
     if(bWaitAll) {
         for(i = 0; i < nCount; i++) {

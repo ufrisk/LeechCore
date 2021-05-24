@@ -117,15 +117,20 @@ Links:
 
 Support PCILeech/MemProcFS development:
 =======================================
-PCILeech and MemProcFS are hobby projects of mine. I put a lot of time and energy into my projects. The time being most of my spare time. Since some aspects also relate to hardware I also put quite some of money into my projects. If you think PCILeech and/or MemProcFS are awesome tools and/or if you had a use for them it's now possible to contribute. It's possible to sponsor via Github Sponsors.
+PCILeech and MemProcFS is free and open source!
 
- - Github Sponsors: [`https://github.com/sponsors/ufrisk`](https://github.com/sponsors/ufrisk)
+I put a lot of time and energy into PCILeech and MemProcFS and related research to make this happen. Some aspects of the projects relate to hardware and I put quite some money into my projects and related research. If you think PCILeech and/or MemProcFS are awesome tools and/or if you had a use for them it's now possible to contribute by becoming a sponsor! 
  
-To all my sponsors, Thank You :sparkling_heart:
+If you like what I've created with PCIleech and MemProcFS with regards to DMA, Memory Analysis and Memory Forensics and would like to give something back to support future development please consider becoming a sponsor at: [`https://github.com/sponsors/ufrisk`](https://github.com/sponsors/ufrisk)
+
+To all my sponsors, Thank You 💖 
+
+All sponsorships are welcome, no matter how large or small. I especially wish to thank my **bronze sponsors**: [grandprixgp](https://github.com/grandprixgp).
 
 
 Changelog:
 ===================
+<details><summary>Previous releases (click to expand):</summary>
 v1.0-1.8
 * Initial Release and various updates. Please see individual relases for more information.
 
@@ -158,6 +163,9 @@ v1.0-1.8
 [v2.5](https://github.com/ufrisk/LeechCore/releases/tag/v2.5)
 * Bug fixes.
 * Read/Write PCI Express Transaction Layer Packets, PCIe TLPs, FPGA devices only.
+</details>
 
-Latest:
+[v2.6](https://github.com/ufrisk/LeechCore/releases/tag/v2.6)
 * Bug fixes.
+* Updates to support MemProcFS v4.
+* Separate releases for Windows and Linux.
