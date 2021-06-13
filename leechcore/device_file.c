@@ -304,7 +304,7 @@ BOOL DeviceFile_MsCrashCoreDumpInitialize(_In_ PLC_CONTEXT ctxLC)
     QWORD i, cbFileOffset;
     PElf64_Ehdr pElf64 = &ctx->CrashOrCoreDump.Elf64;
     PElf32_Ehdr pElf32 = &ctx->CrashOrCoreDump.Elf32;
-    _PPHYSICAL_MEMORY_DESCRIPTOR64 pM32 = (_PPHYSICAL_MEMORY_DESCRIPTOR64)(ctx->CrashOrCoreDump.pbHdr + 0x064);
+    _PPHYSICAL_MEMORY_DESCRIPTOR32 pM32 = (_PPHYSICAL_MEMORY_DESCRIPTOR32)(ctx->CrashOrCoreDump.pbHdr + 0x064);
     _PPHYSICAL_MEMORY_DESCRIPTOR64 pM64 = (_PPHYSICAL_MEMORY_DESCRIPTOR64)(ctx->CrashOrCoreDump.pbHdr + 0x088);
     _fseeki64(ctx->pFile, 0, SEEK_SET);
     fread(ctx->CrashOrCoreDump.pbHdr, 1, 0x2000, ctx->pFile);

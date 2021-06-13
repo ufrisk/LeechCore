@@ -7,8 +7,7 @@
 
 /*
 * Retrieve the operating system path of the directory which is containing this:
-* a) .dll file (Windows)
-* b) executable file (Linux)
+* .dll/.so file.
 * -- szPath
 */
 VOID Util_GetPathLib(_Out_writes_(MAX_PATH) PCHAR szPath)
