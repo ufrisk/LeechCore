@@ -32,13 +32,14 @@ leechcorepyc = Extension(
     library_dirs = ['.'],
     define_macros = [("LINUX", "")],
     include_dirs = ["includes", "/usr/include/libusb-1.0/"],
-	extra_compile_args=["-I.", "-L.", "-l:leechcore.so", "-shared", "-fPIC", "-fvisibility=hidden"],
-	extra_link_args=["-Wl,-rpath,$ORIGIN", "-g", "-ldl", "-shared"]
+    extra_compile_args=["-I.", "-L.", "-l:leechcore.so", "-shared", "-fPIC", "-fvisibility=hidden"],
+    extra_link_args=["-Wl,-rpath,$ORIGIN", "-g", "-ldl", "-shared"],
+    py_limited_api=True
     )
 
 setup(
     name='leechcorepyc',
-    version='2.6.1', # VERSION_END
+    version='2.6.2', # VERSION_END
     description='LeechCore for Python',
     long_description='LeechCore for Python : native extension for physical memory access',
     url='https://github.com/ufrisk/LeechCore',
