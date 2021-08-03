@@ -25,7 +25,26 @@ VOID usleep(_In_ DWORD us);
 
 #endif /* _WIN32 */
 #ifdef LINUX
+#define LC_LIBRARY_FILETYPE                 ".so"
+#include <sys/eventfd.h>
 #include <byteswap.h>
+#endif /* LINUX */
+
+#ifdef MACOS
+#define LC_LIBRARY_FILETYPE                 ".dylib"
+
+/* MACOS doesn't have byteswap instead we use the following snippet that comes from http://tungchingkai.blogspot.com/2009/04/how-to-decrypt-iphone-os-30-beta.html*/
+#define bswap_16(value) ((((value) & 0xff) << 8) | ((value) >> 8))
+#define bswap_32(value) \
+(((uint32_t)bswap_16((uint16_t)((value) & 0xffff)) << 16) | (uint32_t)bswap_16((uint16_t)((value) >> 16)))
+#define bswap_64(value) \
+(((uint64_t)bswap_32((uint32_t)((value) & 0xffffffff)) << 32) | (uint64_t)bswap_32((uint32_t)((value) >> 32)))
+
+#include <fcntl.h>
+#endif /* MACOS */
+
+#if defined(LINUX) || defined(MACOS)
+
 #include <ctype.h>
 #include <dirent.h>
 #include <dlfcn.h>
@@ -37,13 +56,10 @@ VOID usleep(_In_ DWORD us);
 #include <pthread.h>
 #include <time.h>
 #include <unistd.h>
-#include <sys/eventfd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-
-#define LC_LIBRARY_FILETYPE                 ".so"
 
 typedef void                                VOID, *PVOID;
 typedef void                                *HANDLE, **PHANDLE, *HMODULE, *FARPROC;
@@ -211,6 +227,6 @@ DWORD WaitForSingleObject(_In_ HANDLE hHandle, _In_ DWORD dwMilliseconds);
 // reason disable optimization on a function level resolves the issues ...
 #define LINUX_NO_OPTIMIZE __attribute__((optimize("O0")))
 
-#endif /* LINUX */
+#endif /* LINUX || MACOS */
 
 #endif /* __OSCOMPATIBILITY_H__ */

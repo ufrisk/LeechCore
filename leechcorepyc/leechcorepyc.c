@@ -63,9 +63,9 @@ LeechCorePYC_GetLastError(PyObject *self, PyObject *args)
         PyUnicode_FromWideChar(g_LEECHCORE_LAST_ERRORINFO->wszUserText, -1) :
         PyUnicode_FromFormat("%s", "");
 #endif /* _WIN32 */
-#ifdef LINUX
+#if defined(LINUX) || defined(MACOS)
     return PyUnicode_FromFormat("%s", "");
-#endif /* LINUX */ 
+#endif /* LINUX || MACOS */
 }
 
 /*
