@@ -315,7 +315,7 @@ BOOL Device3380_Open2(_Inout_ PLC_CONTEXT ctxLC)
 }
 
 #endif /* _WIN32 */
-#ifdef LINUX
+#if defined(LINUX) || defined(MACOS)
 
 _Success_(return)
 BOOL Device3380_Open2(_Inout_ PLC_CONTEXT ctxLC)
@@ -340,4 +340,4 @@ BOOL Device3380_Open2(_Inout_ PLC_CONTEXT ctxLC)
     return TRUE;
 }
 
-#endif /* LINUX */
+#endif /* LINUX || MACOS */

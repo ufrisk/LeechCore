@@ -703,7 +703,14 @@ SOCKET DeviceFPGA_UDP_Connect(_In_ DWORD dwIpv4Addr, _In_ WORD wUdpPort)
     sAddr.sin_family = AF_INET;
     sAddr.sin_port = htons(wUdpPort);
     sAddr.sin_addr.s_addr = dwIpv4Addr;
+#ifdef MACOS
+    // macos doesn't have SOCK_NONBLOCK
+    if((Sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) != INVALID_SOCKET) {
+        int flags = fcntl(Sock, F_GETFL, 0);
+        fcntl(Sock, F_SETFL, flags | O_NONBLOCK);
+#else
     if((Sock = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK, IPPROTO_UDP)) != INVALID_SOCKET) {
+#endif /* MACOS */
 #ifdef _WIN32
         ioctlsocket(Sock, FIONBIO, &mode);
 #endif /* _WIN32 */
@@ -751,9 +758,9 @@ static BOOL g_fDeviceFpgaMultiHandleLock[0x10] = { 0 };
 
 BOOL DeviceFPGA_InitializeFTDI_LinuxMultiHandle_LockCheck(_In_ QWORD qwDeviceIndex)
 {
-#ifdef LINUX
+#if defined(LINUX) || defined(MACOS)
     if(g_fDeviceFpgaMultiHandleLock[min(0x10 - 1, qwDeviceIndex)]) { return TRUE; }
-#endif /* LINUX */
+#endif /* LINUX || MACOS */
     return FALSE;
 }
 

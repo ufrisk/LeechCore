@@ -26,7 +26,7 @@
 #include <stdio.h>
 #include "leechcore.h"
 
-#ifdef LINUX
+#if defined(LINUX) || defined(MACOS)
 #include <string.h>
 #include <pthread.h>
 #ifndef _LINUX_DEF_CRITICAL_SECTION
@@ -36,7 +36,7 @@ typedef struct tdCRITICAL_SECTION {
     pthread_mutexattr_t mta;
 } CRITICAL_SECTION, *LPCRITICAL_SECTION;
 #endif /* _LINUX_DEF_CRITICAL_SECTION */
-#endif /* LINUX */
+#endif /* LINUX || MACOS */
 
 #define LC_CONTEXT_VERSION                  0xc0e10003
 #define LC_MEMMAP_MAX_ENTRIES               0x100

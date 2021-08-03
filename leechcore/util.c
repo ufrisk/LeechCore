@@ -20,11 +20,11 @@ VOID Util_GetPathLib(_Out_writes_(MAX_PATH) PCHAR szPath)
     GetModuleFileNameA(hModuleLeechCore, szPath, MAX_PATH - 4);
     if(hModuleLeechCore) { FreeLibrary(hModuleLeechCore); }
 #endif /* _WIN32 */
-#ifdef LINUX
+#if defined(LINUX) || defined(MACOS)
     Dl_info Info = { 0 };
     if(!dladdr((void *)Util_GetPathLib, &Info) || !Info.dli_fname) { return; }
     strncpy(szPath, Info.dli_fname, MAX_PATH - 1);
-#endif /* LINUX */
+#endif /* LINUX || MACOS */
     for(i = strlen(szPath) - 1; i > 0; i--) {
         if(szPath[i] == '/' || szPath[i] == '\\') {
             szPath[i + 1] = '\0';

@@ -48,7 +48,7 @@ BOOL WINAPI DllMain(_In_ HINSTANCE hinstDLL, _In_ DWORD fdwReason, _In_ LPVOID l
     return TRUE;
 }
 #endif /* _WIN32 */
-#ifdef LINUX
+#if defined(LINUX) || defined(MACOS)
 __attribute__((constructor)) VOID LcAttach()
 {
     ZeroMemory(&g_ctx, sizeof(LC_MAIN_CONTEXT));

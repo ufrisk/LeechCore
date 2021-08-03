@@ -34,7 +34,8 @@ extern "C" {
 typedef unsigned __int64                    QWORD, *PQWORD;
 
 #endif /* _WIN32 */
-#ifdef LINUX
+
+#if defined(LINUX) || defined(MACOS)
 
 #include <inttypes.h>
 #include <stdlib.h>
@@ -70,7 +71,7 @@ typedef uint16_t                            WCHAR, *PWCHAR, *LPWSTR, *LPCWSTR;
 #define _Printf_format_string_
 #define _Success_(x)
 
-#endif /* LINUX */
+#endif /* LINUX || MACOS */
 
 
 

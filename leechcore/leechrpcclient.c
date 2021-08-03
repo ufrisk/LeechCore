@@ -623,7 +623,7 @@ fail:
 }
 
 #endif /* _WIN32 */
-#ifdef LINUX
+#if defined(LINUX) || defined(MACOS)
 
 _Success_(return)
 BOOL LeechRpc_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo)
@@ -632,4 +632,4 @@ BOOL LeechRpc_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO pp
     return FALSE;
 }
 
-#endif /* LINUX */
+#endif /* LINUX || MACOS */

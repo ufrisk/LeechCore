@@ -35,7 +35,7 @@ BOOL Util_GetPathExe(_Out_writes_(MAX_PATH) PCHAR szPath)
 }
 
 #endif /* _WIN32 */
-#ifdef LINUX
+#if defined(LINUX) || defined(MACOS)
 
 #include "oscompatibility.h"
 #include "util.h"
@@ -68,7 +68,11 @@ VOID LocalFree(HANDLE hMem)
 QWORD GetTickCount64()
 {
     struct timespec ts;
+#ifdef LINUX
     clock_gettime(CLOCK_MONOTONIC_COARSE, &ts);
+#else /* MACOS */
+    clock_gettime(CLOCK_MONOTONIC_RAW_APPROX, &ts);
+#endif /* LINUX */
     return ts.tv_sec * 1000 + ts.tv_nsec / (1000 * 1000);
 }
 
@@ -81,7 +85,11 @@ BOOL QueryPerformanceFrequency(_Out_ LARGE_INTEGER *lpFrequency)
 BOOL QueryPerformanceCounter(_Out_ LARGE_INTEGER *lpPerformanceCount)
 {
     struct timespec ts;
+#ifdef LINUX
     clock_gettime(CLOCK_MONOTONIC_COARSE, &ts);
+#else /* MACOS */
+    clock_gettime(CLOCK_MONOTONIC_RAW_APPROX, &ts);
+#endif /* LINUX */
     *lpPerformanceCount = (ts.tv_sec * 1000 * 1000) + (ts.tv_nsec / 1000);  // uS resolution
     return TRUE;
 }
@@ -207,7 +215,12 @@ HMODULE LoadLibraryA(LPSTR lpFileName)
 {
     CHAR szFileName[2 * MAX_PATH];
     if(lpFileName && (0 == memcmp(lpFileName, "FTD3XX.dll", 10))) {
+#ifdef LINUX
         lpFileName = "leechcore_ft601_driver_linux.so";
+#endif /* LINUX */
+#ifdef MACOS
+        lpFileName = "leechcore_ft601_driver_linux.dylib";
+#endif /* MACOS */
     }
     Util_GetPathLib(szFileName);
     strncat(szFileName, lpFileName, MAX_PATH);
@@ -259,6 +272,7 @@ VOID LeaveCriticalSection(LPCRITICAL_SECTION lpCriticalSection)
 #define OSCOMPATIBILITY_HANDLE_INTERNAL         0x35d91cca
 #define OSCOMPATIBILITY_HANDLE_TYPE_EVENTFD     1
 
+#ifdef LINUX
 typedef struct tdHANDLE_INTERNAL {
     DWORD magic;
     DWORD type;
@@ -345,5 +359,95 @@ DWORD WaitForMultipleObjects(_In_ DWORD nCount, HANDLE *lpHandles, _In_ BOOL bWa
     }
     return -1;
 }
-
 #endif /* LINUX */
+
+typedef struct tdHANDLE_INTERNAL {
+    DWORD magic;
+    DWORD type;
+    BOOL fEventManualReset;
+    int handle[2];
+} HANDLE_INTERNAL, *PHANDLE_INTERNAL;
+
+BOOL CloseHandle(_In_ HANDLE hObject)
+{
+    PHANDLE_INTERNAL hi = (PHANDLE_INTERNAL)hObject;
+    if(hi->magic != OSCOMPATIBILITY_HANDLE_INTERNAL) { return FALSE; }
+    if(hi->type == OSCOMPATIBILITY_HANDLE_TYPE_EVENTFD) {
+        close(hi->handle[0]);
+        close(hi->handle[1]);
+    }
+    LocalFree(hi);
+    return TRUE;
+}
+
+BOOL SetEvent(_In_ HANDLE hEvent)
+{
+    PHANDLE_INTERNAL hi = (PHANDLE_INTERNAL)hEvent;
+    uint64_t v = 1;
+    int res = write(hi->handle[1], &v, sizeof(v));
+    return res == sizeof(v);
+}
+
+// function is not thread-safe, but use case in leechcore is single-threaded
+BOOL ResetEvent(_In_ HANDLE hEvent)
+{
+    PHANDLE_INTERNAL hi = (PHANDLE_INTERNAL)hEvent;
+    uint64_t v;
+    struct pollfd fds[1];
+    fds[0].fd = hi->handle[0];
+    fds[0].events = POLLIN;
+    while((poll(fds, 1, 0) > 0) && (fds[0].revents & POLLIN)) {
+        read(fds[0].fd, &v, sizeof(v));
+    }
+    return TRUE;
+}
+
+HANDLE CreateEvent(_In_opt_ PVOID lpEventAttributes, _In_ BOOL bManualReset, _In_ BOOL bInitialState, _In_opt_ PVOID lpName)
+{
+    PHANDLE_INTERNAL pi;
+    pi = malloc(sizeof(HANDLE_INTERNAL));
+    pi->magic = OSCOMPATIBILITY_HANDLE_INTERNAL;
+    pi->type = OSCOMPATIBILITY_HANDLE_TYPE_EVENTFD;
+    pi->fEventManualReset = bManualReset;
+    pipe(pi->handle);
+    if(bInitialState) { SetEvent(pi); }
+    return pi;
+}
+
+// function is limited and not thread-safe, but use case in leechcore is single-threaded
+DWORD WaitForSingleObject(_In_ HANDLE hHandle, _In_ DWORD dwMilliseconds)
+{
+    PHANDLE_INTERNAL hi = (PHANDLE_INTERNAL)hHandle;
+    uint64_t v;
+    read(hi->handle[0], &v, sizeof(v));
+    return 0;
+}
+
+// function is limited and not thread-safe, but use case in leechcore is single-threaded
+DWORD WaitForMultipleObjects(_In_ DWORD nCount, HANDLE *lpHandles, _In_ BOOL bWaitAll, _In_ DWORD dwMilliseconds)
+{
+    struct pollfd fds[MAXIMUM_WAIT_OBJECTS];
+    DWORD i;
+    uint64_t v;
+    if(bWaitAll) {
+        for(i = 0; i < nCount; i++) {
+            WaitForSingleObject(lpHandles[i], dwMilliseconds);
+        }
+        return -1;
+    }
+    for(i = 0; i < nCount; i++) {
+        fds[i].fd = ((PHANDLE_INTERNAL)lpHandles[i])->handle[0];
+        fds[i].events = POLLIN;
+    }
+    if(poll(fds, 1, -1) > 0) {
+        for(i = 0; i < nCount; i++) {
+            if((fds[0].revents & POLLIN)) {
+                read(fds[i].fd, &v, sizeof(v));
+                return i;
+            }
+        }
+    }
+
+    return -1;
+}
+#endif /* LINUX || MACOS */
