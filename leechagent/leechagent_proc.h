@@ -16,6 +16,11 @@
 #define LEECHAGENT_PROC_CMD_INIT_VMM        0x00000002
 #define LEECHAGENT_PROC_CMD_INIT_PYTHON     0x00000003
 #define LEECHAGENT_PROC_CMD_EXEC_PYTHON     0x00000004
+#define LEECHAGENT_PROC_CMD_VFS_LIST        0x00000005
+#define LEECHAGENT_PROC_CMD_VFS_READ        0x00000006
+#define LEECHAGENT_PROC_CMD_VFS_WRITE       0x00000007
+#define LEECHAGENT_PROC_CMD_VFS_OPT_GET     0x00000008
+#define LEECHAGENT_PROC_CMD_VFS_OPT_SET     0x00000009
 
 typedef struct tdLEECHAGENT_PROC_CMD {
     DWORD dwMagic;
@@ -28,6 +33,29 @@ typedef struct tdLEECHAGENT_PROC_CMD {
 VOID LeechAgent_ProcChild_Main(int argc, wchar_t* argv[]);
 
 _Success_(return)
-BOOL LeechAgent_ProcParent_ExecPy(_In_ DWORD dwTimeout, _In_reads_(cbDataIn) PBYTE pbDataIn, _In_ DWORD cbDataIn, _Out_writes_opt_(*pcbDataOut) PBYTE* ppbDataOut, _Out_opt_ PDWORD pcbDataOut);
+BOOL LeechAgent_ProcParent_ExecPy(_In_ HANDLE hLC, _In_ DWORD dwTimeout, _In_reads_(cbDataIn) PBYTE pbDataIn, _In_ DWORD cbDataIn, _Out_opt_ PBYTE* ppbDataOut, _Out_opt_ PDWORD pcbDataOut);
+
+/*
+* Execute a virtual file system command towards MemProcFS / vmm.dll.
+* MemProcFS will automatically be started and terminated if required.
+* CALLER DECREF: *ppbDataOut
+* -- hLC
+* -- phPP = ptr to "ParentProcess" handle to update as required.
+* -- dwCMD = LEECHAGENT_PROC_CMD_VFS_LIST | LEECHAGENT_PROC_CMD_VFS_READ | LEECHAGENT_PROC_CMD_VFS_WRITE
+* -- pbDataIn
+* -- cbDataIn
+* -- ppbDataOut
+* -- pcbDataOut
+* -- return
+*/
+_Success_(return)
+BOOL LeechAgent_ProcParent_VfsCMD(_In_ HANDLE hLC, _Inout_ PHANDLE phPP, _In_ DWORD dwCMD, _In_reads_(cbDataIn) PBYTE pbDataIn, _In_ DWORD cbDataIn, _Out_opt_ PBYTE* ppbDataOut, _Out_opt_ PDWORD pcbDataOut);
+
+/*
+* Close a ProcParent handle kept by the leechrpcserver.
+* This is usually done on vfs close / handle close after vfs operations.
+* -- hPP = handle to destroy / close.
+*/
+VOID LeechAgent_ProcParent_Close(_In_opt_ HANDLE hPP);
 
 #endif /* __LEECHAGENT_PROC_H__ */

@@ -2375,6 +2375,9 @@ BOOL DeviceFPGA_SetOption(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _In_ QWORD
         case LC_OPT_FPGA_RETRY_ON_ERROR:
             perf->RETRY_ON_ERROR = qwValue ? 1 : 0;
             return TRUE;
+        case LC_OPT_FPGA_DEVICE_ID:
+            ctx->wDeviceId  = (WORD)qwValue;
+            return TRUE;
         case LC_OPT_FPGA_ALGO_TINY:
             ctx->fAlgorithmReadTiny = qwValue ? TRUE : FALSE;
             return TRUE;
@@ -2418,6 +2421,7 @@ BOOL DeviceFPGA_SetOption(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _In_ QWORD
 #define FPGA_PARAMETER_READ_SIZE       "readsize"
 #define FPGA_PARAMETER_READ_RETRY      "readretry"
 #define FPGA_PARAMETER_DEVICE_INDEX    "devindex"
+#define FPGA_PARAMETER_DEVICE_ID       "bdf"
 
 #define FPGA_PARAMETER_ALGO_TINY        0x01
 #define FPGA_PARAMETER_ALGO_SYNCHRONOUS 0x02
@@ -2476,6 +2480,7 @@ BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
     if((v = LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_DELAY_PROBE))) { ctx->perf.DELAY_PROBE_READ = (DWORD)v; }
     if((v = LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_READ_RETRY)))  { ctx->perf.RETRY_ON_ERROR = (DWORD)v; }
     if((v = LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_READ_SIZE)))   { ctx->perf.MAX_SIZE_RX = min(ctx->perf.MAX_SIZE_RX, (DWORD)v & ~0xfff); }
+    if((v = LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_DEVICE_ID)))   { ctx->wDeviceId = (WORD)v; }
     v = LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_READ_ALGORITHM);
     ctx->fAlgorithmReadTiny = (v & FPGA_PARAMETER_ALGO_TINY) ? TRUE : FALSE;
     ctx->async.fEnabled = ctx->async.fEnabled && !(v & FPGA_PARAMETER_ALGO_SYNCHRONOUS);

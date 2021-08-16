@@ -40,29 +40,35 @@ BOOL Util_GetBytesPipe(_In_ HANDLE hPipe_Rd, _Out_writes_opt_(cb) PBYTE pb, _In_
 _Success_(return)
 BOOL LeechRPC_SubmitCommand_Pipe(_In_ PLEECHRPC_CLIENT_CONTEXT ctx, _In_ PLEECHRPC_MSG_HDR pMsgIn, _Out_ PDWORD pcbMsgOut, _Out_ PPLEECHRPC_MSG_HDR ppMsgOut)
 {
+    static SRWLOCK LockSRW = SRWLOCK_INIT;
     DWORD cbWrite = 0;
     LEECHRPC_MSG_HDR Hdr = { 0 };
     PLEECHRPC_MSG_HDR pMsgOut;
-    if(!pcbMsgOut || !ppMsgOut) { return FALSE; }
+    AcquireSRWLockExclusive(&LockSRW);
+    if(!pcbMsgOut || !ppMsgOut) { goto fail; }
     // 1: write contents to pipe
-    if(!ctx->hPipeMem_Wr) { return FALSE; }
-    if(!WriteFile(ctx->hPipeMem_Wr, (PVOID)pMsgIn, pMsgIn->cbMsg, &cbWrite, NULL)) { return FALSE; }
+    if(!ctx->hPipeMem_Wr) { goto fail; }
+    if(!WriteFile(ctx->hPipeMem_Wr, (PVOID)pMsgIn, pMsgIn->cbMsg, &cbWrite, NULL)) { goto fail; }
     // 2: read resulting contents : header
-    if(!Util_GetBytesPipe(ctx->hPipeMem_Rd, (PBYTE)&Hdr, sizeof(LEECHRPC_MSG_HDR))) { return FALSE; }
-    if((Hdr.dwMagic != LEECHRPC_MSGMAGIC) || (Hdr.cbMsg > 0x04000000)) { return FALSE; }
+    if(!Util_GetBytesPipe(ctx->hPipeMem_Rd, (PBYTE)&Hdr, sizeof(LEECHRPC_MSG_HDR))) { goto fail; }
+    if((Hdr.dwMagic != LEECHRPC_MSGMAGIC) || (Hdr.cbMsg > 0x04000000)) { goto fail; }
     pMsgOut = (PLEECHRPC_MSG_HDR)LocalAlloc(0, Hdr.cbMsg);
-    if(!pMsgOut) { return FALSE; }
+    if(!pMsgOut) { goto fail; }
     memcpy(pMsgOut, &Hdr, sizeof(LEECHRPC_MSG_HDR));
     // 3: read resulting contents : data
     if(pMsgOut->cbMsg > sizeof(LEECHRPC_MSG_HDR)) {
         if(!Util_GetBytesPipe(ctx->hPipeMem_Rd, ((PBYTE)pMsgOut) + sizeof(LEECHRPC_MSG_HDR), pMsgOut->cbMsg - sizeof(LEECHRPC_MSG_HDR))) {
             LocalFree(pMsgOut);
-            return FALSE;
+            goto fail;
         }
     }
+    ReleaseSRWLockExclusive(&LockSRW);
     *pcbMsgOut = pMsgOut->cbMsg;
     *ppMsgOut = pMsgOut;
     return TRUE;
+fail:
+    ReleaseSRWLockExclusive(&LockSRW);
+    return FALSE;
 }
 
 _Success_(return)
@@ -443,10 +449,73 @@ BOOL LeechRPC_SetOption(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _In_ QWORD q
     return result;
 }
 
+//
+// struct definitions from vmmdll to verify / fixup vfs related commands
+//
+#define __VFS_FILELISTBLOB_VERSION          0xf88f0001
+
+typedef struct td__VFS_FILELISTBLOB_ENTRY {
+    ULONG64 ouszName;                       // byte offset to string from VMMDLL_VFS_FILELISTBLOB.uszMultiText
+    ULONG64 cbFileSize;                     // -1 == directory
+    BYTE pbExInfoOpaque[32];
+} __VFS_FILELISTBLOB_ENTRY, *P__VFS_FILELISTBLOB_ENTRY;
+
+typedef struct td__VFS_FILELISTBLOB {
+    DWORD dwVersion;                        // VMMDLL_VFS_FILELISTBLOB_VERSION
+    DWORD cbStruct;
+    DWORD cFileEntry;
+    DWORD cbMultiText;
+    LPSTR uszMultiText;
+    DWORD _FutureUse[8];
+    __VFS_FILELISTBLOB_ENTRY FileEntry[0];
+} __VFS_FILELISTBLOB, *P__VFS_FILELISTBLOB;
+
+/*
+* Verify incoming vfs (virtual file system) data from untrusted remote system
+* for basic syntax. This to ensure the remote, potentially infected system,
+* don't cause any security risks by callers trusting data.
+* -- fCMD
+* -- pMsgRsp
+* -- return
+*/
+_Success_(return)
+BOOL LeechRPC_Command_VerifyUntrustedVfsRsp(_In_ ULONG64 fCMD, _In_ PLEECHRPC_MSG_BIN pMsgRsp)
+{
+    PLC_CMD_AGENT_VFS_RSP pRsp;
+    P__VFS_FILELISTBLOB pVfs;
+    DWORD i;
+    // 1: general
+    if(pMsgRsp->cb < sizeof(LC_CMD_AGENT_VFS_RSP)) { return FALSE; }
+    pRsp = (PLC_CMD_AGENT_VFS_RSP)pMsgRsp->pb;
+    if(pRsp->dwVersion != LC_CMD_AGENT_VFS_RSP_VERSION) { return FALSE; }
+    if(pMsgRsp->cb != sizeof(LC_CMD_AGENT_VFS_RSP) + pRsp->cb) { return FALSE; }
+    // 2: specific
+    if(fCMD == LC_CMD_AGENT_VFS_READ) {
+        return (pRsp->cbReadWrite == pRsp->cb);
+    }
+    if(fCMD == LC_CMD_AGENT_VFS_WRITE) {
+        return (0 == pRsp->cb);
+    }
+    if(fCMD == LC_CMD_AGENT_VFS_LIST) {
+        if(pRsp->cb < sizeof(__VFS_FILELISTBLOB)) { return FALSE; }
+        if(pRsp->pb[pRsp->cb - 1] != 0) { return FALSE; }
+        pVfs = (P__VFS_FILELISTBLOB)pRsp->pb;
+        if((pVfs->dwVersion != __VFS_FILELISTBLOB_VERSION) || (pRsp->cb != pVfs->cbStruct) || (pVfs->cbMultiText == 0)) { return FALSE; }
+        if(pRsp->cb != sizeof(__VFS_FILELISTBLOB) + pVfs->cFileEntry * sizeof(__VFS_FILELISTBLOB_ENTRY) + pVfs->cbMultiText) { return FALSE; }
+        if(pRsp->pb[sizeof(__VFS_FILELISTBLOB) + pVfs->cFileEntry * sizeof(__VFS_FILELISTBLOB_ENTRY)] != 0) { return FALSE; }
+        pVfs->uszMultiText = (LPSTR)(sizeof(__VFS_FILELISTBLOB) + pVfs->cFileEntry * sizeof(__VFS_FILELISTBLOB_ENTRY));
+        for(i = 0; i < pVfs->cFileEntry; i++) {
+            if(pVfs->FileEntry[i].ouszName >= pVfs->cbMultiText) { return FALSE; }
+        }
+        return TRUE;
+    }
+    return FALSE;
+}
+
 _Success_(return)
 BOOL LeechRPC_Command(
     _In_ PLC_CONTEXT ctxLC,
-    _In_ ULONG64 fOption,
+    _In_ ULONG64 fCMD,
     _In_ DWORD cbDataIn,
     _In_reads_opt_(cbDataIn) PBYTE pbDataIn,
     _Out_opt_ PBYTE *ppbDataOut,
@@ -461,17 +530,20 @@ BOOL LeechRPC_Command(
     ZeroMemory(pMsgReq, sizeof(LEECHRPC_MSG_BIN));
     pMsgReq->tpMsg = LEECHRPC_MSGTYPE_COMMAND_REQ;
     pMsgReq->cb = cbDataIn;
-    pMsgReq->qwData[0] = fOption;
+    pMsgReq->qwData[0] = fCMD;
     pMsgReq->qwData[1] = 0;
     if(pbDataIn) {
         memcpy(pMsgReq->pb, pbDataIn, cbDataIn);
     }
     // 2: transmit & get result
     result = LeechRPC_SubmitCommand(ctxLC, (PLEECHRPC_MSG_HDR)pMsgReq, LEECHRPC_MSGTYPE_COMMAND_RSP, (PPLEECHRPC_MSG_HDR)&pMsgRsp);
+    if(result && ((fCMD == LC_CMD_AGENT_VFS_LIST) || (fCMD == LC_CMD_AGENT_VFS_READ) || (fCMD == LC_CMD_AGENT_VFS_WRITE))) {
+        result = LeechRPC_Command_VerifyUntrustedVfsRsp(fCMD, pMsgRsp);
+    }
     if(result) {
         if(pcbDataOut) { *pcbDataOut = pMsgRsp->cb; }
         if(ppbDataOut) {
-            if((*ppbDataOut = LocalAlloc(0, pMsgRsp->cb))) {
+            if(*ppbDataOut = LocalAlloc(0, pMsgRsp->cb)) {
                 memcpy(*ppbDataOut, pMsgRsp->pb, pMsgRsp->cb);
             } else {
                 result = FALSE;
@@ -562,8 +634,11 @@ BOOL LeechRpc_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO pp
     } else {
         goto fail;
     }
-    if(!strcmp(ctxLC->Config.szDevice, "existingremote")) {
-        strcpy_s(ctxLC->Config.szDevice, _countof(ctxLC->Config.szDevice), "existing");
+    if(0 == _strnicmp(ctxLC->Config.szDevice, "existingremote", 14)) {
+        for(i = 14; i < _countof(ctxLC->Config.szDevice); i++) {
+            ctxLC->Config.szDevice[i - 6] = ctxLC->Config.szDevice[i];
+            if(0 == ctxLC->Config.szDevice[i]) { break; }
+        }
     }
     // try enable compression (if required)
     ctxLC->Rpc.fCompress = ctxLC->Rpc.fCompress && LeechRPC_CompressInitialize(&ctx->Compress);

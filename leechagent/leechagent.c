@@ -29,11 +29,12 @@ LEECHAGENT_REMOTE_ENTRY g_REMOTE_FILES_REQUIRED[] = {
 	{.f32 = TRUE,.f64 = TRUE,.wsz = L"vcruntime140.dll"},
 };
 LEECHAGENT_REMOTE_ENTRY g_REMOTE_FILES_OPTIONAL[] = {
+    // MemProcFS (64-bit only)
     {.f32 = FALSE,.f64 = TRUE,.wsz = L"vmm.dll"},
-    // Python APIs for LeechCore and MemProcFS
-    {.f32 = FALSE,.f64 = TRUE,.wsz = L"vmmpyc.pyd"},
-    {.f32 = FALSE,.f64 = TRUE,.wsz = L"leechcorepyc.pyd"},
-    {.f32 = FALSE,.f64 = TRUE,.wsz = L"vmmpy.py"},
+    {.f32 = FALSE,.f64 = TRUE,.wsz = L"info.db"},
+    {.f32 = FALSE,.f64 = TRUE,.wsz = L"dbghelp.dll"},
+    {.f32 = FALSE,.f64 = TRUE,.wsz = L"symsrv.dll"},
+    {.f32 = FALSE,.f64 = TRUE,.wsz = L"symsrv.yes"},
     // 32-bit winpmem
     {.f32 = TRUE,.f64 = FALSE,.wsz = L"winpmem_x86.sys"},
     // 64-bit winpmem

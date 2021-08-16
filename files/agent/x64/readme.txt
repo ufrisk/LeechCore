@@ -1,7 +1,14 @@
-The LeechAgent have dependencies on external software for memory capture which should be placed in this folder if needed. Also there is a depencency on embedded Python - please check the python sub-folder for information.
+The LeechAgent have dependencies on external software for memory capture which should be placed in this folder if required.
+
+Please check out the Guide for detailed up-to-date information:
+https://github.com/ufrisk/LeechCore/wiki/LeechAgent
+https://github.com/ufrisk/LeechCore/wiki/LeechAgent_Install
+
+
+Also there is a depencency on embedded Python - please check the Python sub-folder for information.
 
 Recommended for (default) service mode: WinPMEM:
-https://github.com/Velocidex/c-aff4/blob/master/tools/pmem/resources/winpmem/att_winpmem_64.sys
+https://github.com/Velocidex/WinPmem/raw/master/kernel/binaries/winpmem_x64.sys
 
 Recommended for interactive mode: DumpIt:
 https://www.comae.com

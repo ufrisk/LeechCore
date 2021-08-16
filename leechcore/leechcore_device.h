@@ -85,7 +85,7 @@ typedef struct tdLC_CONTEXT {
     LC_CONFIG Config;
     DWORD cDeviceParameter;
     LC_DEVICE_PARAMETER_ENTRY pDeviceParameter[LC_DEVICE_PARAMETER_MAX_ENTRIES];
-    BOOL fWritable;
+    BOOL fWritable;         // deprecated - do not use!
     BOOL fPrintf[4];
     HANDLE hDevice;
     BOOL fMultiThread;

@@ -23,6 +23,14 @@
 #include "util.h"
 #include <stdio.h>
 
+#define VMMDLL_VFS_FILELISTBLOB_VERSION     0xf88f0001
+
+typedef struct tdVMMDLL_VFS_FILELISTBLOB_OPAQUE {
+    DWORD dwVersion;                        // VMMDLL_VFS_FILELISTBLOB_VERSION
+    DWORD cbStruct;
+    BYTE pbOpaque[0];
+} VMMDLL_VFS_FILELISTBLOB_OPAQUE, *PVMMDLL_VFS_FILELISTBLOB_OPAQUE;
+
 typedef struct tdPROCCHILD_CONTEXT {
     BOOL fStateRunning;
     HMODULE hDllVmm;
@@ -30,7 +38,13 @@ typedef struct tdPROCCHILD_CONTEXT {
     HMODULE hDllPython3X;
     HMODULE hDllLeechCorePyC;
     BOOL(*pfnVMMDLL_Initialize)(_In_ DWORD argc, _In_ LPSTR argv[]);
+    BOOL(*pfnVMMDLL_InitializePlugins)();
     BOOL(*pfnVMMDLL_Close)();
+    PVMMDLL_VFS_FILELISTBLOB_OPAQUE(*pfnVMMDLL_VfsListBlobU)(LPSTR);
+    DWORD(*pfnVMMDLL_VfsReadU)(_In_ LPSTR  uszFileName, _Out_writes_to_(cb, *pcbRead) PBYTE pb, _In_ DWORD cb, _Out_ PDWORD pcbRead, _In_ ULONG64 cbOffset);
+    DWORD(*pfnVMMDLL_VfsWriteU)(_In_ LPSTR  uszFileName, _In_reads_(cb) PBYTE pb, _In_ DWORD cb, _Out_ PDWORD pcbWrite, _In_ ULONG64 cbOffset);
+    BOOL(*pfnVMMDLL_ConfigGet)(_In_ ULONG64 fOption, _Out_ PULONG64 pqwValue);
+    BOOL(*pfnVMMDLL_ConfigSet)(_In_ ULONG64 fOption, _In_ ULONG64 qwValue);
     BOOL(*pfnLeechCorePyC_EmbPythonInitialize)(_In_ HMODULE hDllPython);
     BOOL(*pfnLeechCorePyC_EmbExecPyInMem)(_In_ LPSTR szPythonProgram);
     VOID(*pfnLeechCorePyC_EmbClose)();
@@ -38,6 +52,7 @@ typedef struct tdPROCCHILD_CONTEXT {
     HANDLE hPipeCmd_Wr;
     HANDLE hPipeMem_Rd;
     HANDLE hPipeMem_Wr;
+    CHAR szDevice[MAX_PATH];
     CHAR szRemote[MAX_PATH];
 } PROCCHILD_CONTEXT;
 
@@ -51,6 +66,7 @@ BOOL LeechAgent_ProcChild_InitializeVmm()
 {
     BOOL result;
     LPSTR szVMM_ARGUMENTS[] = { "", "-device", "existingremote", "-remote", "pipe://" };
+    szVMM_ARGUMENTS[2] = ctxProcChild.szDevice;
     szVMM_ARGUMENTS[4] = ctxProcChild.szRemote;
     ctxProcChild.hDllVmm = LoadLibraryExA("vmm.dll", NULL, LOAD_LIBRARY_SEARCH_APPLICATION_DIR);
     if(!ctxProcChild.hDllVmm) {
@@ -58,8 +74,14 @@ BOOL LeechAgent_ProcChild_InitializeVmm()
         return FALSE;
     }
     ctxProcChild.pfnVMMDLL_Initialize = (BOOL(*)(DWORD, LPSTR*))GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_Initialize");
+    ctxProcChild.pfnVMMDLL_InitializePlugins = (BOOL(*)())GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_InitializePlugins");
     ctxProcChild.pfnVMMDLL_Close = (BOOL(*)())GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_Close");
-    if(!ctxProcChild.pfnVMMDLL_Initialize || !ctxProcChild.pfnVMMDLL_Close) {
+    ctxProcChild.pfnVMMDLL_VfsListBlobU = (PVMMDLL_VFS_FILELISTBLOB_OPAQUE(*)(LPSTR))GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_VfsListBlobU");
+    ctxProcChild.pfnVMMDLL_VfsReadU = (DWORD(*)(LPSTR, PBYTE, DWORD, PDWORD, ULONG64))GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_VfsReadU");
+    ctxProcChild.pfnVMMDLL_VfsWriteU = (DWORD(*)(LPSTR, PBYTE, DWORD, PDWORD, ULONG64))GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_VfsWriteU");
+    ctxProcChild.pfnVMMDLL_ConfigGet = (BOOL(*)(ULONG64, PULONG64))GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_ConfigGet");
+    ctxProcChild.pfnVMMDLL_ConfigSet = (BOOL(*)(ULONG64, ULONG64))GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_ConfigSet");
+    if(!ctxProcChild.pfnVMMDLL_Initialize || !ctxProcChild.pfnVMMDLL_InitializePlugins || !ctxProcChild.pfnVMMDLL_Close) {
         fprintf(stderr, "LeechAgent: FAIL: CHILD could not load MemProcFS library functions.\n");
         return FALSE;
     }
@@ -68,6 +90,133 @@ BOOL LeechAgent_ProcChild_InitializeVmm()
         fprintf(stderr, "LeechAgent: FAIL: CHILD could not initialize MemProcFS library.\n");
         return FALSE;
     }
+    result = ctxProcChild.pfnVMMDLL_InitializePlugins();
+    if(!result) {
+        fprintf(stderr, "LeechAgent: FAIL: CHILD could not initialize MemProcFS Plugins.\n");
+        return FALSE;
+    }
+    return TRUE;
+}
+
+/*
+* Perform a MemProcFS Virtual File System (VFS) list operation.
+* CALLER LOCALFREE: *ppRsp
+* -- pReq
+* -- ppRsp
+* -- pcbRsp
+* -- return
+*/
+_Success_(return)
+BOOL LeechAgent_ProcChild_VmmVfsList(_In_ PLC_CMD_AGENT_VFS_REQ pReq, _Out_ PLC_CMD_AGENT_VFS_RSP *ppRsp, _Out_ PDWORD pcbRsp)
+{
+    PLC_CMD_AGENT_VFS_RSP pRsp = 0;
+    PVMMDLL_VFS_FILELISTBLOB_OPAQUE pBlob = NULL;
+    pReq->uszPathFile[_countof(pReq->uszPathFile) - 1] = 0;
+    if(!ctxProcChild.pfnVMMDLL_VfsListBlobU) { goto fail; }
+    if(!(pBlob = ctxProcChild.pfnVMMDLL_VfsListBlobU(pReq->uszPathFile))) { goto fail; }
+    if((pBlob->dwVersion != VMMDLL_VFS_FILELISTBLOB_VERSION) || (pBlob->cbStruct > 0x04000000)) { goto fail; }
+    if(!(pRsp = LocalAlloc(0, sizeof(LC_CMD_AGENT_VFS_RSP) + pBlob->cbStruct))) { goto fail; }
+    ZeroMemory(pRsp, sizeof(LC_CMD_AGENT_VFS_RSP));
+    pRsp->dwVersion = LC_CMD_AGENT_VFS_RSP_VERSION;
+    memcpy(pRsp->pb, pBlob, pBlob->cbStruct);
+    pRsp->cb = pBlob->cbStruct;
+    *pcbRsp = sizeof(LC_CMD_AGENT_VFS_RSP) + pRsp->cb;
+    *ppRsp = pRsp;
+fail:
+    LocalFree(pBlob);
+    return pRsp ? TRUE : FALSE;
+}
+
+/*
+* Perform a MemProcFS Virtual File System (VFS) read operation.
+* CALLER LOCALFREE: *ppRsp
+* -- pReq
+* -- ppRsp
+* -- pcbRsp
+* -- return
+*/
+_Success_(return)
+BOOL LeechAgent_ProcChild_VmmVfsRead(_In_ PLC_CMD_AGENT_VFS_REQ pReq, _Out_ PLC_CMD_AGENT_VFS_RSP *ppRsp, _Out_ PDWORD pcbRsp)
+{
+    PLC_CMD_AGENT_VFS_RSP pRsp;
+    if(!ctxProcChild.pfnVMMDLL_VfsReadU) { return FALSE; }
+    pReq->uszPathFile[_countof(pReq->uszPathFile) - 1] = 0;
+    if(pReq->dwLength > 0x04000000) { return FALSE; }
+    if(!(pRsp = LocalAlloc(0, sizeof(LC_CMD_AGENT_VFS_RSP) + pReq->dwLength))) { return FALSE; }
+    ZeroMemory(pRsp, sizeof(LC_CMD_AGENT_VFS_RSP));
+    pRsp->dwVersion = LC_CMD_AGENT_VFS_RSP_VERSION;
+    pRsp->dwStatus = ctxProcChild.pfnVMMDLL_VfsReadU(pReq->uszPathFile, pRsp->pb, pReq->dwLength, &pRsp->cbReadWrite, pReq->qwOffset);
+    pRsp->cb = pRsp->cbReadWrite;
+    *pcbRsp = sizeof(LC_CMD_AGENT_VFS_RSP) + pRsp->cb;
+    *ppRsp = pRsp;
+    return TRUE;
+}
+
+/*
+* Perform a MemProcFS Virtual File System (VFS) write operation.
+* CALLER LOCALFREE: *ppRsp
+* -- pReq
+* -- ppRsp
+* -- pcbRsp
+* -- return
+*/
+_Success_(return)
+BOOL LeechAgent_ProcChild_VmmVfsWrite(_In_ PLC_CMD_AGENT_VFS_REQ pReq, _Out_ PLC_CMD_AGENT_VFS_RSP *ppRsp, _Out_ PDWORD pcbRsp)
+{
+    PLC_CMD_AGENT_VFS_RSP pRsp;
+    if(!ctxProcChild.pfnVMMDLL_VfsWriteU) { return FALSE; }
+    pReq->uszPathFile[_countof(pReq->uszPathFile) - 1] = 0;
+    if(!(pRsp = LocalAlloc(LMEM_ZEROINIT, sizeof(LC_CMD_AGENT_VFS_RSP)))) { return FALSE; }
+    pRsp->dwVersion = LC_CMD_AGENT_VFS_RSP_VERSION;
+    pRsp->dwStatus = ctxProcChild.pfnVMMDLL_VfsWriteU(pReq->uszPathFile, pReq->pb, pReq->cb, &pRsp->cbReadWrite, pReq->qwOffset);
+    *pcbRsp = sizeof(LC_CMD_AGENT_VFS_RSP);
+    *ppRsp = pRsp;
+    return TRUE;
+}
+
+/*
+* Perform a MemProcFS Virtual File System (VFS) get config operation.
+* CALLER LOCALFREE: *ppRsp
+* -- pReq
+* -- ppRsp
+* -- pcbRsp
+* -- return
+*/
+_Success_(return)
+BOOL LeechAgent_ProcChild_VmmVfsConfigGet(_In_ PLC_CMD_AGENT_VFS_REQ pReq, _Out_ PLC_CMD_AGENT_VFS_RSP *ppRsp, _Out_ PDWORD pcbRsp)
+{
+    QWORD qwResult = 0;
+    PLC_CMD_AGENT_VFS_RSP pRsp;
+    if(!ctxProcChild.pfnVMMDLL_ConfigGet) { return FALSE; }
+    if(!(pRsp = LocalAlloc(LMEM_ZEROINIT, sizeof(LC_CMD_AGENT_VFS_RSP) + sizeof(QWORD)))) { return FALSE; }
+    pRsp->dwVersion = LC_CMD_AGENT_VFS_RSP_VERSION;
+    pRsp->dwStatus = (DWORD)ctxProcChild.pfnVMMDLL_ConfigGet(pReq->fOption, (PULONG64)pRsp->pb);
+    pRsp->cb = sizeof(QWORD);
+    *pcbRsp = sizeof(LC_CMD_AGENT_VFS_RSP) + sizeof(QWORD);
+    *ppRsp = pRsp;
+    return TRUE;
+
+}
+
+/*
+* Perform a MemProcFS Virtual File System (VFS) set config operation.
+* CALLER LOCALFREE: *ppRsp
+* -- pReq
+* -- ppRsp
+* -- pcbRsp
+* -- return
+*/
+_Success_(return)
+BOOL LeechAgent_ProcChild_VmmVfsConfigSet(_In_ PLC_CMD_AGENT_VFS_REQ pReq, _Out_ PLC_CMD_AGENT_VFS_RSP *ppRsp, _Out_ PDWORD pcbRsp)
+{
+    QWORD qwResult = 0;
+    PLC_CMD_AGENT_VFS_RSP pRsp;
+    if(!ctxProcChild.pfnVMMDLL_ConfigSet || (pReq->cb != sizeof(QWORD))) { return FALSE; }
+    if(!(pRsp = LocalAlloc(LMEM_ZEROINIT, sizeof(LC_CMD_AGENT_VFS_RSP)))) { return FALSE; }
+    pRsp->dwVersion = LC_CMD_AGENT_VFS_RSP_VERSION;
+    pRsp->dwStatus = (DWORD)ctxProcChild.pfnVMMDLL_ConfigSet(pReq->fOption, *(PULONG64)pReq->pb);
+    *pcbRsp = sizeof(LC_CMD_AGENT_VFS_RSP);
+    *ppRsp = pRsp;
     return TRUE;
 }
 
@@ -104,7 +253,7 @@ BOOL LeechAgent_ProcChild_InitializePython()
         return FALSE;
     }
     // Locate LeechCorePyC
-    ctxProcChild.hDllLeechCorePyC = LoadLibraryA("leechcorepyc.pyd");
+    ctxProcChild.hDllLeechCorePyC = LoadLibraryA("Plugins\\leechcorepyc\\leechcorepyc.pyd");
     if(!ctxProcChild.hDllLeechCorePyC) {
         fprintf(stderr, "LeechAgent: FAIL: CHILD could not locate/load library leechcorepyc.pyd\n");
         return FALSE;
@@ -179,51 +328,90 @@ BOOL LeechAgent_ProcChild_CmdRead(_Out_opt_ PLEECHAGENT_PROC_CMD* ppCmd)
 * Separate thread that reads and dispatches commands read over the CMD pipe
 * from the parent process.
 */
-VOID LeechAgent_ProcChild_ReaderCmd()
+VOID LeechAgent_ProcChild_ReaderCmd(_In_opt_ qwRemoteHLC)
 {
-    BOOL result;
-    DWORD cbWrite;
-    PBYTE pb = NULL;
+    BOOL fResult, fResultWritePipe = TRUE;
+    DWORD cbWrite, cbRspData = 0;
+    PBYTE pb = NULL, pbRspData = NULL;
     LEECHAGENT_PROC_CMD CmdRsp = { 0 };
-    PLEECHAGENT_PROC_CMD pCmd = NULL;
-    CmdRsp.dwMagic = LEECHAGENT_PROC_CMD_MAGIC;
-    while(LeechAgent_ProcChild_CmdRead(&pCmd)) {
-        result = TRUE;
+    PLEECHAGENT_PROC_CMD pCmd = NULL, pCmdRsp = NULL;
+    while(LeechAgent_ProcChild_CmdRead(&pCmd) && fResultWritePipe) {
+        fResult = TRUE;
         switch(pCmd->dwCmd) {
             case LEECHAGENT_PROC_CMD_EXITCLIENT:
                 LeechAgent_ProcChild_Close();
                 break;
             case LEECHAGENT_PROC_CMD_INIT_VMM:
-                result = LeechAgent_ProcChild_InitializeVmm();
+                fResult = LeechAgent_ProcChild_InitializeVmm(qwRemoteHLC);
                 break;
             case LEECHAGENT_PROC_CMD_INIT_PYTHON:
-                result = LeechAgent_ProcChild_InitializePython();
+                fResult = LeechAgent_ProcChild_InitializePython();
                 break;
             case LEECHAGENT_PROC_CMD_EXEC_PYTHON:
-                result = FALSE;
+                fResult = FALSE;
                 if(ctxProcChild.pfnLeechCorePyC_EmbExecPyInMem) {
                     pb = LocalAlloc(0, pCmd->cb + 1ULL);
                     if(pb) {
                         // null terminate buffer (just in case) and send to python for execution.
                         memcpy(pb, pCmd->pb, pCmd->cb);
                         pb[pCmd->cb] = 0;
-                        result = ctxProcChild.pfnLeechCorePyC_EmbExecPyInMem((LPSTR)pb);
+                        fResult = ctxProcChild.pfnLeechCorePyC_EmbExecPyInMem((LPSTR)pb);
                         LocalFree(pb);
                         pb = NULL;
                     }
                 }
                 break;
+            case LEECHAGENT_PROC_CMD_VFS_LIST:
+                fResult = (pCmd->cb >= sizeof(LC_CMD_AGENT_VFS_REQ)) && (((PLC_CMD_AGENT_VFS_REQ)pCmd->pb)->cb <= pCmd->cb - sizeof(LC_CMD_AGENT_VFS_REQ));
+                fResult = fResult && LeechAgent_ProcChild_VmmVfsList((PLC_CMD_AGENT_VFS_REQ)pCmd->pb, (PLC_CMD_AGENT_VFS_RSP *)&pbRspData, &cbRspData);
+                break;
+            case LEECHAGENT_PROC_CMD_VFS_READ:
+                fResult = (pCmd->cb >= sizeof(LC_CMD_AGENT_VFS_REQ)) && (((PLC_CMD_AGENT_VFS_REQ)pCmd->pb)->cb <= pCmd->cb - sizeof(LC_CMD_AGENT_VFS_REQ));
+                fResult = fResult && LeechAgent_ProcChild_VmmVfsRead((PLC_CMD_AGENT_VFS_REQ)pCmd->pb, (PLC_CMD_AGENT_VFS_RSP *)&pbRspData, &cbRspData);
+                break;
+            case LEECHAGENT_PROC_CMD_VFS_WRITE:
+                fResult = (pCmd->cb >= sizeof(LC_CMD_AGENT_VFS_REQ)) && (((PLC_CMD_AGENT_VFS_REQ)pCmd->pb)->cb <= pCmd->cb - sizeof(LC_CMD_AGENT_VFS_REQ));
+                fResult = fResult && LeechAgent_ProcChild_VmmVfsWrite((PLC_CMD_AGENT_VFS_REQ)pCmd->pb, (PLC_CMD_AGENT_VFS_RSP *)&pbRspData, &cbRspData);
+                break;
+            case LEECHAGENT_PROC_CMD_VFS_OPT_GET:
+                fResult = (pCmd->cb >= sizeof(LC_CMD_AGENT_VFS_REQ)) && (((PLC_CMD_AGENT_VFS_REQ)pCmd->pb)->cb <= pCmd->cb - sizeof(LC_CMD_AGENT_VFS_REQ));
+                fResult = fResult && LeechAgent_ProcChild_VmmVfsConfigGet((PLC_CMD_AGENT_VFS_REQ)pCmd->pb, (PLC_CMD_AGENT_VFS_RSP *)&pbRspData, &cbRspData);
+                break;
+            case LEECHAGENT_PROC_CMD_VFS_OPT_SET:
+                fResult = (pCmd->cb >= sizeof(LC_CMD_AGENT_VFS_REQ)) && (((PLC_CMD_AGENT_VFS_REQ)pCmd->pb)->cb <= pCmd->cb - sizeof(LC_CMD_AGENT_VFS_REQ));
+                fResult = fResult && LeechAgent_ProcChild_VmmVfsConfigSet((PLC_CMD_AGENT_VFS_REQ)pCmd->pb, (PLC_CMD_AGENT_VFS_RSP *)&pbRspData, &cbRspData);
+                break;
             default:
                 fprintf(stderr, "LeechAgent: WARN: CHILD received unknown CMD from parent. ID: 0x%08x\n", pCmd->dwCmd);
                 break;
         }
-        CmdRsp.fSuccess = result;
-        CmdRsp.dwCmd = pCmd->dwCmd;
-        if(!WriteFile(ctxProcChild.hPipeCmd_Wr, &CmdRsp, sizeof(LEECHAGENT_PROC_CMD), &cbWrite, NULL)) {
-            break;
+        // write result to pipe
+        if(fResult && cbRspData && pbRspData) {
+            if((pCmdRsp = LocalAlloc(0, sizeof(LEECHAGENT_PROC_CMD) + cbRspData))) {
+                ZeroMemory(pCmdRsp, sizeof(LEECHAGENT_PROC_CMD));
+                memcpy(pCmdRsp->pb, pbRspData, cbRspData);
+                pCmdRsp->cb = cbRspData;
+            } else {
+                fResult = FALSE;
+            }
         }
+        if(!pCmdRsp) {
+            pCmdRsp = &CmdRsp;
+        }
+        pCmdRsp->dwMagic = LEECHAGENT_PROC_CMD_MAGIC;
+        pCmdRsp->dwCmd = pCmd->dwCmd;
+        pCmdRsp->fSuccess = fResult;
+        fResultWritePipe = WriteFile(ctxProcChild.hPipeCmd_Wr, pCmdRsp, sizeof(LEECHAGENT_PROC_CMD) + pCmdRsp->cb, &cbWrite, NULL);
+        // cleanup
         LocalFree(pCmd);
         pCmd = NULL;
+        if(pCmdRsp != &CmdRsp) { LocalFree(pCmdRsp); }
+        pCmdRsp = NULL;
+        cbRspData = 0;
+        if(pbRspData) {
+            LocalFree(pbRspData);
+            pbRspData = NULL;
+        }
     }
     if(ctxProcChild.fStateRunning) {
         fprintf(stderr, "LeechAgent: FAIL: CHILD could not read/write CMD from/to parent. Exiting.\n");
@@ -236,17 +424,20 @@ VOID LeechAgent_ProcChild_ReaderCmd()
 */
 VOID LeechAgent_ProcChild_Main(int argc, wchar_t* argv[])
 {
+    QWORD qwRemoteHLC = 0;
     PLEECHAGENT_PROC_CMD pCmd = NULL;
     ctxProcChild.fStateRunning = TRUE;
-    if(argc <= 5) { return; }
+    if(argc <= 6) { return; }
     ctxProcChild.hPipeCmd_Rd = (HANDLE)_wtoi64(argv[2]);
     ctxProcChild.hPipeCmd_Wr = (HANDLE)_wtoi64(argv[3]);
     ctxProcChild.hPipeMem_Rd = (HANDLE)_wtoi64(argv[4]);
     ctxProcChild.hPipeMem_Wr = (HANDLE)_wtoi64(argv[5]);
+    qwRemoteHLC = _wtoi64(argv[6]);
     if(!ctxProcChild.hPipeCmd_Rd || !ctxProcChild.hPipeMem_Rd || !ctxProcChild.hPipeMem_Wr) { goto fail; }
-    _snprintf_s(ctxProcChild.szRemote, MAX_PATH - 1, _TRUNCATE, "pipe://%llu:%llu", (QWORD)ctxProcChild.hPipeMem_Rd, (QWORD)ctxProcChild.hPipeMem_Wr);
+    _snprintf_s(ctxProcChild.szDevice, _countof(ctxProcChild.szDevice), _TRUNCATE, "existingremote://0x%llx", qwRemoteHLC);
+    _snprintf_s(ctxProcChild.szRemote, _countof(ctxProcChild.szRemote), _TRUNCATE, "pipe://%llu:%llu", (QWORD)ctxProcChild.hPipeMem_Rd, (QWORD)ctxProcChild.hPipeMem_Wr);
     // use main thread for eternal cmd-read loop
-    LeechAgent_ProcChild_ReaderCmd();
+    LeechAgent_ProcChild_ReaderCmd(qwRemoteHLC);
 fail:
     LeechAgent_ProcChild_Close();
 }

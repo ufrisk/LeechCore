@@ -26,6 +26,7 @@ _Success_(return) BOOL Device3380_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC
 _Success_(return) BOOL DeviceFile_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo);
 _Success_(return) BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo);
 _Success_(return) BOOL DevicePMEM_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo);
+_Success_(return) BOOL DeviceVMWare_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo);
 _Success_(return) BOOL DeviceTMD_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo);
 _Success_(return) BOOL LeechRpc_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo);
 
@@ -238,6 +239,11 @@ VOID LcCreate_FetchDevice(_Inout_ PLC_CONTEXT ctx)
         ctx->pfnCreate = DevicePMEM_Open;
         return;
     }
+    if(0 == _strnicmp("vmware", ctx->Config.szDevice, 4)) {
+        strncpy_s(ctx->Config.szDeviceName, sizeof(ctx->Config.szDeviceName), "vmware", _TRUNCATE);
+        ctx->pfnCreate = DeviceVMWare_Open;
+        return;
+    }
     // 2: check against separate device modules:
     // 2.1: count device name length (and 'sanitize' againt disallowed chars).
     while((c = ctx->Config.szDevice[cszDevice]) && (c != ':')) {
@@ -362,13 +368,23 @@ _Success_(return != NULL)
 EXPORTED_FUNCTION HANDLE LcCreateEx(_Inout_ PLC_CONFIG pLcCreateConfig, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo)
 {
     PLC_CONTEXT ctxLC = NULL;
-    QWORD tmStart = LcCallStart();
+    QWORD qwExistingHandle = 0, tmStart = LcCallStart();
     if(ppLcCreateErrorInfo) { *ppLcCreateErrorInfo = NULL; }
     if(!pLcCreateConfig || (pLcCreateConfig->dwVersion != LC_CONFIG_VERSION)) { return NULL; }
     // check if open existing (primary) device:
-    if(0 == _strnicmp("existing", pLcCreateConfig->szDevice, 9)) {
+    if(!pLcCreateConfig->szRemote[0] && (0 == _strnicmp("existing", pLcCreateConfig->szDevice, 8))) {
+        if(0 == _strnicmp("existing://", pLcCreateConfig->szDevice, 11)) {
+            qwExistingHandle = Util_GetNumericA(pLcCreateConfig->szDevice + 11);
+        }
         EnterCriticalSection(&g_ctx.Lock);
-        if((ctxLC = (PLC_CONTEXT)g_ctx.FLink)) {
+        ctxLC = (PLC_CONTEXT)g_ctx.FLink;
+        while(qwExistingHandle && ctxLC && (qwExistingHandle != (QWORD)ctxLC)) {
+            ctxLC = ctxLC->FLink;
+        }
+        if(qwExistingHandle && (qwExistingHandle != (QWORD)ctxLC)) {
+            ctxLC = NULL;
+        }
+        if(ctxLC) {
             memcpy(pLcCreateConfig, &ctxLC->Config, sizeof(LC_CONFIG));
             InterlockedIncrement(&ctxLC->dwHandleCount);
         }

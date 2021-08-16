@@ -18,6 +18,7 @@ typedef struct tdLEECHRPC_SERVER_CONTEXT {
     CRITICAL_SECTION LockClientList;
     struct {
         HANDLE hLC;
+        HANDLE hPP;             // parent/child process context (used for child-process vfs operations)
         DWORD dwRpcClientID;
         DWORD cActiveRequests;
         QWORD qwLastTickCount64;
@@ -31,7 +32,7 @@ LEECHRPC_SERVER_CONTEXT ctxLeechRpc = { 0 };
 //-----------------------------------------------------------------------------
 
 _Success_(return != NULL)
-HANDLE LeechRPC_LcHandle_GetExisting(_In_ DWORD dwRpcClientID)
+HANDLE LeechRPC_LcHandle_GetExisting(_In_ DWORD dwRpcClientID, _Out_opt_ PHANDLE* pphPP)
 {
     DWORD i;
     HANDLE hLC = NULL;
@@ -41,6 +42,7 @@ HANDLE LeechRPC_LcHandle_GetExisting(_In_ DWORD dwRpcClientID)
         if(ctxLeechRpc.ClientList[i].dwRpcClientID == dwRpcClientID) {
             ctxLeechRpc.ClientList[i].cActiveRequests++;
             ctxLeechRpc.ClientList[i].qwLastTickCount64 = GetTickCount64();
+            if(pphPP) { *pphPP = &ctxLeechRpc.ClientList[i].hPP; }
             hLC = ctxLeechRpc.ClientList[i].hLC;
             break;
         }
@@ -86,7 +88,7 @@ VOID LeechRPC_LcHandle_Close(_In_ DWORD dwRpcClientID, _In_ BOOL fReasonTimeout)
 {
     DWORD i;
     CHAR szTime[32];
-    HANDLE hLC = NULL;
+    HANDLE hLC = NULL, hPP = NULL;
     EnterCriticalSection(&ctxLeechRpc.LockClientList);
     for(i = 0; i < LEECHAGENT_CLIENTKEEPALIVE_MAX_CLIENTS; i++) {
         if(ctxLeechRpc.ClientList[i].dwRpcClientID == dwRpcClientID) {
@@ -96,13 +98,18 @@ VOID LeechRPC_LcHandle_Close(_In_ DWORD dwRpcClientID, _In_ BOOL fReasonTimeout)
                 EnterCriticalSection(&ctxLeechRpc.LockClientList);
             }
             hLC = ctxLeechRpc.ClientList[i].hLC;
+            hPP = ctxLeechRpc.ClientList[i].hPP;
             ctxLeechRpc.ClientList[i].hLC = NULL;
+            ctxLeechRpc.ClientList[i].hPP = NULL;
             ctxLeechRpc.ClientList[i].dwRpcClientID = 0;
             ctxLeechRpc.ClientList[i].qwLastTickCount64 = 0;
             break;
         }
     }
     LeaveCriticalSection(&ctxLeechRpc.LockClientList);
+    if(hPP) {
+        LeechAgent_ProcParent_Close(hPP);
+    }
     if(hLC) {
         LcClose(hLC);
         LeechSvc_GetTimeStamp(szTime);
@@ -287,6 +294,8 @@ fail:
 /*
 * Transfer commands/data to/from the remote service (if it exists).
 * NB! USER-FREE: ppbDataOut (LocalFree)
+* -- hLC
+* -- hPP
 * -- fOption = the command as specified by LC_CMD_AGENT_*
 * -- cbDataIn
 * -- pbDataIn
@@ -295,16 +304,31 @@ fail:
 * -- return
 */
 _Success_(return)
-BOOL LeechRpc_CommandAgent(_In_ QWORD fOption, _In_ DWORD cbDataIn, _In_reads_(cbDataIn) PBYTE pbDataIn, _Out_writes_opt_(*pcbDataOut) PBYTE *ppbDataOut, _Out_opt_ PDWORD pcbDataOut)
+BOOL LeechRpc_CommandAgent(_In_ HANDLE hLC, _In_opt_ PHANDLE phPP, _In_ QWORD fOption, _In_ DWORD cbDataIn, _In_reads_(cbDataIn) PBYTE pbDataIn, _Out_writes_opt_(*pcbDataOut) PBYTE *ppbDataOut, _Out_opt_ PDWORD pcbDataOut)
 {
     if(ppbDataOut) { *ppbDataOut = NULL; }
     if(pcbDataOut) { *pcbDataOut = 0; }
     switch(fOption & 0xffffffff'00000000) {
         case LC_CMD_AGENT_EXEC_PYTHON:
-            return LeechAgent_ProcParent_ExecPy(fOption & 0xffffffff, pbDataIn, cbDataIn, ppbDataOut, pcbDataOut);
+            return LeechAgent_ProcParent_ExecPy(hLC, fOption & 0xffffffff, pbDataIn, cbDataIn, ppbDataOut, pcbDataOut);
         case LC_CMD_AGENT_EXIT_PROCESS:
             ExitProcess(fOption & 0xffffffff);
             return FALSE;   // not reached ...
+        case LC_CMD_AGENT_VFS_LIST:
+            if(!phPP) { return FALSE; }
+            return LeechAgent_ProcParent_VfsCMD(hLC, phPP, LEECHAGENT_PROC_CMD_VFS_LIST, pbDataIn, cbDataIn, ppbDataOut, pcbDataOut);
+        case LC_CMD_AGENT_VFS_READ:
+            if(!phPP) { return FALSE; }
+            return LeechAgent_ProcParent_VfsCMD(hLC, phPP, LEECHAGENT_PROC_CMD_VFS_READ, pbDataIn, cbDataIn, ppbDataOut, pcbDataOut);
+        case LC_CMD_AGENT_VFS_WRITE:
+            if(!phPP) { return FALSE; }
+            return LeechAgent_ProcParent_VfsCMD(hLC, phPP, LEECHAGENT_PROC_CMD_VFS_WRITE, pbDataIn, cbDataIn, ppbDataOut, pcbDataOut);
+        case LC_CMD_AGENT_VFS_OPT_GET:
+            if(!phPP) { return FALSE; }
+            return LeechAgent_ProcParent_VfsCMD(hLC, phPP, LEECHAGENT_PROC_CMD_VFS_OPT_GET, pbDataIn, cbDataIn, ppbDataOut, pcbDataOut);
+        case LC_CMD_AGENT_VFS_OPT_SET:
+            if(!phPP) { return FALSE; }
+            return LeechAgent_ProcParent_VfsCMD(hLC, phPP, LEECHAGENT_PROC_CMD_VFS_OPT_SET, pbDataIn, cbDataIn, ppbDataOut, pcbDataOut);
         default:
             return FALSE;
     }
@@ -357,7 +381,7 @@ error_status_t LeechRpc_ReservedSubmitCommand(
     /* [out] */ long *pcbOut,
     /* [size_is][size_is][out] */ byte **ppbOut)
 {
-    HANDLE hLC = NULL;
+    HANDLE hLC = NULL, *phPP = NULL;
     BOOL fTMP = FALSE;
     DWORD cbTMP = 0;
     PBYTE pbTMP = NULL;
@@ -376,7 +400,7 @@ error_status_t LeechRpc_ReservedSubmitCommand(
     if(cbIn < sizeof(LEECHRPC_MSG_HDR)) { return status; }
     pReq = (PLEECHRPC_MSG_HDR)pbIn;
     if((pReq->dwMagic != LEECHRPC_MSGMAGIC) || (pReq->tpMsg > LEECHRPC_MSGTYPE_MAX) || (pReq->cbMsg < sizeof(LEECHRPC_MSG_HDR))) { return status; }
-    hLC = LeechRPC_LcHandle_GetExisting(pReq->dwRpcClientID);
+    hLC = LeechRPC_LcHandle_GetExisting(pReq->dwRpcClientID, &phPP);
     if(!hLC && !((pReq->tpMsg == LEECHRPC_MSGTYPE_PING_REQ) || (pReq->tpMsg == LEECHRPC_MSGTYPE_OPEN_REQ) || (pReq->tpMsg == LEECHRPC_MSGTYPE_CLOSE_REQ))) { goto fail; }
     switch(pReq->tpMsg) {
         case LEECHRPC_MSGTYPE_PING_REQ:
@@ -472,7 +496,7 @@ error_status_t LeechRpc_ReservedSubmitCommand(
             goto finish;
         case LEECHRPC_MSGTYPE_COMMAND_REQ:
             fTMP = (pReqBin->qwData[0] >> 63) ?
-                LeechRpc_CommandAgent(pReqBin->qwData[0], pReqBin->cb, pReqBin->pb, &pbTMP, &cbTMP) :
+                LeechRpc_CommandAgent(hLC, phPP, pReqBin->qwData[0], pReqBin->cb, pReqBin->pb, &pbTMP, &cbTMP) :
                 LcCommand(hLC, pReqBin->qwData[0], pReqBin->cb, pReqBin->pb, &pbTMP, &cbTMP);
             if(!fTMP) { cbTMP = 0; }
             if(!(pRspBin = LocalAlloc(LMEM_ZEROINIT, sizeof(LEECHRPC_MSG_BIN) + cbTMP))) {

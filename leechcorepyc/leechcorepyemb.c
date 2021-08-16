@@ -71,15 +71,17 @@ BOOL LeechCorePyC_EmbPythonInitialize(_In_ HMODULE hDllPython)
     //wprintf(L"LeechSvc: Python Path: %s\n", wszPathPython);
     Py_Initialize();
     //PyEval_InitThreads();
+    /*
     g_PyRun_SimpleString(
         "try:                           \n" \
-        "    import memprocfs           \n" \
+        "    import leechcorepyc        \n" \
         "except:                        \n" \
         "    pass                       \n" \
         "try:                           \n" \
-        "    from leechcorepyc import * \n" \
+        "    import memprocfs           \n" \
         "except:                        \n" \
         "    pass                       \n" );
+    */
     //PyEval_ReleaseLock();
     g_pyThreadState = PyEval_SaveThread();
     return TRUE;

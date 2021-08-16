@@ -80,9 +80,9 @@ VOID LeechRPC_Compress(_In_ PLEECHRPC_COMPRESS ctxCompress, _Inout_ PLEECHRPC_MS
     DWORD i;
     if(ctxCompress->fValid && (pMsg->cb > 0x1000) && !fCompressDisable) {
         if(!(pb = LocalAlloc(0, pMsg->cb))) { return; }
-        while((i = InterlockedIncrement(&ctxCompress->iCompress) % LEECHRPC_COMPRESS_MAXTHREADS) && !TryEnterCriticalSection(&ctxCompress->Compress[i].Lock)) {
-            ;
-        }
+        do {
+            i = InterlockedIncrement(&ctxCompress->iCompress) % LEECHRPC_COMPRESS_MAXTHREADS;
+        } while(!TryEnterCriticalSection(&ctxCompress->Compress[i].Lock));
         result = ctxCompress->fn.pfnCompress(ctxCompress->Compress[i].h, pMsg->pb, pMsg->cb, pb, pMsg->cb, &cb);
         LeaveCriticalSection(&ctxCompress->Compress[i].Lock);
         if(result && (cb <= pMsg->cb)) {
@@ -107,9 +107,9 @@ BOOL LeechRPC_Decompress(_In_ PLEECHRPC_COMPRESS ctxCompress, _In_ PLEECHRPC_MSG
     if(!ctxCompress->fValid || (pMsgIn->cbDecompress > 0x04000000)) { return FALSE; }
     if(!(pMsgOut = (PLEECHRPC_MSG_BIN)LocalAlloc(0, sizeof(LEECHRPC_MSG_BIN) + pMsgIn->cbDecompress))) { return FALSE; }
     memcpy(pMsgOut, pMsgIn, sizeof(LEECHRPC_MSG_BIN));
-    while((i = InterlockedIncrement(&ctxCompress->iDecompress) % LEECHRPC_COMPRESS_MAXTHREADS) && !TryEnterCriticalSection(&ctxCompress->Decompress[i].Lock)) {
-        ;
-    }
+    do {
+        i = InterlockedIncrement(&ctxCompress->iDecompress) % LEECHRPC_COMPRESS_MAXTHREADS;
+    } while(!TryEnterCriticalSection(&ctxCompress->Decompress[i].Lock));
     result = ctxCompress->fn.pfnDecompress(
         ctxCompress->Decompress[i].h,
         pMsgIn->pb,
