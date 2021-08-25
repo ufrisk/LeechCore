@@ -571,8 +571,10 @@ VOID TLP_CallbackMRd_Scatter(_Inout_ PTLP_CALLBACK_BUF_MRd_SCATTER pBufferMrd_Sc
             if(i >= pBufferMrd_Scatter->cph) { return; }
             pMEM = pBufferMrd_Scatter->pph[i];
             if(pMEM->cb == 0x1000) {
-                o = (hdrC->Tag & 0x1f) << 7;
+                if(hdrC->ByteCount > 0x80) { return; }
+                o = ((hdrC->Tag & 0x1f) << 7) + 0x80 - hdrC->ByteCount;
             } else {
+                // TODO: Fix CplD BC
                 o = (DWORD)MEM_SCATTER_STACK_PEEK(pMEM, 1);
             }
         } else {
@@ -583,6 +585,7 @@ VOID TLP_CallbackMRd_Scatter(_Inout_ PTLP_CALLBACK_BUF_MRd_SCATTER pBufferMrd_Sc
             if(pMEM->cb == 0x1000) {
                 o = 0x1000 - (hdrC->ByteCount ? hdrC->ByteCount : 0x1000);
             } else {
+                // TODO: Fix CplD BC
                 o = (DWORD)MEM_SCATTER_STACK_PEEK(pMEM, 1);
             }
         }

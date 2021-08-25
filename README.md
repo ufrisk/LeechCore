@@ -175,3 +175,6 @@ v1.0-1.8
 * Bug fixes.
 * Remote LeechAgent support for MemProcFS.
 * VMWare live memory VM introspection (Windows host only).
+
+Latest:
+* Bug fixes.
