@@ -205,11 +205,13 @@ BOOL IsWow64Process(HANDLE hProcess, PBOOL Wow64Process)
 
 HMODULE LoadLibraryA(LPSTR lpFileName)
 {
-    CHAR szFileName[2 * MAX_PATH];
+    CHAR szFileName[2 * MAX_PATH] = { 0 };
     if(lpFileName && (0 == memcmp(lpFileName, "FTD3XX.dll", 10))) {
         lpFileName = "leechcore_ft601_driver_linux.so";
     }
-    Util_GetPathLib(szFileName);
+    if(!strstr(lpFileName, "/")) {
+        Util_GetPathLib(szFileName);
+    }
     strncat(szFileName, lpFileName, MAX_PATH);
     return dlopen(szFileName, RTLD_NOW);
 }
