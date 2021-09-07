@@ -178,3 +178,4 @@ v1.0-1.8
 
 Latest:
 * Bug fixes.
+* Support for Full Bitmap Microsoft Crash Dump file.

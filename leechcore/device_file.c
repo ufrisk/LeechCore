@@ -16,6 +16,7 @@
 #define DUMP_VALID_DUMP             0x504d5544
 #define DUMP_VALID_DUMP64           0x34365544
 #define DUMP_TYPE_FULL              1
+#define DUMP_TYPE_BITMAP_FULL       5
 #define IMAGE_FILE_MACHINE_I386     0x014c
 #define IMAGE_FILE_MACHINE_AMD64    0x8664
 #define _PHYSICAL_MEMORY_MAX_RUNS   0x20
@@ -43,6 +44,15 @@ typedef struct {
     DWORD NumberOfPages;
     _PHYSICAL_MEMORY_RUN32 Run[_PHYSICAL_MEMORY_MAX_RUNS];
 } _PHYSICAL_MEMORY_DESCRIPTOR32, *_PPHYSICAL_MEMORY_DESCRIPTOR32;
+
+typedef struct tdDUMP_HEADER_BITMAP_FULL64 {
+    QWORD Signature;        // + 0x00
+    QWORD _Filler[3];       // + 0x08
+    QWORD cbFileBase;       // + 0x20
+    QWORD cPages;           // + 0x28
+    QWORD cBits;            // + 0x30
+    BYTE pbBitmap[0];       // + 0x38
+} _DUMP_HEADER_BITMAP_FULL64, *P_DUMP_HEADER_BITMAP_FULL64;
 
 #define CDMP_DWORD(o)                               (*(PDWORD)(ctx->CrashOrCoreDump.pbHdr + o))
 #define CDMP_QWORD(o)                               (*(PQWORD)(ctx->CrashOrCoreDump.pbHdr + o))
@@ -290,6 +300,80 @@ fail:
 }
 
 /*
+* Parsing of the Full Bitmap Microsoft Crashdump file (currently only 64-bits).
+* -- ctxLC
+* -- return
+*/
+BOOL DeviceFile_MsCrashCoreDumpInitialize_BitmapFull(_In_ PLC_CONTEXT ctxLC)
+{
+    PDEVICE_CONTEXT_FILE ctx = (PDEVICE_CONTEXT_FILE)ctxLC->hDevice;
+    _DUMP_HEADER_BITMAP_FULL64 hdr = { 0 };
+    PBYTE pb = NULL;
+    BOOL fResult = FALSE, fPageValid = FALSE;
+    QWORD cb, cbFileBase, iPageBase, iPage, cMaxBits, iPageEx, b;
+    // 1: fetch header:
+    _fseeki64(ctx->pFile, 0x2000, SEEK_SET);
+    fread(&hdr, 1, sizeof(_DUMP_HEADER_BITMAP_FULL64), ctx->pFile);
+    if(hdr.Signature != 0x504d5544504d4446) { goto fail; }       // 'FDMPDUMP'
+    if((hdr.cPages > hdr.cBits) || (hdr.cBits > 0x7fffffff) || (hdr.cbFileBase & 0xfff) || (hdr.cbFileBase > 0x01000000)) { goto fail; }
+    cbFileBase = hdr.cbFileBase;
+    // 2: fetch bits:
+    cb = hdr.cBits / 8;
+    if(!(pb = LocalAlloc(LMEM_ZEROINIT, cb))) { goto fail; }
+    if(cb != fread(pb, 1, cb, ctx->pFile)) { goto fail; }
+    // 3: walk bitmap - add ranges!
+    cMaxBits = hdr.cBits & 0xffffffc0;
+    for(iPage = 0; iPage < cMaxBits; iPage += 64) {
+        b = *(PQWORD)(pb + (iPage >> 3));
+        // all pages valid!
+        if(b == (QWORD)-1) {
+            if(!fPageValid) {
+                fPageValid = TRUE;
+                iPageBase = iPage;
+            }
+            continue;
+        }
+        // no pages valid!
+        if(!b && !fPageValid) { continue; }
+        // some valid pages
+        for(iPageEx = 0; iPageEx < 64; iPageEx++) {
+            if((b >> iPageEx) & 1) {
+                // valid
+                if(!fPageValid) {
+                    fPageValid = TRUE;
+                    iPageBase = iPage + iPageEx;
+                }
+            } else {
+                // invalid
+                if(fPageValid) {
+                    cb = (iPage + iPageEx - iPageBase) << 12;
+                    if(!LcMemMap_AddRange(ctxLC, iPageBase << 12, cb, cbFileBase)) {
+                        lcprintf(ctxLC, "DEVICE: FAIL: unable to add range to memory map. (%016llx %016llx %016llx)\n", iPageBase << 12, cb, cbFileBase);
+                        return FALSE;
+                    }
+                    cbFileBase += cb;
+                    fPageValid = FALSE;
+                }
+            }
+        }
+    }
+    // 4: finalize remaining
+    if(fPageValid) {
+        cb = (iPage - iPageBase) << 12;
+        if(!LcMemMap_AddRange(ctxLC, iPageBase << 12, cb, cbFileBase)) {
+            lcprintf(ctxLC, "DEVICE: FAIL: unable to add range to memory map. (%016llx %016llx %016llx)\n", iPageBase << 12, cb, cbFileBase);
+            return FALSE;
+        }
+    }
+    fResult = TRUE;
+fail:
+    if(!fResult) {
+        lcprintf(ctxLC, "DEVICE: FAIL: error parsing 64-bit full bitmap dump.\n");
+    }
+    return fResult;
+}
+
+/*
 * Try to initialize a Microsoft Crash Dump file (full dump only) _or_ a VirtualBox
 * core dump file. This is done by reading the dump header. If this is not a
 * dump file the function will still return TRUE - but not initialize the
@@ -326,6 +410,9 @@ BOOL DeviceFile_MsCrashCoreDumpInitialize(_In_ PLC_CONTEXT ctxLC)
             }
             cbFileOffset += pM64->Run[i].PageCount << 12;
         }
+    }
+    if((CDMP_DWORD(0x000) == DUMP_SIGNATURE) && (CDMP_DWORD(0x004) == DUMP_VALID_DUMP64) && (CDMP_DWORD(0xf98) == DUMP_TYPE_BITMAP_FULL) && (CDMP_DWORD(0x030) == IMAGE_FILE_MACHINE_AMD64)) {
+        return DeviceFile_MsCrashCoreDumpInitialize_BitmapFull(ctxLC);
     }
     if((CDMP_DWORD(0x000) == DUMP_SIGNATURE) && (CDMP_DWORD(0x004) == DUMP_VALID_DUMP) && (CDMP_DWORD(0xf88) == DUMP_TYPE_FULL) && (CDMP_DWORD(0x020) == IMAGE_FILE_MACHINE_I386)) {
         // PAGEDUMP (32-bit memory dump) and FULL DUMP
