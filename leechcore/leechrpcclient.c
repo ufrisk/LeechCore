@@ -465,7 +465,10 @@ typedef struct td__VFS_FILELISTBLOB {
     DWORD cbStruct;
     DWORD cFileEntry;
     DWORD cbMultiText;
-    LPSTR uszMultiText;
+    union {
+        LPSTR uszMultiText;
+        QWORD _Reserved;
+    };
     DWORD _FutureUse[8];
     __VFS_FILELISTBLOB_ENTRY FileEntry[0];
 } __VFS_FILELISTBLOB, *P__VFS_FILELISTBLOB;

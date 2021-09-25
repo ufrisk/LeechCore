@@ -213,15 +213,15 @@ typedef struct tdDEVICE_CONTEXT_FPGA {
             HANDLE hFTDI;
             SOCKET SocketUDP;
         };
-        ULONG(*pfnFT_Create)(
+        ULONG(WINAPI *pfnFT_Create)(
             PVOID pvArg,
             DWORD dwFlags,
             HANDLE *pftHandle
             );
-        ULONG(*pfnFT_Close)(
+        ULONG(WINAPI *pfnFT_Close)(
             HANDLE ftHandle
             );
-        ULONG(*pfnFT_WritePipe)(
+        ULONG(WINAPI *pfnFT_WritePipe)(
             HANDLE ftHandle,
             UCHAR ucPipeID,
             PUCHAR pucBuffer,
@@ -229,7 +229,7 @@ typedef struct tdDEVICE_CONTEXT_FPGA {
             PULONG pulBytesTransferred,
             LPOVERLAPPED pOverlapped
             );
-        ULONG(*pfnFT_ReadPipe)(
+        ULONG(WINAPI *pfnFT_ReadPipe)(
             HANDLE ftHandle,
             UCHAR ucPipeID,
             PUCHAR pucBuffer,
@@ -237,21 +237,21 @@ typedef struct tdDEVICE_CONTEXT_FPGA {
             PULONG pulBytesTransferred,
             LPOVERLAPPED pOverlapped
             );
-        ULONG(*pfnFT_AbortPipe)(
+        ULONG(WINAPI *pfnFT_AbortPipe)(
             HANDLE ftHandle,
             UCHAR ucPipeID
             );
-        ULONG(*pfnFT_GetOverlappedResult)(
+        ULONG(WINAPI *pfnFT_GetOverlappedResult)(
             HANDLE ftHandle,
             LPOVERLAPPED pOverlapped,
             PULONG pulLengthTransferred,
             BOOL bWait
             );
-        ULONG(*pfnFT_InitializeOverlapped)(
+        ULONG(WINAPI *pfnFT_InitializeOverlapped)(
             HANDLE ftHandle,
             LPOVERLAPPED pOverlapped
             );
-        ULONG(*pfnFT_ReleaseOverlapped)(
+        ULONG(WINAPI *pfnFT_ReleaseOverlapped)(
             HANDLE ftHandle,
             LPOVERLAPPED pOverlapped
         );
@@ -609,7 +609,7 @@ VOID TLP_CallbackMRd_Scatter(_Inout_ PTLP_CALLBACK_BUF_MRd_SCATTER pBufferMrd_Sc
 /*
 * Emulate the FT601 Close function by closing socket.
 */
-ULONG DeviceFPGA_UDP_FT60x_FT_Close(HANDLE ftHandle)
+ULONG WINAPI DeviceFPGA_UDP_FT60x_FT_Close(HANDLE ftHandle)
 {
     FPGA_HANDLESOCKET hs;
     hs.h = ftHandle;
@@ -620,7 +620,7 @@ ULONG DeviceFPGA_UDP_FT60x_FT_Close(HANDLE ftHandle)
 /*
 * Dummy function to keep compatibility with FT601 calls when using UDP.
 */
-ULONG DeviceFPGA_UDP_FT60x_FT_AbortPipe(HANDLE ftHandle, UCHAR ucPipeID)
+ULONG WINAPI DeviceFPGA_UDP_FT60x_FT_AbortPipe(HANDLE ftHandle, UCHAR ucPipeID)
 {
     return 0;
 }
@@ -629,7 +629,7 @@ ULONG DeviceFPGA_UDP_FT60x_FT_AbortPipe(HANDLE ftHandle, UCHAR ucPipeID)
 * Emulate the FT601 WritePipe function when writing UDP packets to keep
 * function call compatibility for the FPGA device module.
 */
-ULONG DeviceFPGA_UDP_FT60x_FT_WritePipe(HANDLE ftHandle, UCHAR ucPipeID, PUCHAR pucBuffer, ULONG ulBufferLength, PULONG pulBytesTransferred, PVOID pOverlapped)
+ULONG WINAPI DeviceFPGA_UDP_FT60x_FT_WritePipe(HANDLE ftHandle, UCHAR ucPipeID, PUCHAR pucBuffer, ULONG ulBufferLength, PULONG pulBytesTransferred, PVOID pOverlapped)
 {
     FPGA_HANDLESOCKET hs;
     hs.h = ftHandle;
@@ -646,7 +646,7 @@ ULONG DeviceFPGA_UDP_FT60x_FT_WritePipe(HANDLE ftHandle, UCHAR ucPipeID, PUCHAR 
 * Emulate the FT601 WritePipe function when reading UDP packets to keep
 * function call compatibility for the FPGA device module.
 */
-ULONG DeviceFPGA_UDP_FT60x_FT_ReadPipe(HANDLE ftHandle, UCHAR ucPipeID, PUCHAR pucBuffer, ULONG ulBufferLength, PULONG pulBytesTransferred, PVOID pOverlapped)
+ULONG WINAPI DeviceFPGA_UDP_FT60x_FT_ReadPipe(HANDLE ftHandle, UCHAR ucPipeID, PUCHAR pucBuffer, ULONG ulBufferLength, PULONG pulBytesTransferred, PVOID pOverlapped)
 {
     int status;
     DWORD cbTx, cSleep = 0, cbRead, cbReadTotal = 0, cPass = 0;
@@ -776,9 +776,9 @@ LPSTR DeviceFPGA_InitializeFTDI(_In_ PDEVICE_CONTEXT_FPGA ctx)
     LPSTR szErrorReason;
     CHAR c, szModuleFTDI[MAX_PATH + 1] = { 0 };
     DWORD status;
-    ULONG(*pfnFT_GetChipConfiguration)(HANDLE ftHandle, PVOID pvConfiguration);
-    ULONG(*pfnFT_SetChipConfiguration)(HANDLE ftHandle, PVOID pvConfiguration);
-    ULONG(*pfnFT_SetSuspendTimeout)(HANDLE ftHandle, ULONG Timeout);
+    ULONG(WINAPI *pfnFT_GetChipConfiguration)(HANDLE ftHandle, PVOID pvConfiguration);
+    ULONG(WINAPI *pfnFT_SetChipConfiguration)(HANDLE ftHandle, PVOID pvConfiguration);
+    ULONG(WINAPI *pfnFT_SetSuspendTimeout)(HANDLE ftHandle, ULONG Timeout);
     FT_60XCONFIGURATION oCfgNew, oCfgOld;
     if(DeviceFPGA_InitializeFTDI_LinuxMultiHandle_LockCheck(ctx->qwDeviceIndex)) {
         szErrorReason = "FPGA linux handle already open";
@@ -795,33 +795,33 @@ LPSTR DeviceFPGA_InitializeFTDI(_In_ PDEVICE_CONTEXT_FPGA ctx)
         szErrorReason = "Unable to load FTD3XX.dll";
         goto fail;
     }
-    ctx->dev.pfnFT_AbortPipe = (ULONG(*)(HANDLE, UCHAR))
+    ctx->dev.pfnFT_AbortPipe = (ULONG(WINAPI *)(HANDLE, UCHAR))
         GetProcAddress(ctx->dev.hModule, "FT_AbortPipe");
-    ctx->dev.pfnFT_Create = (ULONG(*)(PVOID, DWORD, HANDLE*))
+    ctx->dev.pfnFT_Create = (ULONG(WINAPI *)(PVOID, DWORD, HANDLE*))
         GetProcAddress(ctx->dev.hModule, "FT_Create");
-    ctx->dev.pfnFT_Close = (ULONG(*)(HANDLE))
+    ctx->dev.pfnFT_Close = (ULONG(WINAPI *)(HANDLE))
         GetProcAddress(ctx->dev.hModule, "FT_Close");
-    ctx->dev.pfnFT_ReadPipe = (ULONG(*)(HANDLE, UCHAR, PUCHAR, ULONG, PULONG, LPOVERLAPPED))
+    ctx->dev.pfnFT_ReadPipe = (ULONG(WINAPI *)(HANDLE, UCHAR, PUCHAR, ULONG, PULONG, LPOVERLAPPED))
         GetProcAddress(ctx->dev.hModule, "FT_ReadPipeEx");
     if(!ctx->dev.pfnFT_ReadPipe) {
-        ctx->dev.pfnFT_ReadPipe = (ULONG(*)(HANDLE, UCHAR, PUCHAR, ULONG, PULONG, LPOVERLAPPED))
+        ctx->dev.pfnFT_ReadPipe = (ULONG(WINAPI *)(HANDLE, UCHAR, PUCHAR, ULONG, PULONG, LPOVERLAPPED))
             GetProcAddress(ctx->dev.hModule, "FT_ReadPipe");
     }
-    ctx->dev.pfnFT_WritePipe = (ULONG(*)(HANDLE, UCHAR, PUCHAR, ULONG, PULONG, LPOVERLAPPED))
+    ctx->dev.pfnFT_WritePipe = (ULONG(WINAPI *)(HANDLE, UCHAR, PUCHAR, ULONG, PULONG, LPOVERLAPPED))
         GetProcAddress(ctx->dev.hModule, "FT_WritePipeEx");
     if(!ctx->dev.pfnFT_WritePipe) {
-        ctx->dev.pfnFT_WritePipe = (ULONG(*)(HANDLE, UCHAR, PUCHAR, ULONG, PULONG, LPOVERLAPPED))
+        ctx->dev.pfnFT_WritePipe = (ULONG(WINAPI *)(HANDLE, UCHAR, PUCHAR, ULONG, PULONG, LPOVERLAPPED))
             GetProcAddress(ctx->dev.hModule, "FT_WritePipe");
     }
-    ctx->dev.pfnFT_GetOverlappedResult = (ULONG(*)(HANDLE, LPOVERLAPPED, PULONG, BOOL))
+    ctx->dev.pfnFT_GetOverlappedResult = (ULONG(WINAPI *)(HANDLE, LPOVERLAPPED, PULONG, BOOL))
         GetProcAddress(ctx->dev.hModule, "FT_GetOverlappedResult");
-    ctx->dev.pfnFT_InitializeOverlapped = (ULONG(*)(HANDLE, LPOVERLAPPED))
+    ctx->dev.pfnFT_InitializeOverlapped = (ULONG(WINAPI *)(HANDLE, LPOVERLAPPED))
         GetProcAddress(ctx->dev.hModule, "FT_InitializeOverlapped");
-    ctx->dev.pfnFT_ReleaseOverlapped = (ULONG(*)(HANDLE, LPOVERLAPPED))
+    ctx->dev.pfnFT_ReleaseOverlapped = (ULONG(WINAPI *)(HANDLE, LPOVERLAPPED))
         GetProcAddress(ctx->dev.hModule, "FT_ReleaseOverlapped");
-    pfnFT_GetChipConfiguration = (ULONG(*)(HANDLE, PVOID))GetProcAddress(ctx->dev.hModule, "FT_GetChipConfiguration");
-    pfnFT_SetChipConfiguration = (ULONG(*)(HANDLE, PVOID))GetProcAddress(ctx->dev.hModule, "FT_SetChipConfiguration");
-    pfnFT_SetSuspendTimeout = (ULONG(*)(HANDLE, ULONG))GetProcAddress(ctx->dev.hModule, "FT_SetSuspendTimeout");
+    pfnFT_GetChipConfiguration = (ULONG(WINAPI *)(HANDLE, PVOID))GetProcAddress(ctx->dev.hModule, "FT_GetChipConfiguration");
+    pfnFT_SetChipConfiguration = (ULONG(WINAPI *)(HANDLE, PVOID))GetProcAddress(ctx->dev.hModule, "FT_SetChipConfiguration");
+    pfnFT_SetSuspendTimeout = (ULONG(WINAPI *)(HANDLE, ULONG))GetProcAddress(ctx->dev.hModule, "FT_SetSuspendTimeout");
     if(!ctx->dev.pfnFT_Create || !ctx->dev.pfnFT_ReadPipe || !ctx->dev.pfnFT_WritePipe) {
         szErrorReason = ctx->dev.pfnFT_ReadPipe ?
             "Unable to retrieve required functions from FTD3XX.dll" :

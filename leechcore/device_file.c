@@ -17,6 +17,7 @@
 #define DUMP_VALID_DUMP64           0x34365544
 #define DUMP_TYPE_FULL              1
 #define DUMP_TYPE_BITMAP_FULL       5
+#define DUMP_TYPE_ACTIVE_MEMORY     6
 #define IMAGE_FILE_MACHINE_I386     0x014c
 #define IMAGE_FILE_MACHINE_AMD64    0x8664
 #define _PHYSICAL_MEMORY_MAX_RUNS   0x20
@@ -304,7 +305,7 @@ fail:
 * -- ctxLC
 * -- return
 */
-BOOL DeviceFile_MsCrashCoreDumpInitialize_BitmapFull(_In_ PLC_CONTEXT ctxLC)
+BOOL DeviceFile_MsCrashCoreDumpInitialize_BitmapFullOrActiveMemory(_In_ PLC_CONTEXT ctxLC)
 {
     PDEVICE_CONTEXT_FILE ctx = (PDEVICE_CONTEXT_FILE)ctxLC->hDevice;
     _DUMP_HEADER_BITMAP_FULL64 hdr = { 0 };
@@ -314,13 +315,13 @@ BOOL DeviceFile_MsCrashCoreDumpInitialize_BitmapFull(_In_ PLC_CONTEXT ctxLC)
     // 1: fetch header:
     _fseeki64(ctx->pFile, 0x2000, SEEK_SET);
     fread(&hdr, 1, sizeof(_DUMP_HEADER_BITMAP_FULL64), ctx->pFile);
-    if(hdr.Signature != 0x504d5544504d4446) { goto fail; }       // 'FDMPDUMP'
+    if((hdr.Signature != 0x504d5544504d4446) && (hdr.Signature != 0x504d5544504d4453)) { goto fail; }   // !'FDMPDUMP' && !'SDMPDUMP' && 
     if((hdr.cPages > hdr.cBits) || (hdr.cBits > 0x7fffffff) || (hdr.cbFileBase & 0xfff) || (hdr.cbFileBase > 0x01000000)) { goto fail; }
     cbFileBase = hdr.cbFileBase;
     // 2: fetch bits:
     cb = hdr.cBits / 8;
-    if(!(pb = LocalAlloc(LMEM_ZEROINIT, cb))) { goto fail; }
-    if(cb != fread(pb, 1, cb, ctx->pFile)) { goto fail; }
+    if(!(pb = LocalAlloc(LMEM_ZEROINIT, (SIZE_T)cb))) { goto fail; }
+    if(cb != fread(pb, 1, (SIZE_T)cb, ctx->pFile)) { goto fail; }
     // 3: walk bitmap - add ranges!
     cMaxBits = hdr.cBits & 0xffffffc0;
     for(iPage = 0; iPage < cMaxBits; iPage += 64) {
@@ -412,7 +413,11 @@ BOOL DeviceFile_MsCrashCoreDumpInitialize(_In_ PLC_CONTEXT ctxLC)
         }
     }
     if((CDMP_DWORD(0x000) == DUMP_SIGNATURE) && (CDMP_DWORD(0x004) == DUMP_VALID_DUMP64) && (CDMP_DWORD(0xf98) == DUMP_TYPE_BITMAP_FULL) && (CDMP_DWORD(0x030) == IMAGE_FILE_MACHINE_AMD64)) {
-        return DeviceFile_MsCrashCoreDumpInitialize_BitmapFull(ctxLC);
+        return DeviceFile_MsCrashCoreDumpInitialize_BitmapFullOrActiveMemory(ctxLC);
+    }
+    if((CDMP_DWORD(0x000) == DUMP_SIGNATURE) && (CDMP_DWORD(0x004) == DUMP_VALID_DUMP64) && (CDMP_DWORD(0xf98) == DUMP_TYPE_ACTIVE_MEMORY) && (CDMP_DWORD(0x030) == IMAGE_FILE_MACHINE_AMD64)) {
+        lcprintfv(ctxLC, "DEVICE: WARN: active only memory dump - analysis will be degraded!\n");
+        return DeviceFile_MsCrashCoreDumpInitialize_BitmapFullOrActiveMemory(ctxLC);
     }
     if((CDMP_DWORD(0x000) == DUMP_SIGNATURE) && (CDMP_DWORD(0x004) == DUMP_VALID_DUMP) && (CDMP_DWORD(0xf88) == DUMP_TYPE_FULL) && (CDMP_DWORD(0x020) == IMAGE_FILE_MACHINE_I386)) {
         // PAGEDUMP (32-bit memory dump) and FULL DUMP
@@ -604,6 +609,7 @@ BOOL DeviceFile_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
     if(_fseeki64(ctx->pFile, 0, SEEK_END)) { goto fail; }   // seek to end of file
     ctx->cbFile = _ftelli64(ctx->pFile);                    // get current file pointer
     if(ctx->cbFile < 0x01000000) { goto fail; }             // minimum allowed dump file size = 16MB
+    if(ctx->cbFile > 0xffff000000000000) { goto fail; }     // file too large
     ctxLC->hDevice = (HANDLE)ctx;
     // set callback functions and fix up config
     ctxLC->pfnClose = DeviceFile_Close;

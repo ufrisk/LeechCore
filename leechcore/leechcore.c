@@ -123,6 +123,7 @@ EXPORTED_FUNCTION VOID LcClose(_In_opt_ _Post_ptr_invalid_ HANDLE hLC)
         ctxLC->version = 0;
         DeleteCriticalSection(&ctxLC->Lock);
         if(ctxLC->hDeviceModule) { FreeLibrary(ctxLC->hDeviceModule); }
+        LocalFree(ctxLC->pMemMap);
         LocalFree(ctxLC);
     }
     LeaveCriticalSection(&g_ctx.Lock);
@@ -398,6 +399,8 @@ EXPORTED_FUNCTION HANDLE LcCreateEx(_Inout_ PLC_CONFIG pLcCreateConfig, _Out_opt
     InitializeCriticalSection(&ctxLC->Lock);
     ctxLC->version = LC_CONTEXT_VERSION;
     ctxLC->dwHandleCount = 1;
+    ctxLC->cMemMapMax = 0x20;
+    ctxLC->pMemMap = LocalAlloc(LMEM_ZEROINIT, ctxLC->cMemMapMax * sizeof(LC_MEMMAP_ENTRY));
     ctxLC->fPrintf[0] = (ctxLC->Config.dwPrintfVerbosity & LC_CONFIG_PRINTF_ENABLED) ? TRUE : FALSE;
     ctxLC->fPrintf[1] = (ctxLC->Config.dwPrintfVerbosity & LC_CONFIG_PRINTF_V) ? TRUE : FALSE;
     ctxLC->fPrintf[2] = (ctxLC->Config.dwPrintfVerbosity & LC_CONFIG_PRINTF_VV) ? TRUE : FALSE;
@@ -862,7 +865,7 @@ VOID LcWriteScatter_GatherContigious2(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, 
 VOID LcWriteScatter_GatherContigious(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _Inout_ PPMEM_SCATTER ppMEMs)
 {
     DWORD c = 0, cbCurrent;
-    QWORD i, iBase, paBase;
+    QWORD i, iBase = 0, paBase;
     PMEM_SCATTER pMEM;
     for(i = 0; i < cMEMs; i++) {
         pMEM = ppMEMs[i];

@@ -29,12 +29,22 @@ EXPORTED_FUNCTION BOOL LcMemMap_IsInitialized(_In_ PLC_CONTEXT ctxLC)
 _Success_(return)
 EXPORTED_FUNCTION BOOL LcMemMap_AddRange(_In_ PLC_CONTEXT ctxLC, _In_ QWORD pa, _In_ QWORD cb, _In_opt_ QWORD paRemap)
 {
-    if(ctxLC->cMemMap == LC_MEMMAP_MAX_ENTRIES) { return FALSE; }
+    PVOID pvGrowMemMap;
     if((pa & 0xfff) || (cb & 0xfff)) { return FALSE; }
-    if(ctxLC->cMemMap && (ctxLC->MemMap[ctxLC->cMemMap - 1].pa + ctxLC->MemMap[ctxLC->cMemMap - 1].cb > pa)) { return FALSE; }
-    ctxLC->MemMap[ctxLC->cMemMap].pa = pa;
-    ctxLC->MemMap[ctxLC->cMemMap].cb = cb;
-    ctxLC->MemMap[ctxLC->cMemMap].paRemap = paRemap ? paRemap : pa;
+    if(ctxLC->cMemMap >= 0x00100000) { return FALSE; }
+    if(ctxLC->cMemMap == ctxLC->cMemMapMax) {
+        // grow memmap with with factor x2:
+        pvGrowMemMap = LocalAlloc(LMEM_ZEROINIT, ctxLC->cMemMapMax * sizeof(LC_MEMMAP_ENTRY) * 2);
+        if(!pvGrowMemMap) { return FALSE; }
+        memcpy(pvGrowMemMap, ctxLC->pMemMap, ctxLC->cMemMap * sizeof(LC_MEMMAP_ENTRY));
+        LocalFree(ctxLC->pMemMap);
+        ctxLC->pMemMap = (PLC_MEMMAP_ENTRY)pvGrowMemMap;
+        ctxLC->cMemMapMax = ctxLC->cMemMapMax * 2;
+    }
+    if(ctxLC->cMemMap && (ctxLC->pMemMap[ctxLC->cMemMap - 1].pa + ctxLC->pMemMap[ctxLC->cMemMap - 1].cb > pa)) { return FALSE; }
+    ctxLC->pMemMap[ctxLC->cMemMap].pa = pa;
+    ctxLC->pMemMap[ctxLC->cMemMap].cb = cb;
+    ctxLC->pMemMap[ctxLC->cMemMap].paRemap = paRemap ? paRemap : pa;
     ctxLC->cMemMap++;
     lcprintfvv_fn(ctxLC, "%016llx-%016llx -> %016llx\n", pa, pa + cb - 1, paRemap);
     return TRUE;
@@ -49,7 +59,7 @@ _Success_(return != 0)
 EXPORTED_FUNCTION QWORD LcMemMap_GetMaxAddress(_In_ PLC_CONTEXT ctxLC)
 {
     if(ctxLC->cMemMap == 0) { return 0x0000ffffffffffff; }
-    return ctxLC->MemMap[ctxLC->cMemMap - 1].pa + ctxLC->MemMap[ctxLC->cMemMap - 1].cb;
+    return ctxLC->pMemMap[ctxLC->cMemMap - 1].pa + ctxLC->pMemMap[ctxLC->cMemMap - 1].cb;
 }
 
 /*
@@ -61,11 +71,11 @@ EXPORTED_FUNCTION QWORD LcMemMap_GetMaxAddress(_In_ PLC_CONTEXT ctxLC)
 */
 VOID LcMemMap_TranslateMEMs(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _Inout_ PPMEM_SCATTER ppMEMs)
 {
-    DWORD iMEM, iMap;
+    DWORD iMEM, iMap, oMap;
     PMEM_SCATTER pMEM;
     PLC_MEMMAP_ENTRY peMap;
     if(ctxLC->cMemMap == 0) { return; }
-    peMap = ctxLC->MemMap + 0;
+    peMap = ctxLC->pMemMap + 0;
     for(iMEM = 0; iMEM < cMEMs; iMEM++) {
         pMEM = ppMEMs[iMEM];
         if(pMEM->qwA == (QWORD)-1) { continue; }
@@ -75,9 +85,23 @@ VOID LcMemMap_TranslateMEMs(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _Inout_ PP
             continue;
         }
         // check all memmap ranges.
-        for(iMap = 0; iMap < ctxLC->cMemMap; iMap++) {
-            peMap = ctxLC->MemMap + iMap;
+        iMap = 0;
+        if(ctxLC->cMemMap > 0x40) {             // fast find (large map optimization)
+            iMap = ctxLC->cMemMap >> 1;
+            oMap = iMap;
+            while((oMap = oMap >> 1)) {
+                iMap = (pMEM->qwA > ctxLC->pMemMap[iMap].pa) ? (iMap + oMap) : (iMap - oMap);
+            }
+            while(iMap && (pMEM->qwA < ctxLC->pMemMap[iMap].pa)) {
+                iMap--;
+            }
+        }
+        for(; iMap < ctxLC->cMemMap; iMap++) {  // find entry
+            peMap = ctxLC->pMemMap + iMap;
             if((pMEM->qwA >= peMap->pa) && (pMEM->qwA + pMEM->cb <= peMap->pa + peMap->cb)) {
+                break;
+            }
+            if(pMEM->qwA < peMap->pa) {
                 break;
             }
         }
@@ -100,9 +124,10 @@ BOOL LcMemMap_GetRangesAsStruct(_In_ PLC_CONTEXT ctxLC, _Out_ PBYTE *ppbDataOut,
 {
     PBYTE pb;
     DWORD cb;
+    if(ctxLC->cMemMap > 0x00100000) { return FALSE; }
     cb = ctxLC->cMemMap * sizeof(LC_MEMMAP_ENTRY);
     if(!(pb = LocalAlloc(LMEM_ZEROINIT, cb))) { return FALSE; }
-    memcpy(pb, ctxLC->MemMap, cb);
+    memcpy(pb, ctxLC->pMemMap, cb);
     *ppbDataOut = pb;
     if(pcbDataOut) { *pcbDataOut = cb; }
     return TRUE;
@@ -120,6 +145,7 @@ BOOL LcMemMap_GetRangesAsText(_In_ PLC_CONTEXT ctxLC, _Out_ PBYTE *ppbDataOut, _
 {
     PBYTE pb;
     DWORD i, o, cb;
+    if(ctxLC->cMemMap > 0x00100000) { return FALSE; }
     cb = ctxLC->cMemMap * (4 + 1 + 16 + 3 + 16 + 4 + 16 + 1);
     if(!(pb = LocalAlloc(LMEM_ZEROINIT, cb))) { return FALSE; }
     for(i = 0, o = 0; i < ctxLC->cMemMap; i++) {
@@ -128,9 +154,9 @@ BOOL LcMemMap_GetRangesAsText(_In_ PLC_CONTEXT ctxLC, _Out_ PBYTE *ppbDataOut, _
             cb - o,
             "%04x %16llx - %16llx -> %16llx\n",
             i,
-            ctxLC->MemMap[i].pa,
-            ctxLC->MemMap[i].pa + ctxLC->MemMap[i].cb - 1,
-            ctxLC->MemMap[i].paRemap
+            ctxLC->pMemMap[i].pa,
+            ctxLC->pMemMap[i].pa + ctxLC->pMemMap[i].cb - 1,
+            ctxLC->pMemMap[i].paRemap
         );
     }
     pb[cb - 1] = '\n';

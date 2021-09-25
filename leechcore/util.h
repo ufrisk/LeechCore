@@ -42,7 +42,7 @@ VOID Util_PrintHexAscii(_In_opt_ PLC_CONTEXT ctxLC, _In_ PBYTE pb, _In_ DWORD cb
 * -- pcsz = IF sz==NULL :: size of buffer (including space for terminating NULL) on exit
 *           IF sz!=NULL :: size of buffer on entry, size of characters (excluding terminating NULL) on exit.
 */
-BOOL Util_FillHexAscii(_In_ PBYTE pb, _In_ DWORD cb, _In_ DWORD cbInitialOffset, _Inout_opt_ LPSTR sz, _Out_ PDWORD pcsz);
+BOOL Util_FillHexAscii(_In_ PBYTE pb, _In_ DWORD cb, _In_ DWORD cbInitialOffset, _Inout_opt_ LPSTR sz, _Inout_ PDWORD pcsz);
 
 /*
 * Split a string into two at the first chDelimiter character. If no 2nd string

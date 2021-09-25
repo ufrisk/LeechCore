@@ -55,7 +55,7 @@ QWORD Util_GetNumericA(_In_ LPSTR sz)
     "................................................................" \
     "................................................................" \
 
-BOOL Util_FillHexAscii(_In_ PBYTE pb, _In_ DWORD cb, _In_ DWORD cbInitialOffset, _Inout_opt_ LPSTR sz, _Out_ PDWORD pcsz)
+BOOL Util_FillHexAscii(_In_ PBYTE pb, _In_ DWORD cb, _In_ DWORD cbInitialOffset, _Inout_opt_ LPSTR sz, _Inout_ PDWORD pcsz)
 {
     DWORD i, j, o = 0, iMod, cRows;
     // checks
@@ -114,7 +114,7 @@ BOOL Util_FillHexAscii(_In_ PBYTE pb, _In_ DWORD cb, _In_ DWORD cbInitialOffset,
 
 VOID Util_PrintHexAscii(_In_opt_ PLC_CONTEXT ctxLC, _In_ PBYTE pb, _In_ DWORD cb, _In_ DWORD cbInitialOffset)
 {
-    DWORD szMax;
+    DWORD szMax = 0;
     LPSTR sz;
     if(cb > 0x10000) {
         if(ctxLC) {

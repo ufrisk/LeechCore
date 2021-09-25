@@ -176,6 +176,7 @@ v1.0-1.8
 * Remote LeechAgent support for MemProcFS.
 * VMWare live memory VM introspection (Windows host only).
 
-Latest:
+[v2.8](https://github.com/ufrisk/LeechCore/releases/tag/v2.8)
 * Bug fixes.
-* Support for Full Bitmap Microsoft Crash Dump file.
+* 32-bit support.
+* Support for Active Memory and Full Bitmap Microsoft Crash Dump files.

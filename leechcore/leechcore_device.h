@@ -38,8 +38,7 @@ typedef struct tdCRITICAL_SECTION {
 #endif /* _LINUX_DEF_CRITICAL_SECTION */
 #endif /* LINUX */
 
-#define LC_CONTEXT_VERSION                  0xc0e10003
-#define LC_MEMMAP_MAX_ENTRIES               0x100
+#define LC_CONTEXT_VERSION                  0xc0e10004
 #define LC_DEVICE_PARAMETER_MAX_ENTRIES     0x10
 
 typedef struct tdLC_DEVICE_PARAMETER_ENTRY {
@@ -110,7 +109,8 @@ typedef struct tdLC_CONTEXT {
     } RC;
     // MemMap functionality:
     DWORD cMemMap;
-    LC_MEMMAP_ENTRY MemMap[LC_MEMMAP_MAX_ENTRIES];
+    DWORD cMemMapMax;
+    PLC_MEMMAP_ENTRY pMemMap;
     // Remote functionality:
     struct {
         BOOL fCompress;
