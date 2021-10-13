@@ -169,7 +169,6 @@ v1.0-1.8
 * Bug fixes.
 * Updates to support MemProcFS v4.
 * Separate releases for Windows and Linux.
-</details>
 
 [v2.7](https://github.com/ufrisk/LeechCore/releases/tag/v2.7)
 * Bug fixes.
@@ -180,3 +179,7 @@ v1.0-1.8
 * Bug fixes.
 * 32-bit support.
 * Support for Active Memory and Full Bitmap Microsoft Crash Dump files.
+</details>
+
+[v2.9](https://github.com/ufrisk/LeechCore/releases/tag/v2.9)
+* Support for the FT2232H USB2 chip.

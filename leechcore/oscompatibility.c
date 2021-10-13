@@ -209,6 +209,9 @@ HMODULE LoadLibraryA(LPSTR lpFileName)
     if(lpFileName && (0 == memcmp(lpFileName, "FTD3XX.dll", 10))) {
         lpFileName = "leechcore_ft601_driver_linux.so";
     }
+    if(lpFileName && (0 == memcmp(lpFileName, "FTD2XX.dll", 10))) {
+        lpFileName = "libftd2xx.so";
+    }
     if(!strstr(lpFileName, "/")) {
         Util_GetPathLib(szFileName);
     }

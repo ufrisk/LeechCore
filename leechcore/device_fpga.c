@@ -4,6 +4,7 @@
 //     - PCIeScreamer board flashed with PCILeech bitstream.
 //     - ScreamerM2 board flashed with PCILeech bitstream.
 //     - RawUDP protocol - access FPGA over raw UDP packet stream (NeTV2 ETH)
+//     - FT2232H/FT245 protocol - access FPGA via FT2232H USB2 instead of FT601 USB3.
 //
 // (c) Ulf Frisk, 2017-2021
 // Author: Ulf Frisk, pcileech@frizk.net
@@ -88,7 +89,8 @@ typedef union tdFPGA_HANDLESOCKET {
 #define DEVICE_ID_NETV2_UDP                     5
 #define DEVICE_ID_RAPTORDMA_R01                 6
 #define DEVICE_ID_RAPTORDMA_R02                 7
-#define DEVICE_ID_MAX                           7
+#define DEVICE_ID_FT2232H                       8
+#define DEVICE_ID_MAX                           8
 
 const DEVICE_PERFORMANCE PERFORMANCE_PROFILES[DEVICE_ID_MAX + 1] = {
     {
@@ -182,6 +184,17 @@ const DEVICE_PERFORMANCE PERFORMANCE_PROFILES[DEVICE_ID_MAX + 1] = {
         .DELAY_WRITE = 25,
         .DELAY_READ = 300,
         .RETRY_ON_ERROR = 1
+    }, {
+        .SZ_DEVICE_NAME = "FT2232H #1",
+        .PROBE_MAXPAGES = 0x400,
+        .RX_FLUSH_LIMIT = 0,
+        .MAX_SIZE_RX = 0x30000,
+        .MAX_SIZE_TX = 0x8000,
+        .DELAY_PROBE_READ = 1000,
+        .DELAY_PROBE_WRITE = 150,
+        .DELAY_WRITE = 0,
+        .DELAY_READ = 0,
+        .RETRY_ON_ERROR = 1
     }
 };
 
@@ -209,6 +222,7 @@ typedef struct tdDEVICE_CONTEXT_FPGA {
     struct {
         HMODULE hModule;
         BOOL fInitialized;
+        BOOL f2232h;
         union {
             HANDLE hFTDI;
             SOCKET SocketUDP;
@@ -744,7 +758,7 @@ LPSTR DeviceFPGA_InitializeUDP(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ DWORD dwIpv4A
 }
 
 //-------------------------------------------------------------------------------
-// FPGA implementation below:
+// FT601/FT245 connectivity implementation below:
 //-------------------------------------------------------------------------------
 
 // Helper functions to avoid multiple connections in parallel on
@@ -752,7 +766,7 @@ LPSTR DeviceFPGA_InitializeUDP(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ DWORD dwIpv4A
 // this is handled transparantly by the driver.
 static BOOL g_fDeviceFpgaMultiHandleLock[0x10] = { 0 };
 
-BOOL DeviceFPGA_InitializeFTDI_LinuxMultiHandle_LockCheck(_In_ QWORD qwDeviceIndex)
+BOOL DeviceFPGA_Initialize_LinuxMultiHandle_LockCheck(_In_ QWORD qwDeviceIndex)
 {
 #ifdef LINUX
     if(g_fDeviceFpgaMultiHandleLock[min(0x10 - 1, qwDeviceIndex)]) { return TRUE; }
@@ -760,18 +774,18 @@ BOOL DeviceFPGA_InitializeFTDI_LinuxMultiHandle_LockCheck(_In_ QWORD qwDeviceInd
     return FALSE;
 }
 
-VOID DeviceFPGA_InitializeFTDI_LinuxMultiHandle_LockAcquire(_In_ QWORD qwDeviceIndex)
+VOID DeviceFPGA_Initialize_LinuxMultiHandle_LockAcquire(_In_ QWORD qwDeviceIndex)
 {
     g_fDeviceFpgaMultiHandleLock[min(0x10 - 1, qwDeviceIndex)] = TRUE;
 }
 
-VOID DeviceFPGA_InitializeFTDI_LinuxMultiHandle_LockRelease(_In_ QWORD qwDeviceIndex)
+VOID DeviceFPGA_Initialize_LinuxMultiHandle_LockRelease(_In_ QWORD qwDeviceIndex)
 {
     g_fDeviceFpgaMultiHandleLock[min(0x10 - 1, qwDeviceIndex)] = FALSE;
 }
 
 
-LPSTR DeviceFPGA_InitializeFTDI(_In_ PDEVICE_CONTEXT_FPGA ctx)
+LPSTR DeviceFPGA_InitializeFT601(_In_ PDEVICE_CONTEXT_FPGA ctx)
 {
     LPSTR szErrorReason;
     CHAR c, szModuleFTDI[MAX_PATH + 1] = { 0 };
@@ -780,7 +794,7 @@ LPSTR DeviceFPGA_InitializeFTDI(_In_ PDEVICE_CONTEXT_FPGA ctx)
     ULONG(WINAPI *pfnFT_SetChipConfiguration)(HANDLE ftHandle, PVOID pvConfiguration);
     ULONG(WINAPI *pfnFT_SetSuspendTimeout)(HANDLE ftHandle, ULONG Timeout);
     FT_60XCONFIGURATION oCfgNew, oCfgOld;
-    if(DeviceFPGA_InitializeFTDI_LinuxMultiHandle_LockCheck(ctx->qwDeviceIndex)) {
+    if(DeviceFPGA_Initialize_LinuxMultiHandle_LockCheck(ctx->qwDeviceIndex)) {
         szErrorReason = "FPGA linux handle already open";
         goto fail;
     }
@@ -873,13 +887,13 @@ LPSTR DeviceFPGA_InitializeFTDI(_In_ PDEVICE_CONTEXT_FPGA ctx)
         ctx->dev.hModule = NULL;
         ctx->dev.hFTDI = NULL;
         Sleep(3000);
-        return DeviceFPGA_InitializeFTDI(ctx);
+        return DeviceFPGA_InitializeFT601(ctx);
     }
     ctx->async.fEnabled =
         ctx->dev.pfnFT_GetOverlappedResult && ctx->dev.pfnFT_InitializeOverlapped && ctx->dev.pfnFT_ReleaseOverlapped &&
         !ctx->dev.pfnFT_InitializeOverlapped(ctx->dev.hFTDI, &ctx->async.oOverlapped);
     ctx->dev.fInitialized = TRUE;
-    DeviceFPGA_InitializeFTDI_LinuxMultiHandle_LockAcquire(ctx->qwDeviceIndex);
+    DeviceFPGA_Initialize_LinuxMultiHandle_LockAcquire(ctx->qwDeviceIndex);
     return NULL;
 fail:
     if(ctx->dev.hFTDI && ctx->dev.pfnFT_Close) { ctx->dev.pfnFT_Close(ctx->dev.hFTDI); }
@@ -889,13 +903,210 @@ fail:
     return szErrorReason;
 }
 
+//-------------------------------------------------------------------------------
+// FT2232H/FT245 connectivity implementation below:
+//-------------------------------------------------------------------------------
+
+typedef struct tdFT2232H_HANDLE {
+    HANDLE ftHandle;
+    ULONG(WINAPI *pfnFT_Close)(HANDLE ftHandle);
+    ULONG(WINAPI *pfnFT_GetStatus)(HANDLE ftHandle, DWORD *dwRxBytes, DWORD *dwTxBytes, DWORD *dwEventDWord);
+    ULONG(WINAPI *pfnFT_Read)(HANDLE ftHandle, PVOID lpBuffer, DWORD dwBytesToRead, LPDWORD lpBytesReturned);
+    ULONG(WINAPI *pfnFT_Write)(HANDLE ftHandle, PVOID lpBuffer, DWORD dwBytesToWrite, LPDWORD lpBytesWritten);
+} FT2232H_HANDLE, *PFT2232H_HANDLE;
+
+/*
+* Emulate FT601 Close for FT2232H.
+*/
+ULONG WINAPI DeviceFPGA_FT2232_FT60x_FT_Close(HANDLE ftHandleEx)
+{
+    PFT2232H_HANDLE hFT2232H = (PFT2232H_HANDLE)ftHandleEx;
+    ULONG status = hFT2232H->pfnFT_Close(hFT2232H->ftHandle);
+    LocalFree(ftHandleEx);
+    return status;
+}
+
+/*
+* Dummy function to keep compatibility with FT601 calls.
+*/
+ULONG WINAPI DeviceFPGA_FT2232_FT60x_FT_AbortPipe(HANDLE ftHandleEx, UCHAR ucPipeID)
+{
+    return 0;
+}
+
+/*
+* Emulate FT601 ReadPipe for FT2232H.
+*/
+ULONG WINAPI DeviceFPGA_FT2232_FT60x_FT_ReadPipe(HANDLE ftHandleEx, UCHAR ucPipeID, PUCHAR pucBuffer, ULONG ulBufferLength, PULONG pulBytesTransferred, PVOID pOverlapped)
+{
+    PFT2232H_HANDLE hFT2232H = (PFT2232H_HANDLE)ftHandleEx;
+    ULONG iRetry, status = 0, cbRead = 0, cbReadTotal = 0, cbRx, cbTx, dwEventStatus;
+    *pulBytesTransferred = 0;
+    if(ulBufferLength == 0x00103000) {
+        // "fake" ASYNC MODE always calls with a 0x103 page buffer in FT2232H mode.
+        status = hFT2232H->pfnFT_GetStatus(hFT2232H->ftHandle, &cbRx, &cbTx, &dwEventStatus);
+        if(status) { return status; }
+        if(cbRx) {
+            return hFT2232H->pfnFT_Read(hFT2232H->ftHandle, pucBuffer, min(cbRx, ulBufferLength), pulBytesTransferred);
+        }
+        usleep(125);
+        return 0;
+    }
+    // "NORMAL" MODE:
+    while(TRUE) {
+        cbRx = 0;
+        iRetry = 0;
+        while(!cbRx) {
+            status = hFT2232H->pfnFT_GetStatus(hFT2232H->ftHandle, &cbRx, &cbTx, &dwEventStatus);
+            if(cbRx) { break; }
+            if(status || iRetry > 15) { break; }
+            iRetry++;
+            usleep(120);
+        }
+        status = hFT2232H->pfnFT_Read(hFT2232H->ftHandle, pucBuffer + cbReadTotal, min(cbRx, ulBufferLength - cbReadTotal), &cbRead);
+        if(status || !cbRead) { break; }
+        cbReadTotal += cbRead;
+        if(cbReadTotal >= ulBufferLength) { break; }
+    }
+    *pulBytesTransferred = cbReadTotal;
+    return status;
+}
+
+/*
+* Emulate FT601 WritePipe for FT2232H.
+*/
+ULONG WINAPI DeviceFPGA_FT2232_FT60x_FT_WritePipe(HANDLE ftHandleEx, UCHAR ucPipeID, PUCHAR pucBuffer, ULONG ulBufferLength, PULONG pulBytesTransferred, PVOID pOverlapped)
+{
+    PFT2232H_HANDLE hFT2232H = (PFT2232H_HANDLE)ftHandleEx;
+    return hFT2232H->pfnFT_Write(hFT2232H->ftHandle, pucBuffer, ulBufferLength, pulBytesTransferred);
+}
+
+/*
+* Initialize FT2232H with FT245 synchrouous FIFO.
+*/
+LPSTR DeviceFPGA_InitializeFT2232(_In_ PDEVICE_CONTEXT_FPGA ctx)
+{
+    DWORD status;
+    LPSTR szErrorReason;
+    CHAR szModuleFTDI[MAX_PATH + 1] = { 0 };
+    UCHAR ucMask = 0xff, ucMode0 = 0, ucMode1 = 0x40;
+    PFT2232H_HANDLE hFT2232H = NULL;
+    ULONG(WINAPI *pfnFT_Open)(int deviceNumber, HANDLE *pHandle);
+    ULONG(WINAPI *pfnFT_ResetDevice)(HANDLE ftHandle);
+    ULONG(WINAPI *pfnFT_SetBitMode)(HANDLE ftHandle, UCHAR ucMask, UCHAR ucEnable);
+    ULONG(WINAPI *pfnFT_SetLatencyTimer)(HANDLE ftHandle, UCHAR ucLatency);
+    ULONG(WINAPI *pfnFT_SetUSBParameters)(HANDLE ftHandle, ULONG ulInTransferSize, ULONG ulOutTransferSize);
+    ULONG(WINAPI *pfnFT_SetFlowControl)(HANDLE ftHandle, USHORT FlowControl, UCHAR XonChar, UCHAR XoffChar);
+    if(DeviceFPGA_Initialize_LinuxMultiHandle_LockCheck(ctx->qwDeviceIndex)) {
+        szErrorReason = "FPGA linux handle already open";
+        goto fail;
+    }
+    // Load FTDI Library
+    ctx->dev.hModule = LoadLibraryA("FTD2XX.dll");
+    if(!ctx->dev.hModule) {
+        Util_GetPathLib(szModuleFTDI);
+        strcat_s(szModuleFTDI, sizeof(szModuleFTDI) - 1, "FTD2XX.dll / libftd2xx.so");
+        ctx->dev.hModule = LoadLibraryA(szModuleFTDI);
+    }
+    if(!ctx->dev.hModule) {
+        szErrorReason = "Unable to load FTD2XX.dll / libftd2xx.so";
+        goto fail;
+    }
+    // Assign FT601 compatibility functions to device object:
+    ctx->dev.pfnFT_AbortPipe = DeviceFPGA_FT2232_FT60x_FT_AbortPipe;
+    ctx->dev.pfnFT_Close = DeviceFPGA_FT2232_FT60x_FT_Close;
+    ctx->dev.pfnFT_ReadPipe = DeviceFPGA_FT2232_FT60x_FT_ReadPipe;
+    ctx->dev.pfnFT_WritePipe = DeviceFPGA_FT2232_FT60x_FT_WritePipe;
+    // Allocate and assign "extended" ftHandle to device object [free by pfnFT_Close()].
+    // Also assign required function pointers.
+    if(!(hFT2232H = LocalAlloc(LMEM_ZEROINIT, sizeof(FT2232H_HANDLE)))) {
+        szErrorReason = "OOM";
+        goto fail;
+    }
+    ctx->dev.hFTDI = (HANDLE)hFT2232H;
+    hFT2232H->pfnFT_GetStatus = (ULONG(WINAPI *)(HANDLE, DWORD*, DWORD*, DWORD*))
+        GetProcAddress(ctx->dev.hModule, "FT_GetStatus");
+    hFT2232H->pfnFT_Read = (ULONG(WINAPI *)(HANDLE, PVOID, DWORD, LPDWORD))
+        GetProcAddress(ctx->dev.hModule, "FT_Read");
+    hFT2232H->pfnFT_Write = (ULONG(WINAPI *)(HANDLE, PVOID, DWORD, LPDWORD))
+        GetProcAddress(ctx->dev.hModule, "FT_Write");
+    hFT2232H->pfnFT_Close = (ULONG(WINAPI *)(HANDLE))
+        GetProcAddress(ctx->dev.hModule, "FT_Close");
+    if(!hFT2232H->pfnFT_GetStatus || !hFT2232H->pfnFT_Read || !hFT2232H->pfnFT_Write || !hFT2232H->pfnFT_Close) {
+        szErrorReason = "Unable to retrieve required functions from FTD2XX.dll";
+        goto fail;
+    }
+    // Retrieve required function-local function pointers from FTDI library:
+    pfnFT_Open = (ULONG(WINAPI *)(int, HANDLE*))
+        GetProcAddress(ctx->dev.hModule, "FT_Open");
+    pfnFT_ResetDevice = (ULONG(WINAPI *)(HANDLE))
+        GetProcAddress(ctx->dev.hModule, "FT_ResetDevice");
+    pfnFT_SetBitMode = (ULONG(WINAPI *)(HANDLE, UCHAR, UCHAR))
+        GetProcAddress(ctx->dev.hModule, "FT_SetBitMode");
+    pfnFT_SetLatencyTimer = (ULONG(WINAPI *)(HANDLE, UCHAR))
+        GetProcAddress(ctx->dev.hModule, "FT_SetLatencyTimer");
+    pfnFT_SetUSBParameters = (ULONG(WINAPI *)(HANDLE, ULONG, ULONG))
+        GetProcAddress(ctx->dev.hModule, "FT_SetUSBParameters");
+    pfnFT_SetFlowControl = (ULONG(WINAPI *)(HANDLE, USHORT, UCHAR, UCHAR))
+        GetProcAddress(ctx->dev.hModule, "FT_SetFlowControl");
+    if(!pfnFT_Open || !pfnFT_ResetDevice || !pfnFT_SetBitMode || !pfnFT_SetLatencyTimer || !pfnFT_SetUSBParameters || !pfnFT_SetFlowControl) {
+        szErrorReason = "Unable to retrieve required functions from FTD2XX.dll";
+        goto fail;
+    }
+    // Open FTDI
+    status = pfnFT_Open((int)ctx->qwDeviceIndex, &hFT2232H->ftHandle);
+    if(status || !hFT2232H->ftHandle) {
+        szErrorReason = "Unable to connect to USB/FT2232H device";
+        goto fail;
+    }
+    // Reset, set FT245 mode and performance options:
+    if(pfnFT_ResetDevice(hFT2232H->ftHandle)) {
+        szErrorReason = "FT_ResetDevice failed.";
+        goto fail;
+    }
+    pfnFT_SetBitMode(hFT2232H->ftHandle, ucMask, ucMode0);
+    if(pfnFT_SetBitMode(hFT2232H->ftHandle, ucMask, ucMode1)) {
+        szErrorReason = "FT_SetBitMode failed.";
+        goto fail;
+    }
+    if(pfnFT_SetLatencyTimer(hFT2232H->ftHandle, 2)) {
+        szErrorReason = "FT_SetLatencyTimer failed.";
+        goto fail;
+    }
+    if(pfnFT_SetUSBParameters(hFT2232H->ftHandle, 0x10000, 0x10000)) {
+        szErrorReason = "FT_SetUSBParameters failed.";
+        goto fail;
+    }
+    if(pfnFT_SetFlowControl(hFT2232H->ftHandle, 0x0100 /* FT_FLOW_RTS_CTS */, 0x0, 0x0)) {
+        szErrorReason = "FT_SetFlowControl failed.";
+        goto fail;
+    }
+    ctx->dev.f2232h = TRUE;
+    ctx->async.fEnabled = TRUE;
+    ctx->dev.fInitialized = TRUE;
+    DeviceFPGA_Initialize_LinuxMultiHandle_LockAcquire(ctx->qwDeviceIndex);
+    return NULL;
+fail:
+    if(ctx->dev.hFTDI && ctx->dev.pfnFT_Close) { ctx->dev.pfnFT_Close(ctx->dev.hFTDI); }
+    if(ctx->dev.hModule) { FreeLibrary(ctx->dev.hModule); }
+    ctx->dev.hModule = NULL;
+    ctx->dev.hFTDI = NULL;
+    return szErrorReason;
+}
+
+//-------------------------------------------------------------------------------
+// FPGA implementation below:
+//-------------------------------------------------------------------------------
+
 VOID DeviceFPGA_ReInitializeFTDI(_In_ PDEVICE_CONTEXT_FPGA ctx)
 {
-    // called to try to recover link in case of instable devices.
-    ctx->dev.pfnFT_Close(ctx->dev.hFTDI);
-    ctx->dev.hFTDI = NULL;
-    Sleep(250);
-    ctx->dev.pfnFT_Create((PVOID)ctx->qwDeviceIndex, 0x10 /*FT_OPEN_BY_INDEX*/, &ctx->dev.hFTDI);
+    // called to try to recover link in case of unstable devices.
+    if(ctx->dev.pfnFT_Create) {
+        ctx->dev.pfnFT_Close(ctx->dev.hFTDI);
+        ctx->dev.hFTDI = NULL;
+        Sleep(250);
+        ctx->dev.pfnFT_Create((PVOID)ctx->qwDeviceIndex, 0x10 /*FT_OPEN_BY_INDEX*/, &ctx->dev.hFTDI);
+    }
 }
 
 VOID DeviceFPGA_Close(_Inout_ PLC_CONTEXT ctxLC)
@@ -903,7 +1114,7 @@ VOID DeviceFPGA_Close(_Inout_ PLC_CONTEXT ctxLC)
     PDEVICE_CONTEXT_FPGA ctx = (PDEVICE_CONTEXT_FPGA)ctxLC->hDevice;
     DWORD cbTMP;
     if(!ctx) { return; }
-    if(ctx->async.fEnabled) {
+    if(ctx->async.fEnabled && ctx->dev.pfnFT_GetOverlappedResult) {
         ctx->dev.pfnFT_GetOverlappedResult(ctx->dev.hFTDI, &ctx->async.oOverlapped, &cbTMP, TRUE);
     }
     if(ctx->dev.pfnFT_ReleaseOverlapped && ctx->async.fEnabled) {
@@ -914,7 +1125,7 @@ VOID DeviceFPGA_Close(_Inout_ PLC_CONTEXT ctxLC)
 #endif /* WIN32 */
         if(ctx->dev.hFTDI) {
             ctx->dev.pfnFT_Close(ctx->dev.hFTDI);
-            DeviceFPGA_InitializeFTDI_LinuxMultiHandle_LockRelease(ctx->qwDeviceIndex);
+            DeviceFPGA_Initialize_LinuxMultiHandle_LockRelease(ctx->qwDeviceIndex);
         }
         if(ctx->dev.hModule) { FreeLibrary(ctx->dev.hModule); }
 #ifdef WIN32
@@ -1760,11 +1971,15 @@ VOID DeviceFPGA_RxTlpAsynchronous(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_F
     if(prxbuf) {
         cbReadMax = min(0x10000, max(0x1000, (cbBytesToRead - prxbuf->cbReadTotal) << 1));
     }
+    if(ctx->dev.f2232h) {
+        cbReadMax = 0x00103000; // "fake" async buffer magic value in FT2232H mode
+        fAsync = FALSE;
+    }
     usleep(25);
     status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, pbBuffer, cbReadMax, &cbRead, NULL);
     if(status && (status != FT_IO_PENDING)) { return; }
     while(TRUE) {
-        cEmptyRead = (cbRead == 0x14) ? cEmptyRead + 1 : 0;
+        cEmptyRead = ((cbRead == 0) || (cbRead == 0x14)) ? cEmptyRead + 1 : 0;
         if(cEmptyRead >= 0x30) { break; }
         cbBuffer += cbRead;
         // 1: submit async read (if target read is large enough to gain from it)
@@ -1804,7 +2019,8 @@ VOID DeviceFPGA_RxTlpSynchronous(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FP
     PDWORD pdwTlp = (PDWORD)pbTlp;
     DWORD dwStatus, *pdwData;
     // larger read buffer slows down FT_ReadPipe so set it fairly tight if possible.
-    cbReadRxBuf = min(ctx->rxbuf.cbMax, dwBytesToRead ? max(0x4000, (0x1000 + dwBytesToRead + (dwBytesToRead >> 1))) : (DWORD)-1);
+    cbReadRxBuf = ctx->dev.f2232h ? ctx->rxbuf.cbMax :
+        min(ctx->rxbuf.cbMax, dwBytesToRead ? max(0x4000, (0x1000 + dwBytesToRead + (dwBytesToRead >> 1))) : (DWORD)-1);
     status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, ctx->rxbuf.pb, cbReadRxBuf, &ctx->rxbuf.cb, NULL);
     if(status == 0x20 && ctx->perf.RETRY_ON_ERROR) {
         DeviceFPGA_ReInitializeFTDI(ctx); // try recovery if possible.
@@ -2414,6 +2630,7 @@ BOOL DeviceFPGA_SetOption(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _In_ QWORD
 }
 
 #define FPGA_PARAMETER_UDP_ADDRESS     "ip"
+#define FPGA_PARAMETER_FT2232H         "ft2232h"
 #define FPGA_PARAMETER_PCIE            "pciegen"
 #define FPGA_PARAMETER_PCIE_NOCONNECT  "pcienotconnected"
 #define FPGA_PARAMETER_RESTART_DEVICE  "devreload"
@@ -2436,19 +2653,22 @@ BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
     QWORD v;
     LPSTR szDeviceError;
     PDEVICE_CONTEXT_FPGA ctx;
-    PLC_DEVICE_PARAMETER_ENTRY pIpParam;
+    PLC_DEVICE_PARAMETER_ENTRY pParam;
     if(ppLcCreateErrorInfo) { *ppLcCreateErrorInfo = NULL; }
     ctx = LocalAlloc(LMEM_ZEROINIT, sizeof(DEVICE_CONTEXT_FPGA));
     if(!ctx) { return FALSE; }
     ctxLC->hDevice = (HANDLE)ctx;
-    if((pIpParam = LcDeviceParameterGet(ctxLC, FPGA_PARAMETER_UDP_ADDRESS)) && pIpParam->szValue) {
-        dwIpAddr = inet_addr(pIpParam->szValue);
+    if((pParam = LcDeviceParameterGet(ctxLC, FPGA_PARAMETER_UDP_ADDRESS)) && pParam->szValue) {
+        dwIpAddr = inet_addr(pParam->szValue);
         szDeviceError = ((dwIpAddr == 0) || (dwIpAddr == (DWORD)-1)) ?
             "Bad IPv4 address" :
             DeviceFPGA_InitializeUDP(ctx, dwIpAddr);
+    } else if((pParam = LcDeviceParameterGet(ctxLC, FPGA_PARAMETER_FT2232H)) && pParam->szValue) {
+        ctx->qwDeviceIndex = LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_DEVICE_INDEX);
+        szDeviceError = DeviceFPGA_InitializeFT2232(ctx);
     } else {
         ctx->qwDeviceIndex = LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_DEVICE_INDEX);
-        szDeviceError = DeviceFPGA_InitializeFTDI(ctx);
+        szDeviceError = DeviceFPGA_InitializeFT601(ctx);
     }
     if(szDeviceError) { goto fail; }
     ctx->fRestartDevice = (1 == LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_RESTART_DEVICE));
@@ -2464,7 +2684,7 @@ BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
         goto fail;
     }
     DeviceFPGA_SetPerformanceProfile(ctx);
-    ctx->rxbuf.cbMax = (DWORD)(1.30 * ctx->perf.MAX_SIZE_RX + 0x2000);  // buffer size tuned to lowest possible (+margin) for performance.
+    ctx->rxbuf.cbMax = ctx->dev.f2232h ? 0x01000000 : (DWORD)(1.30 * ctx->perf.MAX_SIZE_RX + 0x2000);  // buffer size tuned to lowest possible (+margin) for performance (FT601).
     ctx->rxbuf.pb = LocalAlloc(0, 0x01000000);
     if(!ctx->rxbuf.pb) { goto fail; }
     ctx->txbuf.cbMax = ctx->perf.MAX_SIZE_TX + 0x10000;
