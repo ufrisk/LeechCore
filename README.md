@@ -31,6 +31,7 @@ Please find a summary of the supported software based memory acquisition methods
 | [WinPMEM](https://github.com/ufrisk/LeechCore/wiki/Device_WinPMEM)                       | Live&nbsp;Memory | Yes | No  | No  | No  |
 | [LiveKd](https://github.com/ufrisk/LeechCore/wiki/Device_LiveKd)                         | Live&nbsp;Memory | Yes | No  | No  | No  |
 | [LiveCloudKd](https://github.com/ufrisk/LeechCore/wiki/Device_LiveCloudKd)               | Live&nbsp;Memory | Yes | Yes | No  | Yes |
+| [libmicrovmi](https://github.com/ufrisk/LeechCore-plugins#leechcore_device_microvmi)     | Live&nbsp;Memory | Yes | Yes | Yes | Yes |
 | [Hyper-V Saved State](https://github.com/ufrisk/LeechCore/wiki/Device_HyperV_SavedState) | File             | No  | No  | No  | Yes |
 | [LeechAgent*](https://github.com/ufrisk/LeechCore/wiki/Device_Remote)                    | Remote           |     |     | No  | No  |
 
@@ -183,3 +184,9 @@ v1.0-1.8
 
 [v2.9](https://github.com/ufrisk/LeechCore/releases/tag/v2.9)
 * Support for the FT2232H USB2 chip.
+
+Latest:
+* [Plugin support](https://github.com/ufrisk/LeechCore-plugins/blob/master/README.md#leechcore_device_microvmi) for [libmicrovmi](https://github.com/Wenzel/libmicrovmi):
+  - Support for Xen, KVM, VirtualBox, QEMU on Linux.
+  - Pre-bundled on Linux x64 (libmicrovmi)
+  - Thank you [Wenzel](https://github.com/Wenzel/) for this contribution.

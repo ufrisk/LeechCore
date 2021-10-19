@@ -166,6 +166,25 @@ BOOL LcMemMap_GetRangesAsText(_In_ PLC_CONTEXT ctxLC, _Out_ PBYTE *ppbDataOut, _
 }
 
 /*
+* Set ranges by memmap struct data.
+* NB! all previous ranges will be overwritten.
+* -- ctxLC
+* -- pStruct
+* -- cStruct
+* -- return
+*/
+_Success_(return)
+BOOL LcMemMap_SetRangesFromStruct(_In_ PLC_CONTEXT ctxLC, _In_ PLC_MEMMAP_ENTRY pMemMap, _In_ DWORD cMemMap)
+{
+    DWORD i;
+    ctxLC->cMemMap = 0;
+    for(i = 0; i < cMemMap; i++) {
+        LcMemMap_AddRange(ctxLC, pMemMap[i].pa, pMemMap[i].cb, pMemMap[i].paRemap);
+    }
+    return TRUE;
+}
+
+/*
 * Set ranges by parsing ascii text in the buffer pb. The ranges should be
 * specified on a line-by-line basis with hexascii numericals on the format:
 * <range_base_address> <range_top_address> <optional_range_remap_address>

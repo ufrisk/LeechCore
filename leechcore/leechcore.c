@@ -1123,6 +1123,9 @@ BOOL LcCommand_DoWork(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _In_ DWORD cbD
         case LC_CMD_MEMMAP_GET_STRUCT:
             if(!ppbDataOut) { return FALSE; }
             return LcMemMap_GetRangesAsStruct(ctxLC, ppbDataOut, pcbDataOut);
+        case LC_CMD_MEMMAP_SET_STRUCT:
+            if(!cbDataIn || !pbDataIn) { return FALSE; }
+            return LcMemMap_SetRangesFromStruct(ctxLC, (PLC_MEMMAP_ENTRY)pbDataIn, cbDataIn / sizeof(LC_MEMMAP_ENTRY));
         case LC_CMD_MEMMAP_GET:
             if(!ppbDataOut) { return FALSE; }
             return LcMemMap_GetRangesAsText(ctxLC, ppbDataOut, pcbDataOut);
