@@ -81,16 +81,18 @@ typedef union tdFPGA_HANDLESOCKET {
     SOCKET Socket;
 } FPGA_HANDLESOCKET;
 
-#define DEVICE_ID_SP605_FT601                   0
-#define DEVICE_ID_PCIESCREAMER                  1
-#define DEVICE_ID_AC701_FT601                   2
-#define DEVICE_ID_PCIESCREAMER_R2               3
-#define DEVICE_ID_PCIESCREAMER_M2               4
-#define DEVICE_ID_NETV2_UDP                     5
-#define DEVICE_ID_RAPTORDMA_R01                 6
-#define DEVICE_ID_RAPTORDMA_R02                 7
-#define DEVICE_ID_FT2232H                       8
-#define DEVICE_ID_MAX                           8
+#define DEVICE_ID_SP605_FT601                   0x00
+#define DEVICE_ID_PCIESCREAMER                  0x01
+#define DEVICE_ID_AC701_FT601                   0x02
+#define DEVICE_ID_PCIESCREAMER_R2               0x03
+#define DEVICE_ID_PCIESCREAMER_M2               0x04
+#define DEVICE_ID_NETV2_UDP                     0x05
+#define DEVICE_ID_RAPTORDMA_R01                 0x06
+#define DEVICE_ID_RAPTORDMA_R02                 0x07
+#define DEVICE_ID_FT2232H                       0x08
+#define DEVICE_ID_ENIGMA_X1                     0x09
+#define DEVICE_ID_ENIGMA_X2                     0x0A
+#define DEVICE_ID_MAX                           0x0A
 
 const DEVICE_PERFORMANCE PERFORMANCE_PROFILES[DEVICE_ID_MAX + 1] = {
     {
@@ -194,6 +196,28 @@ const DEVICE_PERFORMANCE PERFORMANCE_PROFILES[DEVICE_ID_MAX + 1] = {
         .DELAY_PROBE_WRITE = 150,
         .DELAY_WRITE = 0,
         .DELAY_READ = 0,
+        .RETRY_ON_ERROR = 1
+    }, {
+        .SZ_DEVICE_NAME = "Enigma X1",
+        .PROBE_MAXPAGES = 0x400,
+        .RX_FLUSH_LIMIT = 0,
+        .MAX_SIZE_RX = 0x3c000,
+        .MAX_SIZE_TX = 0x13f0,
+        .DELAY_PROBE_READ = 500,
+        .DELAY_PROBE_WRITE = 150,
+        .DELAY_WRITE = 10,
+        .DELAY_READ = 250,
+        .RETRY_ON_ERROR = 1
+    }, {
+        .SZ_DEVICE_NAME = "Enigma X1 (ReservedFutureUse)",
+        .PROBE_MAXPAGES = 0x400,
+        .RX_FLUSH_LIMIT = 0,
+        .MAX_SIZE_RX = 0x30000,
+        .MAX_SIZE_TX = 0x13f0,
+        .DELAY_PROBE_READ = 500,
+        .DELAY_PROBE_WRITE = 150,
+        .DELAY_WRITE = 10,
+        .DELAY_READ = 250,
         .RETRY_ON_ERROR = 1
     }
 };
