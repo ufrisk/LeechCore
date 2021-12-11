@@ -107,7 +107,7 @@
       <SubSystem>Console</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <AdditionalDependencies>leechcore.lib;Rpcrt4.lib;Secur32.lib;Netapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>leechcore.lib;Rpcrt4.lib;Secur32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
       <ProgramDatabaseFile>$(OutDir)\lib\$(TargetName).pdb</ProgramDatabaseFile>
     </Link>
@@ -140,7 +140,7 @@ copy "$(SolutionDir)files\leechcorepyc.pyd" "$(OutDir)" /y</Command>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
-      <AdditionalDependencies>leechcore.lib;Rpcrt4.lib;Secur32.lib;Netapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>leechcore.lib;Rpcrt4.lib;Secur32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ProgramDatabaseFile>$(OutDir)\lib\$(TargetName).pdb</ProgramDatabaseFile>
     </Link>
     <PreBuildEvent>
@@ -171,7 +171,7 @@ copy "$(SolutionDir)leechcore\leechrpcshared.c" "$(ProjectDir)" /y
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
-      <AdditionalDependencies>leechcore.lib;Rpcrt4.lib;Secur32.lib;Netapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>leechcore.lib;Rpcrt4.lib;Secur32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ProgramDatabaseFile>$(OutDir)\lib\$(TargetName).pdb</ProgramDatabaseFile>
     </Link>
     <PreBuildEvent>
@@ -207,7 +207,7 @@ copy "$(SolutionDir)files\leechcorepyc.pyd" "$(OutDir)" /y</Command>
       <SubSystem>Console</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <AdditionalDependencies>leechcore.lib;Rpcrt4.lib;Secur32.lib;Netapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>leechcore.lib;Rpcrt4.lib;Secur32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
       <ProgramDatabaseFile>$(OutDir)\lib\$(TargetName).pdb</ProgramDatabaseFile>
     </Link>

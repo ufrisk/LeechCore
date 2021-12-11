@@ -23,7 +23,7 @@ DWORD g_cDevicePMEM = 0;
 #define PMEM_MODE_PTE       2
 #define PMEM_MODE_AUTO      99
 
-#define NUMBER_OF_RUNS      (20)
+#define NUMBER_OF_RUNS      (100)
 
 #define PMEM_CTRL_IOCTRL CTL_CODE(0x22, 0x101, 3, 3)
 #define PMEM_WRITE_ENABLE CTL_CODE(0x22, 0x102, 3, 3)
@@ -342,7 +342,7 @@ BOOL DevicePMEM_GetOption(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _Out_ PQWO
 }
 
 _Success_(return)
-BOOL DevicePMEM_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo)
+BOOL DevicePMEM_Open2(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo)
 {
     BOOL result;
     PDEVICE_CONTEXT_PMEM ctx;
@@ -367,6 +367,17 @@ BOOL DevicePMEM_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
     }
     lcprintfv(ctxLC, "DEVICE: Successfully loaded winpmem memory acquisition driver.\n");
     return TRUE;
+}
+
+_Success_(return)
+BOOL DevicePMEM_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo)
+{
+    // Sometimes communication with PMEM driver will fail even though the driver
+    // is loaded. It's unknown why this is happening. But it always helps trying
+    // again so wrap the open function to perform a retry if there is a fail.
+    if(DevicePMEM_Open2(ctxLC, ppLcCreateErrorInfo)) { return TRUE; }
+    Sleep(100);
+    return DevicePMEM_Open2(ctxLC, ppLcCreateErrorInfo);
 }
 
 #endif /* _WIN32 */

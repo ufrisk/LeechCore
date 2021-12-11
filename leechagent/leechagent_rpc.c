@@ -8,7 +8,6 @@
 #include "leechrpc_h.h"
 #include "leechrpc.h"
 #include <stdio.h>
-#include <lm.h>
 #define SECURITY_WIN32
 #include <security.h>
 
@@ -46,55 +45,39 @@ VOID LeechSvcRpc_WriteInfoEventLog(_In_z_ _Printf_format_string_ char const* con
 /*
 * RPC callback function to authorize the connecting user. The user is will be
 * authorized if it's a member of the Local 'Administrators' group.
+* NB! if user is connecting locally - the user must be an elevated admin.
 */
 RPC_STATUS CALLBACK LeechSvcRpc_SecurityCallback(RPC_IF_HANDLE InterfaceUuid, void *Context)
 {
-    RPC_STATUS status;
-    BYTE pbAdminSID[SECURITY_MAX_SID_SIZE] = { 0 };
-    DWORD cbAdminSID;
-    WCHAR wszAdministrators[MAX_PATH] = { 0 }, wszDummy[MAX_PATH] = { 0 };
-    DWORD cchAdministrators = MAX_PATH, cchDummy = MAX_PATH;
-    SID_NAME_USE SidNameUseAdministrators;
-    DWORD cchUser = MAX_PATH;
-    DWORD cchRemoteUserUPN = MAX_PATH;
-    WCHAR wszUser[MAX_PATH] = { 0 };
-    WCHAR wszRemoteUserUPN[MAX_PATH] = { 0 };
+    BOOL result, fIsImpersonated = FALSE, fIsRpcUserAdministrator = FALSE;
+    PSID pAdministratorsGroupSID = NULL;
     CHAR szTime[MAX_PATH];
-    BOOL result;
-    DWORD cEntries, cTotalEntries;
-    PBYTE pbLocalGroups;
-    PLOCALGROUP_USERS_INFO_0 pLocalGroupInfo;
-    DWORD i;
-    NET_API_STATUS netApiStatus;
-    // 1: Retrieve name of 'Administrators' local group (system may not be English).
-    cbAdminSID = SECURITY_MAX_SID_SIZE;
-    result = CreateWellKnownSid(WinBuiltinAdministratorsSid, 0, &pbAdminSID, &cbAdminSID);
-    if(!result) { return RPC_S_ACCESS_DENIED; }
-    result = LookupAccountSidW(NULL, (PSID)pbAdminSID, wszAdministrators, &cchAdministrators, wszDummy, &cchDummy, &SidNameUseAdministrators);
-    if(!result) { return RPC_S_ACCESS_DENIED; }
-    // 2: Impersonate connecting user for user name retrieval only
-    status = RpcImpersonateClient(Context);
-    if(status) { return RPC_S_ACCESS_DENIED; }
-    result = GetUserNameExW(NameSamCompatible, wszUser, &cchUser);
-    GetUserNameExW(NameUserPrincipal, wszRemoteUserUPN, &cchRemoteUserUPN);
-    if((RPC_S_OK != RpcRevertToSelf()) || !result) { return RPC_S_ACCESS_DENIED; }
-    // 3: Retrieve local groups (recursively) that the user is member of
-    //    and check if name matches administrator group ...
-    netApiStatus = NetUserGetLocalGroups(NULL, wszUser, 0, LG_INCLUDE_INDIRECT, &pbLocalGroups, MAX_PREFERRED_LENGTH, &cEntries, &cTotalEntries);
-    if(netApiStatus) { return RPC_S_ACCESS_DENIED; }
+    WCHAR wszRemoteUserUPN[MAX_PATH] = { 0 };
+    DWORD cchRemoteUserUPN = MAX_PATH;
+    HANDLE hImpersonationToken = 0;
+    SID_IDENTIFIER_AUTHORITY NtAuthoritySID = SECURITY_NT_AUTHORITY;
     LeechSvc_GetTimeStamp(szTime);
-    for(i = 0; i < cEntries; i++) {
-        pLocalGroupInfo = ((PLOCALGROUP_USERS_INFO_0)pbLocalGroups) + i;
-        if(!wcscmp(wszAdministrators, pLocalGroupInfo->lgrui0_name)) {
-            NetApiBufferFree(pbLocalGroups);
-            LeechSvcRpc_WriteInfoEventLog("[%s] LeechAgent:  INFO: User authentication: '%S'\n", szTime, wszRemoteUserUPN);
-            return RPC_S_OK;
+    if(!AllocateAndInitializeSid(&NtAuthoritySID, 2, SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0, &pAdministratorsGroupSID)) { goto fail; }
+    if(RPC_S_OK != RpcImpersonateClient(Context)) { goto fail; }
+    fIsImpersonated = TRUE;
+    GetUserNameExW(NameUserPrincipal, wszRemoteUserUPN, &cchRemoteUserUPN);
+    if(!OpenThreadToken(GetCurrentThread(), TOKEN_READ, TRUE, &hImpersonationToken)) { goto fail; }
+    result = CheckTokenMembership(hImpersonationToken, pAdministratorsGroupSID, &fIsRpcUserAdministrator);
+    if(result && fIsRpcUserAdministrator) {
+        LeechSvcRpc_WriteInfoEventLog("[%s] LeechAgent:  INFO: User authentication: '%S'\n", szTime, wszRemoteUserUPN);
+    } else {
+        LeechSvcRpc_WriteInfoEventLog("[%s] LeechAgent:  FAIL: User authentication: '%S' - not in Administrators group?\n", szTime, wszRemoteUserUPN);
+        fIsRpcUserAdministrator = FALSE;
+    }
+fail:
+    if(fIsImpersonated) {
+        if(RPC_S_OK != RpcRevertToSelf()) {
+            fIsRpcUserAdministrator = FALSE;
         }
     }
-    NetApiBufferFree(pbLocalGroups);
-    // Fail
-    LeechSvcRpc_WriteInfoEventLog("[%s] LeechAgent:  FAIL: User authentication '%S' - not in Administrators group?\n", szTime, wszRemoteUserUPN);
-    return RPC_S_ACCESS_DENIED;
+    if(hImpersonationToken) { CloseHandle(hImpersonationToken); }
+    if(pAdministratorsGroupSID) { FreeSid(pAdministratorsGroupSID); }
+    return fIsRpcUserAdministrator ? RPC_S_OK : RPC_S_ACCESS_DENIED;
 }
 
 RPC_STATUS CALLBACK LeechSvcRpc_SecurityCallback_AlwaysAllow(RPC_IF_HANDLE InterfaceUuid, void *Context)

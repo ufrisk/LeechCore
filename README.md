@@ -193,3 +193,6 @@ v1.0-1.8
   - Support for Xen, KVM, VirtualBox, QEMU on Linux.
   - Pre-bundled on Linux x64 (libmicrovmi)
   - Thank you [Wenzel](https://github.com/Wenzel/) for this contribution.
+
+Latest:
+* Bug fixes.
