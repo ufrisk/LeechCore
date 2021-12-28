@@ -40,7 +40,6 @@ Please find a summary of the supported software based memory acquisition methods
 Please find a summary of the supported hardware based memory acquisition methods listed below. All hardware based memory acquisition methods are supported on both Windows and Linux. The FPGA based methods however have a performance penalty on Linux and will max out at approx: 90MB/s compared to 150MB/s on Windows due to less optimized drivers.
 | Device                                                                 | Type | Interface | Speed | 64-bit memory access | PCIe TLP access | Plugin |
 | -----------------------------------------------------------------------| ---- | --------- | ----- | -------------------- | --------------- | ------ |
-| [Enigma X1](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)      | [FPGA](https://github.com/ufrisk/pcileech-fpga/tree/master/EnigmaX1)     | USB3 | 180MB/s | Yes | Yes | No  |
 | [ScreamerM2](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)     | [FPGA](https://github.com/ufrisk/pcileech-fpga/tree/master/ScreamerM2)   | USB3 | 150MB/s | Yes | Yes | No  |
 | [PCIeScreamer](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)   | [FPGA](https://github.com/ufrisk/pcileech-fpga/tree/master/pciescreamer) | USB3 | 100MB/s | Yes | Yes | No  |
 | [AC701/FT601](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)    | [FPGA](https://github.com/ufrisk/pcileech-fpga/tree/master/ac701_ft601)  | USB3 | 150MB/s | Yes | Yes | No  |
