@@ -30,6 +30,7 @@ _Success_(return)
 EXPORTED_FUNCTION BOOL LcMemMap_AddRange(_In_ PLC_CONTEXT ctxLC, _In_ QWORD pa, _In_ QWORD cb, _In_opt_ QWORD paRemap)
 {
     PVOID pvGrowMemMap;
+    if((cb & 0xfff) == 1) { cb--; }
     if((pa & 0xfff) || (cb & 0xfff)) { return FALSE; }
     if(ctxLC->cMemMap >= 0x00100000) { return FALSE; }
     if(ctxLC->cMemMap == ctxLC->cMemMapMax) {

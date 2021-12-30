@@ -3,8 +3,8 @@
 
 #define VERSION_MAJOR               2
 #define VERSION_MINOR               10
-#define VERSION_REVISION            1
-#define VERSION_BUILD               40
+#define VERSION_REVISION            2
+#define VERSION_BUILD               41
 
 #define VER_FILE_DESCRIPTION_STR    "LeechAgent Memory Acquisition Service"
 #define VER_FILE_VERSION            VERSION_MAJOR, VERSION_MINOR, VERSION_REVISION, VERSION_BUILD
