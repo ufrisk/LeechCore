@@ -92,7 +92,8 @@ typedef union tdFPGA_HANDLESOCKET {
 #define DEVICE_ID_FT2232H                       0x08
 #define DEVICE_ID_ENIGMA_X1                     0x09
 #define DEVICE_ID_ENIGMA_X2                     0x0A
-#define DEVICE_ID_MAX                           0x0A
+#define DEVICE_ID_PCIESCREAMER_M2_X4            0x0B
+#define DEVICE_ID_MAX                           0x0B
 
 const DEVICE_PERFORMANCE PERFORMANCE_PROFILES[DEVICE_ID_MAX + 1] = {
     {
@@ -218,6 +219,17 @@ const DEVICE_PERFORMANCE PERFORMANCE_PROFILES[DEVICE_ID_MAX + 1] = {
         .DELAY_PROBE_WRITE = 150,
         .DELAY_WRITE = 10,
         .DELAY_READ = 250,
+        .RETRY_ON_ERROR = 1
+    }, {
+        .SZ_DEVICE_NAME = "ScreamerM2x4",
+        .PROBE_MAXPAGES = 0x400,
+        .RX_FLUSH_LIMIT = 0,
+        .MAX_SIZE_RX = 0x14000,
+        .MAX_SIZE_TX = 0x3f0,
+        .DELAY_PROBE_READ = 500,
+        .DELAY_PROBE_WRITE = 150,
+        .DELAY_WRITE = 25,
+        .DELAY_READ = 300,
         .RETRY_ON_ERROR = 1
     }
 };
