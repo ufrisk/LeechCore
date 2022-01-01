@@ -1,6 +1,6 @@
 // oscompatibility.c : LeechCore Windows/Linux compatibility layer.
 //
-// (c) Ulf Frisk, 2017-2021
+// (c) Ulf Frisk, 2017-2022
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #ifdef _WIN32

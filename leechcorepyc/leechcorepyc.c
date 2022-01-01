@@ -1,6 +1,6 @@
 //	leechcorepyc.c : Implementation of the LeechCore Python API
 //
-// (c) Ulf Frisk, 2020-2021
+// (c) Ulf Frisk, 2020-2022
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #define PY_SSIZE_T_CLEAN

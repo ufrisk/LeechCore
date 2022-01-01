@@ -15,7 +15,7 @@
 // device may be created/opened - if only one instance may be open at the same
 // time this should be handled by the plugin module itself.
 //
-// (c) Ulf Frisk, 2020-2021
+// (c) Ulf Frisk, 2020-2022
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 // Header Version: 2.5
