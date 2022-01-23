@@ -105,8 +105,6 @@ EXPORTED_FUNCTION VOID LcClose(_In_opt_ _Post_ptr_invalid_ HANDLE hLC)
     if(!ctxLC || (ctxLC->version != LC_CONTEXT_VERSION)) { return; }
     EnterCriticalSection(&g_ctx.Lock);
     if(0 == --ctxLC->dwHandleCount) {
-        LcReadContigious_Close(ctxLC);
-        if(ctxLC->pfnClose) { ctxLC->pfnClose(ctxLC); }
         // detach from handles list
         if(g_ctx.FLink == ctxLC) {
             g_ctx.FLink = ctxLC->FLink;
@@ -120,6 +118,10 @@ EXPORTED_FUNCTION VOID LcClose(_In_opt_ _Post_ptr_invalid_ HANDLE hLC)
                 ctxParent = (PLC_CONTEXT)ctxParent->FLink;
             }
         }
+        LcLockAcquire(ctxLC);
+        LcReadContigious_Close(ctxLC);
+        if(ctxLC->pfnClose) { ctxLC->pfnClose(ctxLC); }
+        LcLockRelease(ctxLC);
         ctxLC->version = 0;
         DeleteCriticalSection(&ctxLC->Lock);
         if(ctxLC->hDeviceModule) { FreeLibrary(ctxLC->hDeviceModule); }
