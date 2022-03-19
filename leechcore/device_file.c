@@ -1,6 +1,6 @@
 // device_file.c : implementation related to file backed memory acquisition device.
 //
-// (c) Ulf Frisk, 2018-2021
+// (c) Ulf Frisk, 2018-2022
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include "leechcore.h"

@@ -6,7 +6,7 @@
 //     - RawUDP protocol - access FPGA over raw UDP packet stream (NeTV2 ETH)
 //     - FT2232H/FT245 protocol - access FPGA via FT2232H USB2 instead of FT601 USB3.
 //
-// (c) Ulf Frisk, 2017-2021
+// (c) Ulf Frisk, 2017-2022
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include "leechcore.h"
@@ -87,13 +87,14 @@ typedef union tdFPGA_HANDLESOCKET {
 #define DEVICE_ID_PCIESCREAMER_R2               0x03
 #define DEVICE_ID_PCIESCREAMER_M2               0x04
 #define DEVICE_ID_NETV2_UDP                     0x05
-#define DEVICE_ID_RAPTORDMA_R01                 0x06
-#define DEVICE_ID_RAPTORDMA_R02                 0x07
+#define DEVICE_ID_UNSUPPORTED1                  0x06
+#define DEVICE_ID_UNSUPPORTED2                  0x07
 #define DEVICE_ID_FT2232H                       0x08
 #define DEVICE_ID_ENIGMA_X1                     0x09
 #define DEVICE_ID_ENIGMA_X2                     0x0A
 #define DEVICE_ID_PCIESCREAMER_M2_X4            0x0B
-#define DEVICE_ID_MAX                           0x0B
+#define DEVICE_ID_PCIESQUIRREL                  0x0C
+#define DEVICE_ID_MAX                           0x0C
 
 const DEVICE_PERFORMANCE PERFORMANCE_PROFILES[DEVICE_ID_MAX + 1] = {
     {
@@ -166,7 +167,7 @@ const DEVICE_PERFORMANCE PERFORMANCE_PROFILES[DEVICE_ID_MAX + 1] = {
         .DELAY_READ = 0,
         .RETRY_ON_ERROR = 0
     }, {
-        .SZ_DEVICE_NAME = "RaptorDMA",
+        .SZ_DEVICE_NAME = "Unsupported",
         .PROBE_MAXPAGES = 0x400,
         .RX_FLUSH_LIMIT = 0,
         .MAX_SIZE_RX = 0x1c000,
@@ -177,7 +178,7 @@ const DEVICE_PERFORMANCE PERFORMANCE_PROFILES[DEVICE_ID_MAX + 1] = {
         .DELAY_READ = 300,
         .RETRY_ON_ERROR = 1
     }, {
-        .SZ_DEVICE_NAME = "RaptorDMA",
+        .SZ_DEVICE_NAME = "Unsupported",
         .PROBE_MAXPAGES = 0x400,
         .RX_FLUSH_LIMIT = 0,
         .MAX_SIZE_RX = 0x1c000,
@@ -225,6 +226,17 @@ const DEVICE_PERFORMANCE PERFORMANCE_PROFILES[DEVICE_ID_MAX + 1] = {
         .PROBE_MAXPAGES = 0x400,
         .RX_FLUSH_LIMIT = 0,
         .MAX_SIZE_RX = 0x14000,
+        .MAX_SIZE_TX = 0x3f0,
+        .DELAY_PROBE_READ = 500,
+        .DELAY_PROBE_WRITE = 150,
+        .DELAY_WRITE = 25,
+        .DELAY_READ = 300,
+        .RETRY_ON_ERROR = 1
+    }, {
+        .SZ_DEVICE_NAME = "PCIeSquirrel",
+        .PROBE_MAXPAGES = 0x400,
+        .RX_FLUSH_LIMIT = 0,
+        .MAX_SIZE_RX = 0x1c000,
         .MAX_SIZE_TX = 0x3f0,
         .DELAY_PROBE_READ = 500,
         .DELAY_PROBE_WRITE = 150,
@@ -2337,6 +2349,7 @@ VOID DeviceFPGA_ProbeMEM(_In_ PLC_CONTEXT ctxLC, _In_ QWORD pa, _In_ DWORD cPage
 _Success_(return) LINUX_NO_OPTIMIZE
 BOOL DeviceFPGA_WriteMEM_TXP(_In_ PLC_CONTEXT ctxLC, _Inout_ PDEVICE_CONTEXT_FPGA ctx, _In_ QWORD pa, _In_ BYTE bFirstBE, _In_ BYTE bLastBE, _In_ PBYTE pb, _In_ DWORD cb)
 {
+    static BYTE bTag = 0;
     DWORD txbuf[36], i, cbTlp;
     PBYTE pbTlp = (PBYTE)txbuf;
     PTLP_HDR_MRdWr32 hdrWr32 = (PTLP_HDR_MRdWr32)txbuf;
@@ -2347,6 +2360,7 @@ BOOL DeviceFPGA_WriteMEM_TXP(_In_ PLC_CONTEXT ctxLC, _Inout_ PDEVICE_CONTEXT_FPG
         hdrWr32->h.Length = (WORD)(cb + 3) >> 2;
         hdrWr32->FirstBE = bFirstBE;
         hdrWr32->LastBE = bLastBE;
+        hdrWr32->Tag = bTag++;
         hdrWr32->RequesterID = ctx->wDeviceId;
         hdrWr32->Address = (DWORD)pa;
         for(i = 0; i < 3; i++) {
@@ -2359,6 +2373,7 @@ BOOL DeviceFPGA_WriteMEM_TXP(_In_ PLC_CONTEXT ctxLC, _Inout_ PDEVICE_CONTEXT_FPG
         hdrWr64->h.Length = (WORD)(cb + 3) >> 2;
         hdrWr64->FirstBE = bFirstBE;
         hdrWr64->LastBE = bLastBE;
+        hdrWr64->Tag = bTag++;
         hdrWr64->RequesterID = ctx->wDeviceId;
         hdrWr64->AddressHigh = (DWORD)(pa >> 32);
         hdrWr64->AddressLow = (DWORD)pa;
@@ -2371,37 +2386,46 @@ BOOL DeviceFPGA_WriteMEM_TXP(_In_ PLC_CONTEXT ctxLC, _Inout_ PDEVICE_CONTEXT_FPG
     return DeviceFPGA_TxTlp(ctxLC, ctx, pbTlp, cbTlp, FALSE, FALSE);
 }
 
-_Success_(return)
-BOOL DeviceFPGA_Write(_In_ PLC_CONTEXT ctxLC, _In_ QWORD pa, _In_ DWORD cb, _In_reads_(cb) PBYTE pb)
+VOID DeviceFPGA_WriteScatter(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cpMEMs, _Inout_ PPMEM_SCATTER ppMEMs)
 {
     PDEVICE_CONTEXT_FPGA ctx = (PDEVICE_CONTEXT_FPGA)ctxLC->hDevice;
     BOOL result = TRUE;
-    BYTE be, pbb[4];
-    DWORD cbtx;
-    if(!ctx->wDeviceId) { return FALSE; }
-    // TX 1st dword if not aligned
-    if(cb && (pa & 0x3)) {
-        be = (cb < 3) ? (0xf >> (4 - cb)) : 0xf;
-        be <<= pa & 0x3;
-        cbtx = min(cb, 4 - (pa & 0x3));
-        memcpy(pbb + (pa & 0x3), pb, cbtx);
-        result = DeviceFPGA_WriteMEM_TXP(ctxLC, ctx, pa & ~0x3, be, 0, pbb, 4);
-        pb += cbtx;
-        cb -= cbtx;
-        pa += cbtx;
+    BYTE *pb, be, pbb[4];
+    DWORD cb, iMEM, cbtx;
+    QWORD pa;
+    PMEM_SCATTER pMEM;
+    if(!ctx->wDeviceId) { return; }
+    for(iMEM = 0; iMEM < cpMEMs; iMEM++) {
+        pMEM = ppMEMs[iMEM];
+        if(pMEM->f || (pMEM->qwA == (QWORD)-1)) { continue; }
+        pa = pMEM->qwA;
+        cb = pMEM->cb;
+        pb = pMEM->pb;
+        // TX 1st dword if not aligned
+        if(cb && (pa & 0x3)) {
+            be = (cb < 3) ? (0xf >> (4 - cb)) : 0xf;
+            be <<= pa & 0x3;
+            cbtx = min(cb, 4 - (pa & 0x3));
+            memcpy(pbb + (pa & 0x3), pb, cbtx);
+            result = DeviceFPGA_WriteMEM_TXP(ctxLC, ctx, pa & ~0x3, be, 0, pbb, 4);
+            pb += cbtx;
+            cb -= cbtx;
+            pa += cbtx;
+        }
+        // TX as 128-byte packets (aligned to 128-byte boundaries)
+        while(result && cb) {
+            cbtx = min(128 - (pa & 0x7f), cb);
+            be = (cbtx & 0x3) ? (0xf >> (4 - (cbtx & 0x3))) : 0xf;
+            result = (cbtx <= 4) ?
+                DeviceFPGA_WriteMEM_TXP(ctxLC, ctx, pa, be, 0, pb, 4) :
+                DeviceFPGA_WriteMEM_TXP(ctxLC, ctx, pa, 0xf, be, pb, cbtx);
+            pb += cbtx;
+            cb -= cbtx;
+            pa += cbtx;
+        }
+        pMEM->f = TRUE;
     }
-    // TX as 128-byte packets (aligned to 128-byte boundaries)
-    while(result && cb) {
-        cbtx = min(128 - (pa & 0x7f), cb);
-        be = (cbtx & 0x3) ? (0xf >> (4 - (cbtx & 0x3))) : 0xf;
-        result = (cbtx <= 4) ?
-            DeviceFPGA_WriteMEM_TXP(ctxLC, ctx, pa, be, 0, pb, 4) :
-            DeviceFPGA_WriteMEM_TXP(ctxLC, ctx, pa, 0xf, be, pb, cbtx);
-        pb += cbtx;
-        cb -= cbtx;
-        pa += cbtx;
-    }
-    return DeviceFPGA_TxTlp(ctxLC, ctx, NULL, 0, FALSE, TRUE) && result; // Flush and Return.
+    DeviceFPGA_TxTlp(ctxLC, ctx, NULL, 0, FALSE, TRUE) && result; // Flush and Return.
 }
 
 _Success_(return)
@@ -2730,7 +2754,7 @@ BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
     ctxLC->Config.fVolatile = TRUE;
     ctxLC->pfnClose = DeviceFPGA_Close;
     ctxLC->pfnReadScatter = DeviceFPGA_ReadScatter;
-    ctxLC->pfnWriteContigious = DeviceFPGA_Write;
+    ctxLC->pfnWriteScatter = DeviceFPGA_WriteScatter;
     ctxLC->pfnGetOption = DeviceFPGA_GetOption;
     ctxLC->pfnSetOption = DeviceFPGA_SetOption;
     ctxLC->pfnCommand = DeviceFPGA_Command;

@@ -1,6 +1,6 @@
 // leechrpcshared.c : implementation of the remote procedure call (RPC) shared functionality (client/server).
 //
-// (c) Ulf Frisk, 2018-2021
+// (c) Ulf Frisk, 2018-2022
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include <stdio.h>

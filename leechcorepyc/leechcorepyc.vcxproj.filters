@@ -13,14 +13,9 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
-    <Filter Include="Header Files\leechcore">
-      <UniqueIdentifier>{29bfed6e-f356-4e59-99f9-484f03d6fc7d}</UniqueIdentifier>
+    <Filter Include="Header Files\includes">
+      <UniqueIdentifier>{1451d3ca-05c1-4721-b6fe-e8ab6a3602ca}</UniqueIdentifier>
     </Filter>
-  </ItemGroup>
-  <ItemGroup>
-    <ResourceCompile Include="leechcorepyc.rc">
-      <Filter>Resource Files</Filter>
-    </ResourceCompile>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="leechcorepyc.c">
@@ -41,17 +36,22 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\includes\leechcore.h">
-      <Filter>Header Files\leechcore</Filter>
+      <Filter>Header Files\includes</Filter>
     </ClInclude>
     <ClInclude Include="oscompatibility.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <None Include="Makefile">
+    <ResourceCompile Include="leechcorepyc.rc">
+      <Filter>Resource Files</Filter>
+    </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="pkggen_linux.sh">
       <Filter>Resource Files</Filter>
     </None>
-    <None Include="pkggen_linux.sh">
+    <None Include="Makefile">
       <Filter>Resource Files</Filter>
     </None>
   </ItemGroup>

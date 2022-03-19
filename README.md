@@ -186,7 +186,6 @@ v1.0-1.8
 
 [v2.9](https://github.com/ufrisk/LeechCore/releases/tag/v2.9)
 * Support for the FT2232H USB2 chip.
-</details>
 
 [v2.10](https://github.com/ufrisk/LeechCore/releases/tag/v2.10)
 * Support for [Enigma X1](https://github.com/ufrisk/pcileech-fpga/tree/master/EnigmaX1) hardware.
@@ -194,7 +193,9 @@ v1.0-1.8
   - Support for Xen, KVM, VirtualBox, QEMU on Linux.
   - Pre-bundled on Linux x64 (libmicrovmi)
   - Thank you [Wenzel](https://github.com/Wenzel/) for this contribution.
+</details>
 
-Latest:
+[v2.11](https://github.com/ufrisk/LeechCore/releases/tag/v2.11)
 * Bug fixes.
 * Visual Studio 2022 Support.
+* New write fpga algorithm.
