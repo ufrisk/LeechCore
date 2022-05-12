@@ -74,6 +74,7 @@ typedef struct tdDEVICE_PERFORMANCE {
     DWORD DELAY_WRITE;
     DWORD DELAY_READ;
     DWORD RETRY_ON_ERROR;
+    DWORD F_TINY;
 } DEVICE_PERFORMANCE, *PDEVICE_PERFORMANCE;
 
 typedef union tdFPGA_HANDLESOCKET {
@@ -94,156 +95,31 @@ typedef union tdFPGA_HANDLESOCKET {
 #define DEVICE_ID_ENIGMA_X2                     0x0A
 #define DEVICE_ID_PCIESCREAMER_M2_X4            0x0B
 #define DEVICE_ID_PCIESQUIRREL                  0x0C
-#define DEVICE_ID_MAX                           0x0C
+#define DEVICE_ID_DEVICE13N                     0x0D
+#define DEVICE_ID_DEVICE14T                     0x0E
+#define DEVICE_ID_DEVICE15N                     0x0F
+#define DEVICE_ID_DEVICE16T                     0x10
+#define DEVICE_ID_MAX                           0x10
 
 const DEVICE_PERFORMANCE PERFORMANCE_PROFILES[DEVICE_ID_MAX + 1] = {
-    {
-        .SZ_DEVICE_NAME = "SP605 / FT601",
-        .PROBE_MAXPAGES = 0x400,
-        .RX_FLUSH_LIMIT = 0x8000,
-        .MAX_SIZE_RX = 0x1f000,
-        .MAX_SIZE_TX = 0x2000,
-        .DELAY_PROBE_READ = 500,
-        .DELAY_PROBE_WRITE = 0,
-        .DELAY_WRITE = 175,
-        .DELAY_READ = 400,
-        .RETRY_ON_ERROR = 0
-    }, {
-        // The PCIeScreamer R1 have a problem with the PCIe link stability
-        // which results on lost or delayed TLPS - workarounds are in place
-        // to retry after a delay.
-        .SZ_DEVICE_NAME = "PCIeScreamer R1",
-        .PROBE_MAXPAGES = 0x400,
-        .RX_FLUSH_LIMIT = 0,
-        .MAX_SIZE_RX = 0x1c000,
-        .MAX_SIZE_TX = 0x3f0,
-        .DELAY_PROBE_READ = 1000,
-        .DELAY_PROBE_WRITE = 150,
-        .DELAY_WRITE = 0,
-        .DELAY_READ = 500,
-        .RETRY_ON_ERROR = 1
-    }, {
-        .SZ_DEVICE_NAME = "AC701 / FT601",
-        .PROBE_MAXPAGES = 0x400,
-        .RX_FLUSH_LIMIT = 0,
-        .MAX_SIZE_RX = 0x1c000,
-        .MAX_SIZE_TX = 0x3f0,
-        .DELAY_PROBE_READ = 500,
-        .DELAY_PROBE_WRITE = 0,
-        .DELAY_WRITE = 0,
-        .DELAY_READ = 300,
-        .RETRY_ON_ERROR = 1
-    }, {
-        .SZ_DEVICE_NAME = "PCIeScreamer R2",
-        .PROBE_MAXPAGES = 0x400,
-        .RX_FLUSH_LIMIT = 0,
-        .MAX_SIZE_RX = 0x1c000,
-        .MAX_SIZE_TX = 0x3f0,
-        .DELAY_PROBE_READ = 750,
-        .DELAY_PROBE_WRITE = 150,
-        .DELAY_WRITE = 0,
-        .DELAY_READ = 400,
-        .RETRY_ON_ERROR = 1
-    }, {
-        .SZ_DEVICE_NAME = "ScreamerM2",
-        .PROBE_MAXPAGES = 0x400,
-        .RX_FLUSH_LIMIT = 0,
-        .MAX_SIZE_RX = 0x1c000,
-        .MAX_SIZE_TX = 0x3f0,
-        .DELAY_PROBE_READ = 500,
-        .DELAY_PROBE_WRITE = 150,
-        .DELAY_WRITE = 25,
-        .DELAY_READ = 300,
-        .RETRY_ON_ERROR = 1
-    }, {
-        .SZ_DEVICE_NAME = "NeTV2 RawUDP",
-        .PROBE_MAXPAGES = 0x400,
-        .RX_FLUSH_LIMIT = 0,
-        .MAX_SIZE_RX = 0x1c000,
-        .MAX_SIZE_TX = 0x400,
-        .DELAY_PROBE_READ = 0,
-        .DELAY_PROBE_WRITE = 0,
-        .DELAY_WRITE = 0,
-        .DELAY_READ = 0,
-        .RETRY_ON_ERROR = 0
-    }, {
-        .SZ_DEVICE_NAME = "Unsupported",
-        .PROBE_MAXPAGES = 0x400,
-        .RX_FLUSH_LIMIT = 0,
-        .MAX_SIZE_RX = 0x1c000,
-        .MAX_SIZE_TX = 0x3f0,
-        .DELAY_PROBE_READ = 500,
-        .DELAY_PROBE_WRITE = 150,
-        .DELAY_WRITE = 25,
-        .DELAY_READ = 300,
-        .RETRY_ON_ERROR = 1
-    }, {
-        .SZ_DEVICE_NAME = "Unsupported",
-        .PROBE_MAXPAGES = 0x400,
-        .RX_FLUSH_LIMIT = 0,
-        .MAX_SIZE_RX = 0x1c000,
-        .MAX_SIZE_TX = 0x3f0,
-        .DELAY_PROBE_READ = 500,
-        .DELAY_PROBE_WRITE = 150,
-        .DELAY_WRITE = 25,
-        .DELAY_READ = 300,
-        .RETRY_ON_ERROR = 1
-    }, {
-        .SZ_DEVICE_NAME = "FT2232H #1",
-        .PROBE_MAXPAGES = 0x400,
-        .RX_FLUSH_LIMIT = 0,
-        .MAX_SIZE_RX = 0x30000,
-        .MAX_SIZE_TX = 0x8000,
-        .DELAY_PROBE_READ = 1000,
-        .DELAY_PROBE_WRITE = 150,
-        .DELAY_WRITE = 0,
-        .DELAY_READ = 0,
-        .RETRY_ON_ERROR = 1
-    }, {
-        .SZ_DEVICE_NAME = "Enigma X1",
-        .PROBE_MAXPAGES = 0x400,
-        .RX_FLUSH_LIMIT = 0,
-        .MAX_SIZE_RX = 0x3c000,
-        .MAX_SIZE_TX = 0x13f0,
-        .DELAY_PROBE_READ = 500,
-        .DELAY_PROBE_WRITE = 150,
-        .DELAY_WRITE = 10,
-        .DELAY_READ = 250,
-        .RETRY_ON_ERROR = 1
-    }, {
-        .SZ_DEVICE_NAME = "Enigma X1 (ReservedFutureUse)",
-        .PROBE_MAXPAGES = 0x400,
-        .RX_FLUSH_LIMIT = 0,
-        .MAX_SIZE_RX = 0x30000,
-        .MAX_SIZE_TX = 0x13f0,
-        .DELAY_PROBE_READ = 500,
-        .DELAY_PROBE_WRITE = 150,
-        .DELAY_WRITE = 10,
-        .DELAY_READ = 250,
-        .RETRY_ON_ERROR = 1
-    }, {
-        .SZ_DEVICE_NAME = "ScreamerM2x4",
-        .PROBE_MAXPAGES = 0x400,
-        .RX_FLUSH_LIMIT = 0,
-        .MAX_SIZE_RX = 0x14000,
-        .MAX_SIZE_TX = 0x3f0,
-        .DELAY_PROBE_READ = 500,
-        .DELAY_PROBE_WRITE = 150,
-        .DELAY_WRITE = 25,
-        .DELAY_READ = 300,
-        .RETRY_ON_ERROR = 1
-    }, {
-        .SZ_DEVICE_NAME = "PCIeSquirrel",
-        .PROBE_MAXPAGES = 0x400,
-        .RX_FLUSH_LIMIT = 0,
-        .MAX_SIZE_RX = 0x1c000,
-        .MAX_SIZE_TX = 0x3f0,
-        .DELAY_PROBE_READ = 500,
-        .DELAY_PROBE_WRITE = 150,
-        .DELAY_WRITE = 25,
-        .DELAY_READ = 300,
-        .RETRY_ON_ERROR = 1
-    }
+    { .SZ_DEVICE_NAME = "SP605 / FT601",         .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0x8000, .MAX_SIZE_RX = 0x1f000, .MAX_SIZE_TX = 0x2000, .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 175, .DELAY_READ = 400, .RETRY_ON_ERROR = 0, .F_TINY = 0 },
+    // The PCIeScreamer R1 have a problem with the PCIe link stability which results on lost or delayed TLPS - workarounds are in place to retry after a delay.
+    { .SZ_DEVICE_NAME = "PCIeScreamer R1",       .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x1c000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 1000, .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 0,   .DELAY_READ = 500, .RETRY_ON_ERROR = 1, .F_TINY = 0 },
+    { .SZ_DEVICE_NAME = "AC701 / FT601",         .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x1c000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0,   .DELAY_READ = 300, .RETRY_ON_ERROR = 1, .F_TINY = 0 },
+    { .SZ_DEVICE_NAME = "PCIeScreamer R2",       .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x1c000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 750,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 0,   .DELAY_READ = 400, .RETRY_ON_ERROR = 1, .F_TINY = 0 },
+    { .SZ_DEVICE_NAME = "ScreamerM2",            .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x1c000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 25,  .DELAY_READ = 300, .RETRY_ON_ERROR = 1, .F_TINY = 0 },
+    { .SZ_DEVICE_NAME = "NeTV2 RawUDP",          .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x1c000, .MAX_SIZE_TX = 0x400,  .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0,   .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0 },
+    { .SZ_DEVICE_NAME = "Unsupported",           .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x14000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 35,  .DELAY_READ = 350, .RETRY_ON_ERROR = 1, .F_TINY = 0 },
+    { .SZ_DEVICE_NAME = "Unsupported",           .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x14000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 35,  .DELAY_READ = 350, .RETRY_ON_ERROR = 1, .F_TINY = 0 },
+    { .SZ_DEVICE_NAME = "FT2232H #1",            .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x30000, .MAX_SIZE_TX = 0x8000, .DELAY_PROBE_READ = 1000, .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 0,   .DELAY_READ = 0,   .RETRY_ON_ERROR = 1, .F_TINY = 0 },
+    { .SZ_DEVICE_NAME = "Enigma X1",             .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x3c000, .MAX_SIZE_TX = 0x13f0, .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 10,  .DELAY_READ = 250, .RETRY_ON_ERROR = 1, .F_TINY = 0 },
+    { .SZ_DEVICE_NAME = "Enigma X1 (FutureUse)", .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x30000, .MAX_SIZE_TX = 0x13f0, .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 10,  .DELAY_READ = 250, .RETRY_ON_ERROR = 1, .F_TINY = 0 },
+    { .SZ_DEVICE_NAME = "ScreamerM2x4",          .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x14000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 25,  .DELAY_READ = 300, .RETRY_ON_ERROR = 1, .F_TINY = 0 },
+    { .SZ_DEVICE_NAME = "PCIeSquirrel",          .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x1c000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 25,  .DELAY_READ = 300, .RETRY_ON_ERROR = 1, .F_TINY = 0 },
+    { .SZ_DEVICE_NAME = "Device #13N",           .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x14000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 35,  .DELAY_READ = 350, .RETRY_ON_ERROR = 1, .F_TINY = 0 },
+    { .SZ_DEVICE_NAME = "Device #14T",           .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x14000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 35,  .DELAY_READ = 350, .RETRY_ON_ERROR = 1, .F_TINY = 1 },
+    { .SZ_DEVICE_NAME = "Device #15N",           .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x30000, .MAX_SIZE_TX = 0x13f0, .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 20,  .DELAY_READ = 300, .RETRY_ON_ERROR = 1, .F_TINY = 0 },
+    { .SZ_DEVICE_NAME = "Device #16T",           .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x30000, .MAX_SIZE_TX = 0x13f0, .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 20,  .DELAY_READ = 300, .RETRY_ON_ERROR = 1, .F_TINY = 1 },
 };
 
 typedef struct tdDEVICE_CONTEXT_FPGA {
@@ -2765,7 +2641,7 @@ BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
     if((v = LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_READ_SIZE)))   { ctx->perf.MAX_SIZE_RX = min(ctx->perf.MAX_SIZE_RX, (DWORD)v & ~0xfff); }
     if((v = LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_DEVICE_ID)))   { ctx->wDeviceId = (WORD)v; }
     v = LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_READ_ALGORITHM);
-    ctx->fAlgorithmReadTiny = (v & FPGA_PARAMETER_ALGO_TINY) ? TRUE : FALSE;
+    ctx->fAlgorithmReadTiny = ((v & FPGA_PARAMETER_ALGO_TINY) ? TRUE : FALSE) || ctx->perf.F_TINY;
     ctx->async.fEnabled = ctx->async.fEnabled && !(v & FPGA_PARAMETER_ALGO_SYNCHRONOUS);
     // return
     lcprintfv(ctxLC, 

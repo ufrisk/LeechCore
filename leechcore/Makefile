@@ -1,6 +1,6 @@
 CC=gcc
 CFLAGS  += -I. -D LINUX -D _GNU_SOURCE -shared -fPIC -fvisibility=hidden -pthread `pkg-config libusb-1.0 --libs --cflags`
-#CFLAGS  += -g -O0
+#CFLAGS  += -g -O0 -Wextra -Wno-unused-parameter
 CFLAGS  += -fPIE -fPIC -pie -fstack-protector -D_FORTIFY_SOURCE=2 -O1 -Wl,-z,noexecstack
 CFLAGS  += -Wall -Wno-unused-result -Wno-unused-variable -Wno-unused-value -Wno-pointer-to-int-cast -Wno-int-to-pointer-cast
 LDFLAGS += -g -ldl -shared
