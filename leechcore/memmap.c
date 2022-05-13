@@ -216,6 +216,7 @@ BOOL LcMemMap_SetRangesFromText(_In_ PLC_CONTEXT ctxLC, _In_ PBYTE pb, _In_ DWOR
             if((szLine[i] >= '0') && (szLine[i] <= '9')) { continue; }
             if((szLine[i] >= 'a') && (szLine[i] <= 'f')) { continue; }
             if((szLine[i] >= 'A') && (szLine[i] <= 'F')) { continue; }
+            if(szLine[i] == '#') { szLine[i] = 0; }
             szLine[i] = ' ';
         }
         i = 0;
@@ -226,7 +227,7 @@ BOOL LcMemMap_SetRangesFromText(_In_ PLC_CONTEXT ctxLC, _In_ PBYTE pb, _In_ DWOR
             v[i++] = strtoull(szToken, NULL, 16);
             szToken = strtok_s(NULL, " ", &szTokenContext);
         }
-        if(!(v[0] & 0xfff)) {
+        if(!(v[0] & 0xfff) && (v[0] < v[1])) {
             if(!v[2]) { v[2] = v[0]; }
             LcMemMap_AddRange(ctxLC, v[0], v[1] + 1 - v[0], v[2]);
         }

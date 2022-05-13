@@ -118,8 +118,8 @@ const DEVICE_PERFORMANCE PERFORMANCE_PROFILES[DEVICE_ID_MAX + 1] = {
     { .SZ_DEVICE_NAME = "PCIeSquirrel",          .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x1c000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 25,  .DELAY_READ = 300, .RETRY_ON_ERROR = 1, .F_TINY = 0 },
     { .SZ_DEVICE_NAME = "Device #13N",           .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x14000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 35,  .DELAY_READ = 350, .RETRY_ON_ERROR = 1, .F_TINY = 0 },
     { .SZ_DEVICE_NAME = "Device #14T",           .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x14000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 35,  .DELAY_READ = 350, .RETRY_ON_ERROR = 1, .F_TINY = 1 },
-    { .SZ_DEVICE_NAME = "Device #15N",           .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x30000, .MAX_SIZE_TX = 0x13f0, .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 20,  .DELAY_READ = 300, .RETRY_ON_ERROR = 1, .F_TINY = 0 },
-    { .SZ_DEVICE_NAME = "Device #16T",           .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x30000, .MAX_SIZE_TX = 0x13f0, .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 20,  .DELAY_READ = 300, .RETRY_ON_ERROR = 1, .F_TINY = 1 },
+    { .SZ_DEVICE_NAME = "Device #15N",           .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x30000, .MAX_SIZE_TX = 0x13f0, .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 15,  .DELAY_READ = 300, .RETRY_ON_ERROR = 1, .F_TINY = 0 },
+    { .SZ_DEVICE_NAME = "Device #16T",           .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x30000, .MAX_SIZE_TX = 0x13f0, .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 15,  .DELAY_READ = 300, .RETRY_ON_ERROR = 1, .F_TINY = 1 },
 };
 
 typedef struct tdDEVICE_CONTEXT_FPGA {
@@ -1248,10 +1248,9 @@ BOOL DeviceFPGA_PCIeCfgSpaceCoreRead(_In_ PDEVICE_CONTEXT_FPGA ctx, _Out_writes_
     WORD wDWordAddr, oDWord, wAddr = 0;
     ZeroMemory(pb, 0x200);
     for(wDWordAddr = 0; wDWordAddr < 0x80; wDWordAddr += 32) {  // 0x80 * sizeof(DWORD) == 0x200
-        // enable read/write lock (instruction serialization)
         cbRxTx = 0;
-        memcpy(pbRxTx + cbRxTx, pbTxLockEnable, 8); cbRxTx += 8;
         for(oDWord = 0; oDWord < 32; oDWord++) {
+            memcpy(pbRxTx + cbRxTx, pbTxLockEnable, 8); cbRxTx += 8;    // enable read/write lock (instruction serialization)
             // NB! read config space DWORD _TWO_ times on 1st read in
             //     batch required to clear any lingering register data.
             for(i = 0; (i < 2) && (!i || !oDWord); i++) {
@@ -1273,10 +1272,9 @@ BOOL DeviceFPGA_PCIeCfgSpaceCoreRead(_In_ PDEVICE_CONTEXT_FPGA ctx, _Out_writes_
             memcpy(pbRxTx + cbRxTx, pbTxResultMeta, 8); cbRxTx += 8;
             memcpy(pbRxTx + cbRxTx, pbTxResultDataLo, 8); cbRxTx += 8;
             memcpy(pbRxTx + cbRxTx, pbTxResultDataHi, 8); cbRxTx += 8;
+            memcpy(pbRxTx + cbRxTx, pbTxLockDisable, 8); cbRxTx += 8;   // disable read/write lock (instruction serialization)
             if(raSingleDW) { break; }
         }
-        // disable read/write lock
-        memcpy(pbRxTx + cbRxTx, pbTxLockDisable, 8); cbRxTx += 8;
         // WRITE TxData
         status = ctx->dev.pfnFT_WritePipe(ctx->dev.hFTDI, 0x02, pbRxTx, cbRxTx, &cbRxTx, NULL);
         if(status) { return FALSE; }
