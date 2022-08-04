@@ -200,3 +200,6 @@ v1.0-1.8
 * Bug fixes.
 * Visual Studio 2022 Support.
 * New write fpga algorithm.
+
+[v2.12](https://github.com/ufrisk/LeechCore/releases/tag/v2.12)
+* Support for MemProcFS v5.

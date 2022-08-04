@@ -269,24 +269,30 @@ VOID DevicePMEM_Close(_Inout_ PLC_CONTEXT ctxLC)
 }
 
 _Success_(return)
-BOOL DevicePMEM_GetMemoryInformation(_Inout_ PLC_CONTEXT ctxLC)
+BOOL DevicePMEM_GetMemoryInformation(_Inout_ PLC_CONTEXT ctxLC, _In_ BOOL fFirst)
 {
     PDEVICE_CONTEXT_PMEM ctx = (PDEVICE_CONTEXT_PMEM)ctxLC->hDevice;
     DWORD i, cbRead, dwMode = PMEM_MODE_PTE;
     // 1: retrieve information from kernel driver
     if(!DeviceIoControl(ctx->hFile, PMEM_INFO_IOCTRL, NULL, 0, &ctx->MemoryInfo, sizeof(ctx->MemoryInfo), &cbRead, NULL)) {
-        lcprintf(ctxLC, "DEVICE: ERROR: Unable to communicate with winpmem driver.\n");
+        if(!fFirst) {
+            lcprintf(ctxLC, "DEVICE: ERROR: Unable to communicate with winpmem driver.\n");
+        }
         return FALSE;
     }
     // 2: sanity checks
     if((ctx->MemoryInfo.NumberOfRuns.QuadPart == 0) || (ctx->MemoryInfo.NumberOfRuns.QuadPart > 100)) {
-        lcprintf(ctxLC, "DEVICE: ERROR: too few/many memory segments reported from winpmem driver. (%lli)\n", ctx->MemoryInfo.NumberOfRuns.QuadPart);
+        if(!fFirst) {
+            lcprintf(ctxLC, "DEVICE: ERROR: too few/many memory segments reported from winpmem driver. (%lli)\n", ctx->MemoryInfo.NumberOfRuns.QuadPart);
+        }
         return FALSE;
     }
     // 3: parse memory ranges
     for(i = 0; i < ctx->MemoryInfo.NumberOfRuns.QuadPart; i++) {
         if(!LcMemMap_AddRange(ctxLC, ctx->MemoryInfo.Run[i].start, ctx->MemoryInfo.Run[i].length, ctx->MemoryInfo.Run[i].start)) {
-            lcprintf(ctxLC, "DEVICE: FAIL: unable to add range to memory map. (%016llx %016llx %016llx)\n", ctx->MemoryInfo.Run[i].start, ctx->MemoryInfo.Run[i].length, ctx->MemoryInfo.Run[i].start);
+            if(!fFirst) {
+                lcprintf(ctxLC, "DEVICE: FAIL: unable to add range to memory map. (%016llx %016llx %016llx)\n", ctx->MemoryInfo.Run[i].start, ctx->MemoryInfo.Run[i].length, ctx->MemoryInfo.Run[i].start);
+            }
             return FALSE;
         }
     }
@@ -342,7 +348,7 @@ BOOL DevicePMEM_GetOption(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _Out_ PQWO
 }
 
 _Success_(return)
-BOOL DevicePMEM_Open2(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo)
+BOOL DevicePMEM_Open2(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo, _In_ BOOL fFirst)
 {
     BOOL result;
     PDEVICE_CONTEXT_PMEM ctx;
@@ -360,7 +366,7 @@ BOOL DevicePMEM_Open2(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO
     g_cDevicePMEM++;
     result = DevicePMEM_SvcStatusRunning(ctxLC) || DevicePMEM_SvcStart(ctxLC);
     // 3: retrieve memory map.
-    result = result && DevicePMEM_GetMemoryInformation(ctxLC);
+    result = result && DevicePMEM_GetMemoryInformation(ctxLC, fFirst);
     if(!result) {
         DevicePMEM_Close(ctxLC);
         return FALSE;
@@ -375,9 +381,9 @@ BOOL DevicePMEM_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
     // Sometimes communication with PMEM driver will fail even though the driver
     // is loaded. It's unknown why this is happening. But it always helps trying
     // again so wrap the open function to perform a retry if there is a fail.
-    if(DevicePMEM_Open2(ctxLC, ppLcCreateErrorInfo)) { return TRUE; }
+    if(DevicePMEM_Open2(ctxLC, ppLcCreateErrorInfo, TRUE)) { return TRUE; }
     Sleep(100);
-    return DevicePMEM_Open2(ctxLC, ppLcCreateErrorInfo);
+    return DevicePMEM_Open2(ctxLC, ppLcCreateErrorInfo, FALSE);
 }
 
 #endif /* _WIN32 */

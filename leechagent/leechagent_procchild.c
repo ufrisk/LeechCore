@@ -25,6 +25,10 @@
 
 #define VMMDLL_VFS_FILELISTBLOB_VERSION     0xf88f0001
 
+typedef struct tdVMM_HANDLE *VMM_HANDLE;
+
+static VMM_HANDLE g_hVMM = NULL;
+
 typedef struct tdVMMDLL_VFS_FILELISTBLOB_OPAQUE {
     DWORD dwVersion;                        // VMMDLL_VFS_FILELISTBLOB_VERSION
     DWORD cbStruct;
@@ -37,14 +41,15 @@ typedef struct tdPROCCHILD_CONTEXT {
     HMODULE hDllPython3;
     HMODULE hDllPython3X;
     HMODULE hDllLeechCorePyC;
-    BOOL(*pfnVMMDLL_Initialize)(_In_ DWORD argc, _In_ LPSTR argv[]);
-    BOOL(*pfnVMMDLL_InitializePlugins)();
-    BOOL(*pfnVMMDLL_Close)();
-    PVMMDLL_VFS_FILELISTBLOB_OPAQUE(*pfnVMMDLL_VfsListBlobU)(LPSTR);
-    DWORD(*pfnVMMDLL_VfsReadU)(_In_ LPSTR  uszFileName, _Out_writes_to_(cb, *pcbRead) PBYTE pb, _In_ DWORD cb, _Out_ PDWORD pcbRead, _In_ ULONG64 cbOffset);
-    DWORD(*pfnVMMDLL_VfsWriteU)(_In_ LPSTR  uszFileName, _In_reads_(cb) PBYTE pb, _In_ DWORD cb, _Out_ PDWORD pcbWrite, _In_ ULONG64 cbOffset);
-    BOOL(*pfnVMMDLL_ConfigGet)(_In_ ULONG64 fOption, _Out_ PULONG64 pqwValue);
-    BOOL(*pfnVMMDLL_ConfigSet)(_In_ ULONG64 fOption, _In_ ULONG64 qwValue);
+    VMM_HANDLE(*pfnVMMDLL_Initialize)(_In_ DWORD argc, _In_ LPSTR argv[]);
+    BOOL(*pfnVMMDLL_InitializePlugins)(VMM_HANDLE);
+    BOOL(*pfnVMMDLL_Close)(VMM_HANDLE);
+    VOID(*pfnVMMDLL_MemFree)(PVOID);
+    PVMMDLL_VFS_FILELISTBLOB_OPAQUE(*pfnVMMDLL_VfsListBlobU)(VMM_HANDLE, LPSTR);
+    DWORD(*pfnVMMDLL_VfsReadU)(VMM_HANDLE, _In_ LPSTR  uszFileName, _Out_writes_to_(cb, *pcbRead) PBYTE pb, _In_ DWORD cb, _Out_ PDWORD pcbRead, _In_ ULONG64 cbOffset);
+    DWORD(*pfnVMMDLL_VfsWriteU)(VMM_HANDLE, _In_ LPSTR  uszFileName, _In_reads_(cb) PBYTE pb, _In_ DWORD cb, _Out_ PDWORD pcbWrite, _In_ ULONG64 cbOffset);
+    BOOL(*pfnVMMDLL_ConfigGet)(VMM_HANDLE, _In_ ULONG64 fOption, _Out_ PULONG64 pqwValue);
+    BOOL(*pfnVMMDLL_ConfigSet)(VMM_HANDLE, _In_ ULONG64 fOption, _In_ ULONG64 qwValue);
     BOOL(*pfnLeechCorePyC_EmbPythonInitialize)(_In_ HMODULE hDllPython);
     BOOL(*pfnLeechCorePyC_EmbExecPyInMem)(_In_ LPSTR szPythonProgram);
     VOID(*pfnLeechCorePyC_EmbClose)();
@@ -70,28 +75,34 @@ BOOL LeechAgent_ProcChild_InitializeVmm()
     szVMM_ARGUMENTS[4] = ctxProcChild.szRemote;
     ctxProcChild.hDllVmm = LoadLibraryExA("vmm.dll", NULL, LOAD_LIBRARY_SEARCH_APPLICATION_DIR);
     if(!ctxProcChild.hDllVmm) {
+        ctxProcChild.hDllVmm = LoadLibraryA("vmm.dll");
+    }
+    if(!ctxProcChild.hDllVmm) {
         fprintf(stderr, "LeechAgent: FAIL: CHILD could not locate/load MemProcFS library vmm.dll\n");
         return FALSE;
     }
-    ctxProcChild.pfnVMMDLL_Initialize = (BOOL(*)(DWORD, LPSTR*))GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_Initialize");
-    ctxProcChild.pfnVMMDLL_InitializePlugins = (BOOL(*)())GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_InitializePlugins");
-    ctxProcChild.pfnVMMDLL_Close = (BOOL(*)())GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_Close");
-    ctxProcChild.pfnVMMDLL_VfsListBlobU = (PVMMDLL_VFS_FILELISTBLOB_OPAQUE(*)(LPSTR))GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_VfsListBlobU");
-    ctxProcChild.pfnVMMDLL_VfsReadU = (DWORD(*)(LPSTR, PBYTE, DWORD, PDWORD, ULONG64))GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_VfsReadU");
-    ctxProcChild.pfnVMMDLL_VfsWriteU = (DWORD(*)(LPSTR, PBYTE, DWORD, PDWORD, ULONG64))GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_VfsWriteU");
-    ctxProcChild.pfnVMMDLL_ConfigGet = (BOOL(*)(ULONG64, PULONG64))GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_ConfigGet");
-    ctxProcChild.pfnVMMDLL_ConfigSet = (BOOL(*)(ULONG64, ULONG64))GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_ConfigSet");
+    ctxProcChild.pfnVMMDLL_Initialize = (VMM_HANDLE(*)(DWORD, LPSTR*))GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_Initialize");
+    ctxProcChild.pfnVMMDLL_InitializePlugins = (BOOL(*)(VMM_HANDLE))GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_InitializePlugins");
+    ctxProcChild.pfnVMMDLL_Close = (BOOL(*)(VMM_HANDLE))GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_Close");
+    ctxProcChild.pfnVMMDLL_MemFree = (VOID(*)(PVOID))GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_MemFree");
+    ctxProcChild.pfnVMMDLL_VfsListBlobU = (PVMMDLL_VFS_FILELISTBLOB_OPAQUE(*)(VMM_HANDLE, LPSTR))GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_VfsListBlobU");
+    ctxProcChild.pfnVMMDLL_VfsReadU = (DWORD(*)(VMM_HANDLE, LPSTR, PBYTE, DWORD, PDWORD, ULONG64))GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_VfsReadU");
+    ctxProcChild.pfnVMMDLL_VfsWriteU = (DWORD(*)(VMM_HANDLE, LPSTR, PBYTE, DWORD, PDWORD, ULONG64))GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_VfsWriteU");
+    ctxProcChild.pfnVMMDLL_ConfigGet = (BOOL(*)(VMM_HANDLE, ULONG64, PULONG64))GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_ConfigGet");
+    ctxProcChild.pfnVMMDLL_ConfigSet = (BOOL(*)(VMM_HANDLE, ULONG64, ULONG64))GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_ConfigSet");
     if(!ctxProcChild.pfnVMMDLL_Initialize || !ctxProcChild.pfnVMMDLL_InitializePlugins || !ctxProcChild.pfnVMMDLL_Close) {
         fprintf(stderr, "LeechAgent: FAIL: CHILD could not load MemProcFS library functions.\n");
         return FALSE;
     }
-    result = ctxProcChild.pfnVMMDLL_Initialize((sizeof(szVMM_ARGUMENTS) / sizeof(LPCSTR)), szVMM_ARGUMENTS);
-    if(!result) {
+    g_hVMM = ctxProcChild.pfnVMMDLL_Initialize((sizeof(szVMM_ARGUMENTS) / sizeof(LPCSTR)), szVMM_ARGUMENTS);
+    if(!g_hVMM) {
         fprintf(stderr, "LeechAgent: FAIL: CHILD could not initialize MemProcFS library.\n");
         return FALSE;
     }
-    result = ctxProcChild.pfnVMMDLL_InitializePlugins();
+    result = ctxProcChild.pfnVMMDLL_InitializePlugins(g_hVMM);
     if(!result) {
+        ctxProcChild.pfnVMMDLL_Close(g_hVMM);
+        g_hVMM = NULL;
         fprintf(stderr, "LeechAgent: FAIL: CHILD could not initialize MemProcFS Plugins.\n");
         return FALSE;
     }
@@ -113,7 +124,7 @@ BOOL LeechAgent_ProcChild_VmmVfsList(_In_ PLC_CMD_AGENT_VFS_REQ pReq, _Out_ PLC_
     PVMMDLL_VFS_FILELISTBLOB_OPAQUE pBlob = NULL;
     pReq->uszPathFile[_countof(pReq->uszPathFile) - 1] = 0;
     if(!ctxProcChild.pfnVMMDLL_VfsListBlobU) { goto fail; }
-    if(!(pBlob = ctxProcChild.pfnVMMDLL_VfsListBlobU(pReq->uszPathFile))) { goto fail; }
+    if(!(pBlob = ctxProcChild.pfnVMMDLL_VfsListBlobU(g_hVMM, pReq->uszPathFile))) { goto fail; }
     if((pBlob->dwVersion != VMMDLL_VFS_FILELISTBLOB_VERSION) || (pBlob->cbStruct > 0x04000000)) { goto fail; }
     if(!(pRsp = LocalAlloc(0, sizeof(LC_CMD_AGENT_VFS_RSP) + pBlob->cbStruct))) { goto fail; }
     ZeroMemory(pRsp, sizeof(LC_CMD_AGENT_VFS_RSP));
@@ -123,7 +134,7 @@ BOOL LeechAgent_ProcChild_VmmVfsList(_In_ PLC_CMD_AGENT_VFS_REQ pReq, _Out_ PLC_
     *pcbRsp = sizeof(LC_CMD_AGENT_VFS_RSP) + pRsp->cb;
     *ppRsp = pRsp;
 fail:
-    LocalFree(pBlob);
+    ctxProcChild.pfnVMMDLL_MemFree(pBlob);
     return pRsp ? TRUE : FALSE;
 }
 
@@ -145,7 +156,7 @@ BOOL LeechAgent_ProcChild_VmmVfsRead(_In_ PLC_CMD_AGENT_VFS_REQ pReq, _Out_ PLC_
     if(!(pRsp = LocalAlloc(0, sizeof(LC_CMD_AGENT_VFS_RSP) + pReq->dwLength))) { return FALSE; }
     ZeroMemory(pRsp, sizeof(LC_CMD_AGENT_VFS_RSP));
     pRsp->dwVersion = LC_CMD_AGENT_VFS_RSP_VERSION;
-    pRsp->dwStatus = ctxProcChild.pfnVMMDLL_VfsReadU(pReq->uszPathFile, pRsp->pb, pReq->dwLength, &pRsp->cbReadWrite, pReq->qwOffset);
+    pRsp->dwStatus = ctxProcChild.pfnVMMDLL_VfsReadU(g_hVMM, pReq->uszPathFile, pRsp->pb, pReq->dwLength, &pRsp->cbReadWrite, pReq->qwOffset);
     pRsp->cb = pRsp->cbReadWrite;
     *pcbRsp = sizeof(LC_CMD_AGENT_VFS_RSP) + pRsp->cb;
     *ppRsp = pRsp;
@@ -168,7 +179,7 @@ BOOL LeechAgent_ProcChild_VmmVfsWrite(_In_ PLC_CMD_AGENT_VFS_REQ pReq, _Out_ PLC
     pReq->uszPathFile[_countof(pReq->uszPathFile) - 1] = 0;
     if(!(pRsp = LocalAlloc(LMEM_ZEROINIT, sizeof(LC_CMD_AGENT_VFS_RSP)))) { return FALSE; }
     pRsp->dwVersion = LC_CMD_AGENT_VFS_RSP_VERSION;
-    pRsp->dwStatus = ctxProcChild.pfnVMMDLL_VfsWriteU(pReq->uszPathFile, pReq->pb, pReq->cb, &pRsp->cbReadWrite, pReq->qwOffset);
+    pRsp->dwStatus = ctxProcChild.pfnVMMDLL_VfsWriteU(g_hVMM, pReq->uszPathFile, pReq->pb, pReq->cb, &pRsp->cbReadWrite, pReq->qwOffset);
     *pcbRsp = sizeof(LC_CMD_AGENT_VFS_RSP);
     *ppRsp = pRsp;
     return TRUE;
@@ -190,7 +201,7 @@ BOOL LeechAgent_ProcChild_VmmVfsConfigGet(_In_ PLC_CMD_AGENT_VFS_REQ pReq, _Out_
     if(!ctxProcChild.pfnVMMDLL_ConfigGet) { return FALSE; }
     if(!(pRsp = LocalAlloc(LMEM_ZEROINIT, sizeof(LC_CMD_AGENT_VFS_RSP) + sizeof(QWORD)))) { return FALSE; }
     pRsp->dwVersion = LC_CMD_AGENT_VFS_RSP_VERSION;
-    pRsp->dwStatus = (DWORD)ctxProcChild.pfnVMMDLL_ConfigGet(pReq->fOption, (PULONG64)pRsp->pb);
+    pRsp->dwStatus = (DWORD)ctxProcChild.pfnVMMDLL_ConfigGet(g_hVMM, pReq->fOption, (PULONG64)pRsp->pb);
     pRsp->cb = sizeof(QWORD);
     *pcbRsp = sizeof(LC_CMD_AGENT_VFS_RSP) + sizeof(QWORD);
     *ppRsp = pRsp;
@@ -214,7 +225,7 @@ BOOL LeechAgent_ProcChild_VmmVfsConfigSet(_In_ PLC_CMD_AGENT_VFS_REQ pReq, _Out_
     if(!ctxProcChild.pfnVMMDLL_ConfigSet || (pReq->cb != sizeof(QWORD))) { return FALSE; }
     if(!(pRsp = LocalAlloc(LMEM_ZEROINIT, sizeof(LC_CMD_AGENT_VFS_RSP)))) { return FALSE; }
     pRsp->dwVersion = LC_CMD_AGENT_VFS_RSP_VERSION;
-    pRsp->dwStatus = (DWORD)ctxProcChild.pfnVMMDLL_ConfigSet(pReq->fOption, *(PULONG64)pReq->pb);
+    pRsp->dwStatus = (DWORD)ctxProcChild.pfnVMMDLL_ConfigSet(g_hVMM, pReq->fOption, *(PULONG64)pReq->pb);
     *pcbRsp = sizeof(LC_CMD_AGENT_VFS_RSP);
     *ppRsp = pRsp;
     return TRUE;
