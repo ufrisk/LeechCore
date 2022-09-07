@@ -29,6 +29,12 @@
 #define FPGA_REG_READWRITE            0x8000
 #define FPGA_REG_SHADOWCFGSPACE       0xC000
 
+#ifdef _WIN32
+#define DEVICE_FPGA_FT601_LIBRARY          "FTD3XX.dll"
+#else
+#define DEVICE_FPGA_FT601_LIBRARY          "leechcore_ft601_driver_linux.so"
+#endif /* _WIN32 */
+
 #define ENDIAN_SWAP_DWORD(x)    (x = (x << 24) | ((x >> 8) & 0xff00) | ((x << 8) & 0xff0000) | (x >> 24))
 
 typedef struct tdDEV_CFG_PHY {
@@ -723,14 +729,14 @@ LPSTR DeviceFPGA_InitializeFT601(_In_ PDEVICE_CONTEXT_FPGA ctx)
         goto fail;
     }
     // Load FTDI Library
-    ctx->dev.hModule = LoadLibraryA("FTD3XX.dll");
+    ctx->dev.hModule = LoadLibraryA(DEVICE_FPGA_FT601_LIBRARY);
     if(!ctx->dev.hModule) {
         Util_GetPathLib(szModuleFTDI);
-        strcat_s(szModuleFTDI, sizeof(szModuleFTDI) - 1, "FTD3XX.dll");
+        strcat_s(szModuleFTDI, sizeof(szModuleFTDI) - 1, DEVICE_FPGA_FT601_LIBRARY);
         ctx->dev.hModule = LoadLibraryA(szModuleFTDI);
     }
     if(!ctx->dev.hModule) {
-        szErrorReason = "Unable to load FTD3XX.dll";
+        szErrorReason = "Unable to load "DEVICE_FPGA_FT601_LIBRARY;
         goto fail;
     }
     ctx->dev.pfnFT_AbortPipe = (ULONG(WINAPI *)(HANDLE, UCHAR))
@@ -1887,7 +1893,7 @@ VOID DeviceFPGA_RxTlpAsynchronous(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_F
     DWORD status, cbRead, cdwTlpDataConsumed, cbReadMax = 0x10000;
     DWORD cbBuffer = 0, oBuffer = 0, cEmptyRead = 0;
     PBYTE pbBuffer = NULL;
-    BOOL fAsync = cbBytesToRead > 0x4000;
+    BOOL fAsyncInProgress = FALSE, fAsync = cbBytesToRead > 0x4000;
     PTLP_CALLBACK_BUF_MRd_SCATTER prxbuf = ctx->pMRdBufferX;
     pbBuffer = ctx->rxbuf.pb;
     if(prxbuf) {
@@ -2128,7 +2134,7 @@ VOID DeviceFPGA_ReadScatter(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _Inout_ PP
                 MEM_SCATTER_STACK_PUSH(pMEM, 0);
             }
         }
-        DeviceFPGA_ReadScatter_Impl(ctxLC, cMEMs, ppMEMs);
+            DeviceFPGA_ReadScatter_Impl(ctxLC, cMEMs, ppMEMs);
         for(i = 0; i < cMEMs; i++) {
             pMEM = ppMEMs[i];
             if(!pMEM->f && MEM_SCATTER_ADDR_ISVALID(pMEM)) {
