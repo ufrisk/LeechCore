@@ -14,5 +14,6 @@ leechrpc_c.c
 leechrpc_s.c
 /files/lib
 /files/temp
+/files/ARM64
 /files/x86/lib
 /leechcorepyc/pkg_linux
