@@ -344,6 +344,7 @@ copy "$(ProjectDir)\leechcore.h" "$(SolutionDir)\includes\" /y
     <ClCompile Include="device_pmem.c" />
     <ClCompile Include="device_tmd.c" />
     <ClCompile Include="device_usb3380.c" />
+    <ClCompile Include="device_vmm.c" />
     <ClCompile Include="device_vmware.c" />
     <ClCompile Include="leechcore.c" />
     <ClCompile Include="leechrpcshared.c" />

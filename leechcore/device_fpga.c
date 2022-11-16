@@ -202,6 +202,7 @@ typedef struct tdDEVICE_CONTEXT_FPGA {
     } dev;
     struct {
         BOOL fEnabled;
+        BOOL fOldAsync;
         OVERLAPPED oOverlapped;
     } async;
     PVOID pMRdBufferX; // NULL || PTLP_CALLBACK_BUF_MRd || PTLP_CALLBACK_BUF_MRd_2
@@ -2369,6 +2370,7 @@ VOID DeviceFPGA_ReadScatter_NewAsync_Impl(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_C
         // 6.1: check no-read ops and update buffer pointer with previously read data
         cbBuffer += cbRead;
         if((cbRead == 0) || (cbRead == 0x14)) {
+            usleep(5);
             cEmptyRead++;
             if(cEmptyRead >= 0x30) {
                 break;
@@ -2439,7 +2441,7 @@ VOID DeviceFPGA_ReadScatter(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _Inout_ PP
                 MEM_SCATTER_STACK_PUSH(pMEM, 0);
             }
         }
-        if(ctx->async.fEnabled) {
+        if(ctx->async.fEnabled && !ctx->async.fOldAsync) {
             DeviceFPGA_ReadScatter_NewAsync_Impl(ctxLC, ctx, cMEMs, ppMEMs);
         } else {
             DeviceFPGA_ReadScatter_Impl(ctxLC, cMEMs, ppMEMs);
@@ -2899,8 +2901,9 @@ BOOL DeviceFPGA_SetOption(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _In_ QWORD
 #define FPGA_PARAMETER_DEVICE_INDEX    "devindex"
 #define FPGA_PARAMETER_DEVICE_ID       "bdf"
 
-#define FPGA_PARAMETER_ALGO_TINY        0x01
-#define FPGA_PARAMETER_ALGO_SYNCHRONOUS 0x02
+#define FPGA_PARAMETER_ALGO_TINY                0x01
+#define FPGA_PARAMETER_ALGO_SYNCHRONOUS         0x02
+#define FPGA_PARAMETER_ALGO_OLDASYNCHRONOUS     0x04
 
 _Success_(return)
 BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo)
@@ -2963,6 +2966,8 @@ BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
     v = LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_READ_ALGORITHM);
     ctx->fAlgorithmReadTiny = ((v & FPGA_PARAMETER_ALGO_TINY) ? TRUE : FALSE) || ctx->perf.F_TINY;
     ctx->async.fEnabled = ctx->async.fEnabled && !(v & FPGA_PARAMETER_ALGO_SYNCHRONOUS);
+    ctx->async.fOldAsync = ctx->async.fEnabled && (v & FPGA_PARAMETER_ALGO_OLDASYNCHRONOUS);
+
     // return
     lcprintfv(ctxLC, 
         "DEVICE: FPGA: %s PCIe gen%i x%i [%i,%i,%i] [v%i.%i,%04x] [%s,%s]\n",

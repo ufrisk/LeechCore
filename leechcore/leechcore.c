@@ -26,6 +26,7 @@ _Success_(return) BOOL Device3380_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC
 _Success_(return) BOOL DeviceFile_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo);
 _Success_(return) BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo);
 _Success_(return) BOOL DevicePMEM_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo);
+_Success_(return) BOOL DeviceVMM_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo);
 _Success_(return) BOOL DeviceVMWare_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo);
 _Success_(return) BOOL DeviceTMD_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo);
 _Success_(return) BOOL LeechRpc_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo);
@@ -240,6 +241,11 @@ VOID LcCreate_FetchDevice(_Inout_ PLC_CONTEXT ctx)
     if(0 == _strnicmp("pmem", ctx->Config.szDevice, 4)) {
         strncpy_s(ctx->Config.szDeviceName, sizeof(ctx->Config.szDeviceName), "pmem", _TRUNCATE);
         ctx->pfnCreate = DevicePMEM_Open;
+        return;
+    }
+    if(0 == _strnicmp("vmm://", ctx->Config.szDevice, 6)) {
+        strncpy_s(ctx->Config.szDeviceName, sizeof(ctx->Config.szDeviceName), "vmm", _TRUNCATE);
+        ctx->pfnCreate = DeviceVMM_Open;
         return;
     }
     if(0 == _strnicmp("vmware", ctx->Config.szDevice, 4)) {
@@ -1026,6 +1032,12 @@ BOOL LcGetOption_DoWork(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _Out_ PQWORD
         case LC_OPT_CORE_STATISTICS_CALL_TIME:
             if((DWORD)fOption > LC_STATISTICS_ID_MAX) { return FALSE; }
             *pqwValue = ctxLC->CallStat.Call[(DWORD)fOption].tm;
+            return TRUE;
+        case LC_OPT_CORE_VOLATILE:
+            *pqwValue = ctxLC->Config.fVolatile ? 1 : 0;
+            return TRUE;
+        case LC_OPT_CORE_READONLY:
+            *pqwValue = ctxLC->Config.fWritable ? 0 : 1;
             return TRUE;
     }
     if(ctxLC->pfnGetOption) {

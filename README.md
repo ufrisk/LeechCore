@@ -207,3 +207,6 @@ v1.0-1.8
 [v2.13](https://github.com/ufrisk/LeechCore/releases/tag/v2.13)
 * FPGA performance improvements.
 * ARM64 Windows support.
+
+[v2.14](https://github.com/ufrisk/LeechCore/releases/tag/v2.14)
+* VMM loopback device.

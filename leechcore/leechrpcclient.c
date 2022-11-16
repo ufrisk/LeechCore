@@ -235,6 +235,9 @@ VOID LeechRPC_Close(_Inout_ PLC_CONTEXT ctxLC)
     if(LeechRPC_SubmitCommand(ctxLC, &Msg, LEECHRPC_MSGTYPE_CLOSE_RSP, &pMsgRsp)) {
         LocalFree(pMsgRsp);
     }
+    while(ctx->fHousekeeperThreadIsRunning) {
+        SwitchToThread();
+    }
     if(ctx->hPipeMem_Rd) {
         CloseHandle(ctx->hPipeMem_Rd);
         ctx->hPipeMem_Rd = NULL;

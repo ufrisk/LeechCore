@@ -54,6 +54,9 @@
     <ClCompile Include="device_vmware.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="device_vmm.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="leechrpc.h">
