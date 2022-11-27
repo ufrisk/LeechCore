@@ -2195,10 +2195,9 @@ VOID DeviceFPGA_ReadScatter_NewAsync_Impl_Tx(_In_ PLC_CONTEXT ctxLC, _In_ PDEVIC
             pai->iMEM++;
             continue;
         }
+        // NB! TINY algorithm is not yet supported by 'NewAsync'!
         f32 = (pMEM->qwA < 0x100000000);
         fTiny = ctx->fAlgorithmReadTiny || (pMEM->cb != 0x1000);
-
-
         o = 0;
         while(o < pMEM->cb) {
             cb = (WORD)(fTiny ? min(0x80, pMEM->cb - o) : pMEM->cb);
@@ -2430,18 +2429,25 @@ VOID DeviceFPGA_ReadScatter(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _Inout_ PP
 {
     PDEVICE_CONTEXT_FPGA ctx = (PDEVICE_CONTEXT_FPGA)ctxLC->hDevice;
     DWORD i, iRetry;
-    BOOL fRetry;
+    BOOL fRetry, fNewAsync;
     PMEM_SCATTER pMEM;
     if(!ctx->wDeviceId) { return; }
+    // NewAsync is faster but currently do not support partial page TLP reads.
+    // NewAsync non-full page reads may fail or may be corrupted. Support is
+    // planned for the future - but for now use the old async for partial pages.
+    fNewAsync = ctx->async.fEnabled && !ctx->async.fOldAsync;
     for(iRetry = 0, fRetry = TRUE; (fRetry && (iRetry <= ctx->perf.RETRY_ON_ERROR)); iRetry++) {
         fRetry = FALSE;
         for(i = 0; i < cMEMs; i++) {
             pMEM = ppMEMs[i];
             if(!pMEM->f && MEM_SCATTER_ADDR_ISVALID(pMEM)) {
                 MEM_SCATTER_STACK_PUSH(pMEM, 0);
+                // NewAsync lack of functionality for non-full pages
+                // -> use old async for partial pages.
+                fNewAsync = fNewAsync && (pMEM->cb == 0x1000);
             }
         }
-        if(ctx->async.fEnabled && !ctx->async.fOldAsync) {
+        if(fNewAsync) {
             DeviceFPGA_ReadScatter_NewAsync_Impl(ctxLC, ctx, cMEMs, ppMEMs);
         } else {
             DeviceFPGA_ReadScatter_Impl(ctxLC, cMEMs, ppMEMs);
