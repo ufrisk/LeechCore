@@ -131,6 +131,21 @@ typedef struct tdElf64_Ehdr {
 } Elf64_Ehdr, *PElf64_Ehdr;
 
 //-----------------------------------------------------------------------------
+// DEFINES: LiME DUMP DEFINES
+//-----------------------------------------------------------------------------
+
+#define LIME_MAGIC              0x4C694D45
+#define LIME_VERSION            0x00000001
+
+typedef struct tdLIME_MEM_RANGE_HEADER {
+    unsigned int magic;
+    unsigned int version;
+    unsigned long long _s_addr;
+    unsigned long long _e_addr;
+    unsigned char reserved[8];
+} LIME_MEM_RANGE_HEADER, *PLIME_MEM_RANGE_HEADER;
+
+//-----------------------------------------------------------------------------
 // DEFINES: GENERAL
 //-----------------------------------------------------------------------------
 
@@ -141,12 +156,14 @@ typedef struct tdDEVICE_CONTEXT_FILE {
     struct {
         BOOL fValidCoreDump;
         BOOL fValidCrashDump;
+        BOOL fValidLimeDump;
         BOOL fValidVMwareDump;
         BOOL f32;
         union {
             BYTE pbHdr[0x2000];
             Elf64_Ehdr Elf64;
             Elf32_Ehdr Elf32;
+            LIME_MEM_RANGE_HEADER LiME;
         };
     } CrashOrCoreDump;
 } DEVICE_CONTEXT_FILE, *PDEVICE_CONTEXT_FILE;
@@ -375,14 +392,60 @@ fail:
 }
 
 /*
-* Try to initialize a Microsoft Crash Dump file (full dump only) _or_ a VirtualBox
-* core dump file. This is done by reading the dump header. If this is not a
-* dump file the function will still return TRUE - but not initialize the
-* ctxFile->MsCrashDump struct.On fatal non-recoverable errors FALSE is returned.
+* Initialize a LiME memory dump. In LiME memory dumps the headers are
+* spread out throughout the dump file (before each memory range).
+* -- ctxLC
 * -- return
 */
 _Success_(return)
-BOOL DeviceFile_MsCrashCoreDumpInitialize(_In_ PLC_CONTEXT ctxLC)
+BOOL DeviceFile_DumpInitialize_LiME(_In_ PLC_CONTEXT ctxLC)
+{
+    PDEVICE_CONTEXT_FILE ctx = (PDEVICE_CONTEXT_FILE)ctxLC->hDevice;
+    QWORD cbRangeMax, cbRangeFileMax, cbPreviousRangeMax = 0, oLimeHeader = 0;
+    LIME_MEM_RANGE_HEADER LimeHeader;
+    BOOL f;
+    while((oLimeHeader + sizeof(LIME_MEM_RANGE_HEADER) + 0x1000) <= ctx->cbFile) {
+        ZeroMemory(&LimeHeader, sizeof(LIME_MEM_RANGE_HEADER));
+        _fseeki64(ctx->pFile, oLimeHeader, SEEK_SET);
+        fread(&LimeHeader, 1, sizeof(LIME_MEM_RANGE_HEADER), ctx->pFile);
+        if(oLimeHeader && !LimeHeader.magic && !LimeHeader.version) {
+            return TRUE;
+        }
+        f = (LimeHeader.magic == LIME_MAGIC) && (LimeHeader.version == LIME_VERSION) &&
+            ((LimeHeader._s_addr & 0xfff) == 0) && (LimeHeader._s_addr >= cbPreviousRangeMax) &&
+            (((LimeHeader._e_addr & 0xfff) == 0xfff) || ((LimeHeader._e_addr & 0xfff) == 0x000)) &&
+            (LimeHeader._s_addr < LimeHeader._e_addr);
+        if(!f) {
+            lcprintf(ctxLC, "DEVICE: FAIL: Parse LiME header at offset: 0x%llx\n", oLimeHeader);
+            return FALSE;
+        }
+        cbRangeMax = (LimeHeader._e_addr + 1) & ~0xfff;
+        cbRangeFileMax = (ctx->cbFile + LimeHeader._s_addr + oLimeHeader - sizeof(LIME_MEM_RANGE_HEADER)) & ~0xfff;
+        if(cbRangeMax > cbRangeFileMax) {
+            lcprintf(ctxLC, "DEVICE: WARN: memory range exceeds file size - adjusting...\n");
+            cbRangeMax = cbRangeFileMax;
+        }
+        if(!LcMemMap_AddRange(ctxLC, (QWORD)LimeHeader._s_addr, cbRangeMax - (QWORD)LimeHeader._s_addr, oLimeHeader + 0x20)) {
+            lcprintf(ctxLC, "DEVICE: FAIL: unable to add range to memory map. (%016llx %016llx %016llx)\n", LimeHeader._s_addr, cbRangeMax - LimeHeader._s_addr, oLimeHeader + 0x20);
+            return FALSE;
+        }
+        oLimeHeader += sizeof(LIME_MEM_RANGE_HEADER) + cbRangeMax - (QWORD)LimeHeader._s_addr;
+        cbPreviousRangeMax = cbRangeMax;
+    }
+    return cbPreviousRangeMax ? TRUE : FALSE;
+}
+
+/*
+* Try to initialize a dump file of one of the supported formats below:
+* - Microsoft Crash Dump file (full dump only).
+* - LiME dump file.
+* - VirtualBox core dump file.
+* This is done by reading the dump header. If this is not a dump file the
+* -- ctxLC
+* -- return = FALSE on fatal non-recoverable error, otherwise TRUE.
+*/
+_Success_(return)
+BOOL DeviceFile_DumpInitialize(_In_ PLC_CONTEXT ctxLC)
 {
     PDEVICE_CONTEXT_FILE ctx = (PDEVICE_CONTEXT_FILE)ctxLC->hDevice;
     BOOL f, fElfLoadSegment = FALSE;
@@ -486,6 +549,11 @@ BOOL DeviceFile_MsCrashCoreDumpInitialize(_In_ PLC_CONTEXT ctxLC)
         }
         if(!fElfLoadSegment) { return FALSE; }
         ctx->CrashOrCoreDump.fValidCoreDump = TRUE;
+    }
+    if((ctx->CrashOrCoreDump.LiME.magic == LIME_MAGIC) && (ctx->CrashOrCoreDump.LiME.version == LIME_VERSION)) {
+        // LiME memory dump: ranges are spread out in file -> parse this in separate function:
+        if(!DeviceFile_DumpInitialize_LiME(ctxLC)) { return FALSE; }
+        ctx->CrashOrCoreDump.fValidLimeDump;
     }
     return TRUE;
 }
@@ -632,7 +700,7 @@ BOOL DeviceFile_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
         DeviceFile_VMwareDumpInitialize(ctxLC);
     }
     if(!ctx->CrashOrCoreDump.fValidVMwareDump) {
-        if(!DeviceFile_MsCrashCoreDumpInitialize(ctxLC)) { goto fail; }
+        if(!DeviceFile_DumpInitialize(ctxLC)) { goto fail; }
     }    
     if(ctx->CrashOrCoreDump.fValidCrashDump) {
         lcprintfv(ctxLC, "DEVICE: Successfully opened file: '%s' as Microsoft Crash Dump.\n", ctx->szFileName);
