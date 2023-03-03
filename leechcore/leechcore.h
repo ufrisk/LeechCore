@@ -96,10 +96,10 @@ extern "C" {
 
     typedef struct LC_CONFIG {
         // below are set by caller
-        DWORD dwVersion;                        // must equal LC_CREATE_VERSION
+        DWORD dwVersion;                        // must equal LC_CONFIG_VERSION
         DWORD dwPrintfVerbosity;                // printf verbosity according to LC_PRINTF_*
         CHAR szDevice[MAX_PATH];                // device connection string - see wiki for additional info.
-        CHAR szRemote[MAX_PATH];                // remote connection striLC_CONFIG_VERSIONng - see wiki for additional info.
+        CHAR szRemote[MAX_PATH];                // remote connection string - see wiki for additional info.
         _Check_return_opt_ int(*pfn_printf_opt)(_In_z_ _Printf_format_string_ char const *const _Format, ...);
         // below are set by caller, updated by LeecCore
         QWORD paMax;                            // max physical address (disables any max address auto-detect).
