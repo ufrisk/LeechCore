@@ -213,4 +213,6 @@ v1.0-1.8
 * VMM loopback device.
 
 Latest:
+* Multi-threaded file access.
+* Volatile memory file support.
 * Support for LiME memory dump files.

@@ -1,6 +1,6 @@
 // device_file.c : implementation related to file backed memory acquisition device.
 //
-// (c) Ulf Frisk, 2018-2022
+// (c) Ulf Frisk, 2018-2023
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include "leechcore.h"
@@ -149,8 +149,15 @@ typedef struct tdLIME_MEM_RANGE_HEADER {
 // DEFINES: GENERAL
 //-----------------------------------------------------------------------------
 
+#define FILE_MAX_THREADS        4
+
 typedef struct tdDEVICE_CONTEXT_FILE {
-    FILE *pFile;
+    struct {
+        FILE *h;
+        CRITICAL_SECTION Lock;
+    } File[FILE_MAX_THREADS];
+    BOOL fMultiThreaded;
+    DWORD iFileNext;                // next file handle to use for a read (in multi-threaded mode)
     QWORD cbFile;
     CHAR szFileName[MAX_PATH];
     struct {
@@ -172,18 +179,53 @@ typedef struct tdDEVICE_CONTEXT_FILE {
 // GENERAL 'DEVICE' FUNCTIONALITY BELOW:
 //-----------------------------------------------------------------------------
 
+/*
+* Contigious file read. This is used by LiveKD since it is otherwise very slow
+* to read scattered memory using LiveKD.
+* -- ctxRC
+*/
+VOID DeviceFile_ReadContigious(_Inout_ PLC_READ_CONTIGIOUS_CONTEXT ctxRC)
+{
+    PDEVICE_CONTEXT_FILE ctx = (PDEVICE_CONTEXT_FILE)ctxRC->ctxLC->hDevice;
+    EnterCriticalSection(&ctx->File[0].Lock);
+    if(0 == _fseeki64(ctx->File[0].h, ctxRC->paBase, SEEK_SET)) {
+        ctxRC->cbRead = (DWORD)fread(ctxRC->pb, 1, ctxRC->cb, ctx->File[0].h);
+    }
+    LeaveCriticalSection(&ctx->File[0].Lock);
+}
+
+/*
+* Default scatter read function - to be called by LeechCore. This function may
+* be called in multi-threaded mode if the ctx->fMultiThreaded flag is set. In
+* that case load-balance accesses amongst the file handles in the ctx->File[].
+* -- ctxLC
+* -- cpMEMs
+* -- ppMEMs
+*/
 VOID DeviceFile_ReadScatter(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cpMEMs, _Inout_ PPMEM_SCATTER ppMEMs)
 {
     PDEVICE_CONTEXT_FILE ctx = (PDEVICE_CONTEXT_FILE)ctxLC->hDevice;
-    DWORD i;
+    DWORD iMEM, iFile = 0, cTryLock = 0;
     PMEM_SCATTER pMEM;
-    for(i = 0; i < cpMEMs; i++) {
-        pMEM = ppMEMs[i];
-        if(pMEM->f || (pMEM->qwA == (QWORD)-1)) { continue; }
-        if(pMEM->qwA != (QWORD)_ftelli64(ctx->pFile)) {
-            if(_fseeki64(ctx->pFile, pMEM->qwA, SEEK_SET)) { continue; }
+    if(ctx->fMultiThreaded) {
+        // in a multi-threaded environment:
+        // load-balance file access amongst available file handles
+        iFile = InterlockedIncrement(&ctx->iFileNext) % FILE_MAX_THREADS;
+        while(!TryEnterCriticalSection(&ctx->File[iFile].Lock)) {
+            iFile = InterlockedIncrement(&ctx->iFileNext) % FILE_MAX_THREADS;
+            if(++cTryLock == FILE_MAX_THREADS) {
+                EnterCriticalSection(&ctx->File[iFile].Lock);
+                break;
+            }
         }
-        pMEM->f = pMEM->cb == (DWORD)fread(pMEM->pb, 1, pMEM->cb, ctx->pFile);
+    }
+    for(iMEM = 0; iMEM < cpMEMs; iMEM++) {
+        pMEM = ppMEMs[iMEM];
+        if(pMEM->f || (pMEM->qwA == (QWORD)-1)) { continue; }
+        if(pMEM->qwA != (QWORD)_ftelli64(ctx->File[iFile].h)) {
+            if(_fseeki64(ctx->File[iFile].h, pMEM->qwA, SEEK_SET)) { continue; }
+        }
+        pMEM->f = pMEM->cb == (DWORD)fread(pMEM->pb, 1, pMEM->cb, ctx->File[iFile].h);
         if(pMEM->f) {
             if(ctxLC->fPrintf[LC_PRINTF_VVV]) {
                 lcprintf_fn(
@@ -198,13 +240,63 @@ VOID DeviceFile_ReadScatter(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cpMEMs, _Inout_ P
             lcprintfvvv_fn(ctxLC, "READ FAILED:\n        offset=%016llx req_len=%08x\n", pMEM->qwA, pMEM->cb);
         }
     }
+    if(ctx->fMultiThreaded) {
+        LeaveCriticalSection(&ctx->File[iFile].Lock);
+    }
 }
 
-VOID DeviceFile_ReadContigious(_Inout_ PLC_READ_CONTIGIOUS_CONTEXT ctxRC)
+/*
+* Scatter write function - to be called by LeechCore. This function may
+* be called in multi-threaded mode if the ctx->fMultiThreaded flag is set. In
+* that case load-balance accesses amongst the file handles in the ctx->File[].
+* Writes are only supported by special devices and must be set in the write=1
+* parameter in the device string.
+* Do not use for normal file access - it may corrupt files!
+* -- ctxLC
+* -- cpMEMs
+* -- ppMEMs
+*/
+VOID DeviceFile_WriteScatter(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cpMEMs, _Inout_ PPMEM_SCATTER ppMEMs)
 {
-    PDEVICE_CONTEXT_FILE ctx = (PDEVICE_CONTEXT_FILE)ctxRC->ctxLC->hDevice;
-    if(_fseeki64(ctx->pFile, ctxRC->paBase, SEEK_SET)) { return; }
-    ctxRC->cbRead = (DWORD)fread(ctxRC->pb, 1, ctxRC->cb, ctx->pFile);
+    PDEVICE_CONTEXT_FILE ctx = (PDEVICE_CONTEXT_FILE)ctxLC->hDevice;
+    DWORD iMEM, iFile = 0, cTryLock = 0;
+    PMEM_SCATTER pMEM;
+    if(ctx->fMultiThreaded) {
+        // in a multi-threaded environment:
+        // load-balance file access amongst available file handles
+        iFile = InterlockedIncrement(&ctx->iFileNext) % FILE_MAX_THREADS;
+        while(!TryEnterCriticalSection(&ctx->File[iFile].Lock)) {
+            iFile = InterlockedIncrement(&ctx->iFileNext) % FILE_MAX_THREADS;
+            if(++cTryLock == FILE_MAX_THREADS) {
+                EnterCriticalSection(&ctx->File[iFile].Lock);
+                break;
+            }
+        }
+    }
+    for(iMEM = 0; iMEM < cpMEMs; iMEM++) {
+        pMEM = ppMEMs[iMEM];
+        if(pMEM->f || (pMEM->qwA == (QWORD)-1)) { continue; }
+        if(pMEM->qwA != (QWORD)_ftelli64(ctx->File[iFile].h)) {
+            if(_fseeki64(ctx->File[iFile].h, pMEM->qwA, SEEK_SET)) { continue; }
+        }
+        pMEM->f = pMEM->cb == (DWORD)fwrite(pMEM->pb, 1, pMEM->cb, ctx->File[iFile].h);
+        if(pMEM->f) {
+            if(ctxLC->fPrintf[LC_PRINTF_VVV]) {
+                lcprintf_fn(
+                    ctxLC,
+                    "WRITE:\n        offset=%016llx req_len=%08x\n",
+                    pMEM->qwA,
+                    pMEM->cb
+                );
+                Util_PrintHexAscii(ctxLC, pMEM->pb, pMEM->cb, 0);
+            }
+        } else {
+            lcprintfvvv_fn(ctxLC, "WRITE FAILED:\n        offset=%016llx req_len=%08x\n", pMEM->qwA, pMEM->cb);
+        }
+    }
+    if(ctx->fMultiThreaded) {
+        LeaveCriticalSection(&ctx->File[iFile].Lock);
+    }
 }
 
 //-----------------------------------------------------------------------------
@@ -260,7 +352,7 @@ VOID DeviceFile_VMwareDumpInitialize(_In_ PLC_CONTEXT ctxLC)
         fopen_s(&pFile, szFileName, "rb");
     }
     if(!pFile) {
-        lcprintf(ctxLC, "DEVICE: WARN: Unable to open VMWare .vmss or .vmsn file - assuming 1:1 memory space.\n");
+        lcprintf(ctxLC, "DEVICE: WARN: Unable to open VMware .vmss or .vmsn file - assuming 1:1 memory space.\n");
         goto fail;
     }
     _fseeki64(pFile, 0, SEEK_SET);
@@ -330,15 +422,15 @@ BOOL DeviceFile_MsCrashCoreDumpInitialize_BitmapFullOrActiveMemory(_In_ PLC_CONT
     BOOL fResult = FALSE, fPageValid = FALSE;
     QWORD cb, cbFileBase, iPageBase, iPage, cMaxBits, iPageEx, b;
     // 1: fetch header:
-    _fseeki64(ctx->pFile, 0x2000, SEEK_SET);
-    fread(&hdr, 1, sizeof(_DUMP_HEADER_BITMAP_FULL64), ctx->pFile);
+    _fseeki64(ctx->File[0].h, 0x2000, SEEK_SET);
+    fread(&hdr, 1, sizeof(_DUMP_HEADER_BITMAP_FULL64), ctx->File[0].h);
     if((hdr.Signature != 0x504d5544504d4446) && (hdr.Signature != 0x504d5544504d4453)) { goto fail; }   // !'FDMPDUMP' && !'SDMPDUMP' && 
     if((hdr.cPages > hdr.cBits) || (hdr.cBits > 0x7fffffff) || (hdr.cbFileBase & 0xfff) || (hdr.cbFileBase > 0x01000000)) { goto fail; }
     cbFileBase = hdr.cbFileBase;
     // 2: fetch bits:
     cb = hdr.cBits / 8;
     if(!(pb = LocalAlloc(LMEM_ZEROINIT, (SIZE_T)cb))) { goto fail; }
-    if(cb != fread(pb, 1, (SIZE_T)cb, ctx->pFile)) { goto fail; }
+    if(cb != fread(pb, 1, (SIZE_T)cb, ctx->File[0].h)) { goto fail; }
     // 3: walk bitmap - add ranges!
     cMaxBits = hdr.cBits & 0xffffffc0;
     for(iPage = 0; iPage < cMaxBits; iPage += 64) {
@@ -406,8 +498,8 @@ BOOL DeviceFile_DumpInitialize_LiME(_In_ PLC_CONTEXT ctxLC)
     BOOL f;
     while((oLimeHeader + sizeof(LIME_MEM_RANGE_HEADER) + 0x1000) <= ctx->cbFile) {
         ZeroMemory(&LimeHeader, sizeof(LIME_MEM_RANGE_HEADER));
-        _fseeki64(ctx->pFile, oLimeHeader, SEEK_SET);
-        fread(&LimeHeader, 1, sizeof(LIME_MEM_RANGE_HEADER), ctx->pFile);
+        _fseeki64(ctx->File[0].h, oLimeHeader, SEEK_SET);
+        fread(&LimeHeader, 1, sizeof(LIME_MEM_RANGE_HEADER), ctx->File[0].h);
         if(oLimeHeader && !LimeHeader.magic && !LimeHeader.version) {
             return TRUE;
         }
@@ -454,8 +546,8 @@ BOOL DeviceFile_DumpInitialize(_In_ PLC_CONTEXT ctxLC)
     PElf32_Ehdr pElf32 = &ctx->CrashOrCoreDump.Elf32;
     _PPHYSICAL_MEMORY_DESCRIPTOR32 pM32 = (_PPHYSICAL_MEMORY_DESCRIPTOR32)(ctx->CrashOrCoreDump.pbHdr + 0x064);
     _PPHYSICAL_MEMORY_DESCRIPTOR64 pM64 = (_PPHYSICAL_MEMORY_DESCRIPTOR64)(ctx->CrashOrCoreDump.pbHdr + 0x088);
-    _fseeki64(ctx->pFile, 0, SEEK_SET);
-    fread(ctx->CrashOrCoreDump.pbHdr, 1, 0x2000, ctx->pFile);
+    _fseeki64(ctx->File[0].h, 0, SEEK_SET);
+    fread(ctx->CrashOrCoreDump.pbHdr, 1, 0x2000, ctx->File[0].h);
     if((CDMP_DWORD(0x000) == DUMP_SIGNATURE) && (CDMP_DWORD(0x004) == DUMP_VALID_DUMP64) && (CDMP_DWORD(0xf98) == DUMP_TYPE_FULL) && (CDMP_DWORD(0x030) == IMAGE_FILE_MACHINE_AMD64)) {
         // PAGEDUMP (64-bit memory dump) and FULL DUMP
         lcprintfvv_fn(ctxLC, "64-bit Microsoft Crash Dump identified.\n");
@@ -649,22 +741,52 @@ BOOL DeviceFile_Command(
 
 VOID DeviceFile_Close(_Inout_ PLC_CONTEXT ctxLC)
 {
+    DWORD i;
     PDEVICE_CONTEXT_FILE ctx = (PDEVICE_CONTEXT_FILE)ctxLC->hDevice;
-    if(!ctx) { return; }
-    if(ctx->pFile) { fclose(ctx->pFile); }
-    LocalFree(ctx);
-    ctxLC->hDevice = 0;
+    if(ctx) {
+        ctxLC->hDevice = 0;
+        if(ctx->fMultiThreaded) {
+            for(i = 0; i < FILE_MAX_THREADS; i++) {
+                if(ctx->File[i].h) {
+                    fclose(ctx->File[i].h);
+                    DeleteCriticalSection(&ctx->File[i].Lock);
+                }
+            }
+        } else {
+            if(ctx->File[0].h) {
+                fclose(ctx->File[0].h);
+          }
+        }  
+        LocalFree(ctx);
+    }
 }
+
+#define DEVICE_FILE_PARAMETER_FILE                  "file"
+#define DEVICE_FILE_PARAMETER_WRITE                 "write"
+#define DEVICE_FILE_PARAMETER_VOLATILE              "volatile"
 
 _Success_(return)
 BOOL DeviceFile_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo)
 {
+    DWORD i;
+    LPSTR szType;
     PDEVICE_CONTEXT_FILE ctx;
+    PLC_DEVICE_PARAMETER_ENTRY pParam;
     if(ppLcCreateErrorInfo) { *ppLcCreateErrorInfo = NULL; }
     if(!(ctx = (PDEVICE_CONTEXT_FILE)LocalAlloc(LMEM_ZEROINIT, sizeof(DEVICE_CONTEXT_FILE)))) { return FALSE; }
     lcprintfv(ctxLC, "DEVICE OPEN: %s\n", ctxLC->Config.szDeviceName);
+    ctxLC->Config.fWritable = FALSE;                    // Files are assumed to be read-only.
+    ctxLC->Config.fVolatile = FALSE;                    // Files are assumed to be static non-volatile.
     if(0 == _strnicmp("file://", ctxLC->Config.szDevice, 7)) {
-        strncpy_s(ctx->szFileName, _countof(ctx->szFileName), ctxLC->Config.szDevice + 7, _countof(ctxLC->Config.szDevice) - 7);
+        if((pParam = LcDeviceParameterGet(ctxLC, DEVICE_FILE_PARAMETER_FILE)) && pParam->szValue) {
+            // we have a file name on the new format, i.e. fpga://file=<filename> - use the new format.
+            strncpy_s(ctx->szFileName, _countof(ctx->szFileName), pParam->szValue, _TRUNCATE);
+            ctxLC->Config.fVolatile = LcDeviceParameterGetNumeric(ctxLC, DEVICE_FILE_PARAMETER_VOLATILE) ? TRUE : FALSE;
+            ctxLC->Config.fWritable = LcDeviceParameterGetNumeric(ctxLC, DEVICE_FILE_PARAMETER_WRITE) ? TRUE : FALSE;
+        } else {
+            // we have a file name on the old format, i.e. fpga://<filename> - use the old format.
+            strncpy_s(ctx->szFileName, _countof(ctx->szFileName), ctxLC->Config.szDevice + 7, _countof(ctxLC->Config.szDevice) - 7);
+        }
     } else if(0 == _stricmp(ctxLC->Config.szDevice, "livekd")) {
         strcpy_s(ctx->szFileName, _countof(ctx->szFileName), "C:\\WINDOWS\\livekd.dmp");
     } else if(0 == _stricmp(ctxLC->Config.szDevice, "dumpit")) {
@@ -672,19 +794,22 @@ BOOL DeviceFile_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
     } else {
         strncpy_s(ctx->szFileName, _countof(ctx->szFileName), ctxLC->Config.szDevice, _countof(ctxLC->Config.szDevice));
     }
-    // open backing file
-    if(fopen_s(&ctx->pFile, ctx->szFileName, "rb") || !ctx->pFile) { goto fail; }
-    if(_fseeki64(ctx->pFile, 0, SEEK_END)) { goto fail; }   // seek to end of file
-    ctx->cbFile = _ftelli64(ctx->pFile);                    // get current file pointer
-    if(ctx->cbFile < 0x01000000) { goto fail; }             // minimum allowed dump file size = 16MB
-    if(ctx->cbFile > 0xffff000000000000) { goto fail; }     // file too large
+    // open backing file:
+    if(fopen_s(&ctx->File[0].h, ctx->szFileName, (ctxLC->Config.fWritable ? "r+b" : "rb")) || !ctx->File[0].h) { goto fail; }
+    InitializeCriticalSection(&ctx->File[0].Lock);
+    if(_fseeki64(ctx->File[0].h, 0, SEEK_END)) { goto fail; }   // seek to end of file
+    ctx->cbFile = _ftelli64(ctx->File[0].h);                    // get current file pointer
+    if(ctx->cbFile < 0x01000000) { goto fail; }                 // minimum allowed dump file size = 16MB
+    if(ctx->cbFile > 0xffff000000000000) { goto fail; }         // file too large
     ctxLC->hDevice = (HANDLE)ctx;
-    // set callback functions and fix up config
+    // set callback functions and fix up config:
     ctxLC->pfnClose = DeviceFile_Close;
     ctxLC->pfnReadScatter = DeviceFile_ReadScatter;
     ctxLC->pfnGetOption = DeviceFile_GetOption;
     ctxLC->pfnCommand = DeviceFile_Command;
-    ctxLC->Config.fVolatile = FALSE;                  // Files are assumed to be static non-volatile.
+    if(ctxLC->Config.fWritable) {
+        ctxLC->pfnWriteScatter = DeviceFile_WriteScatter;
+    }
     if(strstr(ctx->szFileName, "DumpIt.dmp")) {
         ctxLC->Config.fVolatile = TRUE;               // DumpIt LIVEKD files are volatile.
     }
@@ -701,20 +826,38 @@ BOOL DeviceFile_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
     }
     if(!ctx->CrashOrCoreDump.fValidVMwareDump) {
         if(!DeviceFile_DumpInitialize(ctxLC)) { goto fail; }
-    }    
+    }
+    // try upgrade to multi-threaded access:
+    if(!fopen_s(&ctx->File[1].h, ctx->szFileName, (ctxLC->Config.fWritable ? "r+b" : "rb"))) {
+        // 2nd file handle successfully opened - upgrade to multi-threaded access.
+        ctxLC->fMultiThread = TRUE;
+        ctx->fMultiThreaded = TRUE;
+        InitializeCriticalSection(&ctx->File[1].Lock);
+        for(i = 2; i < FILE_MAX_THREADS; i++) {
+            if(fopen_s(&ctx->File[i].h, ctx->szFileName, (ctxLC->Config.fWritable ? "r+b" : "rb"))) { break; }
+            InitializeCriticalSection(&ctx->File[i].Lock);
+        }
+    }
+    // print result and return:
     if(ctx->CrashOrCoreDump.fValidCrashDump) {
-        lcprintfv(ctxLC, "DEVICE: Successfully opened file: '%s' as Microsoft Crash Dump.\n", ctx->szFileName);
+        szType = "Microsoft Crash Dump";
     } else if(ctx->CrashOrCoreDump.fValidCoreDump) {
-        lcprintfv(ctxLC, "DEVICE: Successfully opened file: '%s' as ELF Core Dump.\n", ctx->szFileName);
+        szType = "ELF Core Dump";
     } else if(ctx->CrashOrCoreDump.fValidVMwareDump) {
-        lcprintfv(ctxLC, "DEVICE: Successfully opened file: '%s' as VMware Dump.\n", ctx->szFileName);
+        szType = "VMware Dump";
     } else {
         LcMemMap_AddRange(ctxLC, 0, ctx->cbFile, 0);
-        lcprintfv(ctxLC, "DEVICE: Successfully opened file: '%s' as RAW Memory Dump.\n", ctx->szFileName);
+        szType = "RAW Memory Dump";
     }
+    lcprintfv(ctxLC, "DEVICE: Successfully opened file: '%s' as %s%s%s.\n", ctx->szFileName, (ctxLC->Config.fVolatile ? "volatile " : ""), (ctxLC->Config.fWritable ? "writable " : ""), szType);
     return TRUE;
 fail:
-    if(ctx->pFile) { fclose(ctx->pFile); }
+    for(i = 0; i < FILE_MAX_THREADS; i++) {
+        if(ctx->File[i].h) {
+            fclose(ctx->File[i].h);
+            DeleteCriticalSection(&ctx->File[i].Lock);
+        }
+    }
     LocalFree(ctx);
     ctxLC->hDevice = 0;
     lcprintf(ctxLC, "DEVICE: ERROR: Failed opening file: '%s'.\n", ctxLC->Config.szDevice);

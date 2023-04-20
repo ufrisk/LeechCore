@@ -1,6 +1,6 @@
 // oscompatibility.h : LeechCore Windows/Linux compatibility layer.
 //
-// (c) Ulf Frisk, 2017-2022
+// (c) Ulf Frisk, 2017-2023
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #ifndef __OSCOMPATIBILITY_H__
@@ -163,6 +163,7 @@ typedef struct tdCRITICAL_SECTION {
 VOID InitializeCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
 VOID DeleteCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
 VOID EnterCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
+BOOL TryEnterCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
 VOID LeaveCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
 
 typedef struct _SYSTEMTIME {

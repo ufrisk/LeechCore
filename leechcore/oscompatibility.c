@@ -1,6 +1,6 @@
 // oscompatibility.c : LeechCore Windows/Linux compatibility layer.
 //
-// (c) Ulf Frisk, 2017-2022
+// (c) Ulf Frisk, 2017-2023
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #ifdef _WIN32
@@ -250,6 +250,11 @@ VOID DeleteCriticalSection(LPCRITICAL_SECTION lpCriticalSection)
 VOID EnterCriticalSection(LPCRITICAL_SECTION lpCriticalSection)
 {
     pthread_mutex_lock(&lpCriticalSection->mutex);
+}
+
+BOOL TryEnterCriticalSection(LPCRITICAL_SECTION lpCriticalSection)
+{
+    return 0 == pthread_mutex_trylock(&lpCriticalSection->mutex);
 }
 
 VOID LeaveCriticalSection(LPCRITICAL_SECTION lpCriticalSection)

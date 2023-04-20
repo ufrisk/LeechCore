@@ -1,6 +1,6 @@
 // leechcore.c : core implementation of the the LeechCore physical memory acquisition library.
 //
-// (c) Ulf Frisk, 2020-2022
+// (c) Ulf Frisk, 2020-2023
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 
@@ -156,7 +156,7 @@ VOID LcCreate_FetchDeviceParameter(_Inout_ PLC_CONTEXT ctxLC)
     memcpy(szDevice, ctxLC->Config.szDevice, _countof(szDevice));
     if(!(szParameters = strstr(szDevice, "://"))) { return; }
     szParameters += 3;
-    while((szToken = strtok_s(szParameters, ",:;", &szTokenContext)) && (ctxLC->cDeviceParameter < LC_DEVICE_PARAMETER_MAX_ENTRIES)) {
+    while((szToken = strtok_s(szParameters, ",;", &szTokenContext)) && (ctxLC->cDeviceParameter < LC_DEVICE_PARAMETER_MAX_ENTRIES)) {
         szParameters = NULL;
         if(!(szDelim = strstr(szToken, "="))) { continue; }
         pe = &ctxLC->pDeviceParameter[ctxLC->cDeviceParameter];
