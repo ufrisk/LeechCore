@@ -391,6 +391,7 @@ VOID DeviceFile_VMwareDumpInitialize(_In_ PLC_CONTEXT ctxLC)
                     regions[iMemoryRegion].cbOffsetFile = *(PDWORD)(pb + oTag + 2 + 0x0d + 4) * 0x1000ULL;
                 }
                 oTag += cbTag;
+                if((oTag + 4 <= grp.cbSize) && (0 == *(PDWORD)(pb + oTag))) { oTag += 4; }
             }
             LocalFree(pb);
             for(iMemoryRegion = 0; iMemoryRegion < FILE_VMWARE_MEMORY_REGIONS_MAX; iMemoryRegion++) {
