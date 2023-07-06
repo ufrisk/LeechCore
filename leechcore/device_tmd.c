@@ -2,7 +2,7 @@
 //                Also known as: CVE-2018-1038. Please see Microsoft advisory for more information:
 //                https://portal.msrc.microsoft.com/en-US/security-guidance/advisory/CVE-2018-1038
 //
-// (c) Ulf Frisk, 2020-2022
+// (c) Ulf Frisk, 2020-2023
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include "leechcore.h"

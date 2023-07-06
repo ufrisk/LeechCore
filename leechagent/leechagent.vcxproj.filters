@@ -52,6 +52,9 @@
     <ClCompile Include="leechrpc_s.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="leechagent_svc.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="leechagent.h">
@@ -77,6 +80,9 @@
     </ClInclude>
     <ClInclude Include="..\includes\leechcore.h">
       <Filter>Header Files\leechcore</Filter>
+    </ClInclude>
+    <ClInclude Include="leechagent_svc.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

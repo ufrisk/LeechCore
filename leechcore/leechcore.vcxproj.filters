@@ -13,6 +13,12 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="Header Files\ob">
+      <UniqueIdentifier>{0d7968b8-c699-4099-a783-9482426d0802}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\ob">
+      <UniqueIdentifier>{b6ad61ff-a1bb-4908-90dc-116c7af6e5c1}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="device_file.c">
@@ -57,6 +63,15 @@
     <ClCompile Include="device_vmm.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="ob\ob_core.c">
+      <Filter>Source Files\ob</Filter>
+    </ClCompile>
+    <ClCompile Include="ob\ob_map.c">
+      <Filter>Source Files\ob</Filter>
+    </ClCompile>
+    <ClCompile Include="ob\ob_set.c">
+      <Filter>Source Files\ob</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="leechrpc.h">
@@ -82,6 +97,9 @@
     </ClInclude>
     <ClInclude Include="leechcore_internal.h">
       <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ob\ob.h">
+      <Filter>Header Files\ob</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

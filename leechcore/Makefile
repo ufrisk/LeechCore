@@ -7,10 +7,10 @@ CFLAGS  += -I. -D LINUX -D _GNU_SOURCE -shared -fPIC -fvisibility=hidden -pthrea
 # CFLAGS  += -fsanitize=pointer-compare -fsanitize=pointer-subtract -fanalyzer
 # DEBUG FLAGS ABOVE
 CFLAGS  += -fPIE -fPIC -pie -fstack-protector -D_FORTIFY_SOURCE=2 -O1 -Wl,-z,noexecstack
-CFLAGS  += -Wall -Wno-unused-result -Wno-unused-variable -Wno-unused-value -Wno-pointer-to-int-cast -Wno-int-to-pointer-cast
+CFLAGS  += -Wall -Wno-unused-result -Wno-unused-variable -Wno-unused-value -Wno-pointer-to-int-cast -Wno-int-to-pointer-cast -Wno-multichar
 LDFLAGS += -g -ldl -shared
 DEPS = leechcore.h
-OBJ = oscompatibility.o leechcore.o util.o memmap.o device_file.o device_fpga.o device_pmem.o device_tmd.o device_usb3380.o device_vmm.o device_vmware.o leechrpcclient.o
+OBJ = oscompatibility.o leechcore.o util.o memmap.o device_file.o device_fpga.o device_pmem.o device_tmd.o device_usb3380.o device_vmm.o device_vmware.o leechrpcclient.o ob/ob_core.o ob/ob_map.o ob/ob_set.o
 
 %.o: %.c $(DEPS)
 	$(CC) -c -o $@ $< $(CFLAGS)

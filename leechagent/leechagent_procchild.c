@@ -2,7 +2,7 @@
 //                 Child processes host execution environments such as the
 //                 Python environment which allows for execution of scripts.
 //
-// (c) Ulf Frisk, 2020-2022
+// (c) Ulf Frisk, 2020-2023
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 // In general, this child process is meant to be a temporary host process to
@@ -24,6 +24,8 @@
 #include <stdio.h>
 
 #define VMMDLL_VFS_FILELISTBLOB_VERSION     0xf88f0001
+#define VMMDLL_VFS_INITIALIZEBLOB_VERSION   0xfaaf0001
+#define VMMDLL_VFS_INITIALIZEBLOB_MAX_ARGC  64
 
 typedef struct tdVMM_HANDLE *VMM_HANDLE;
 
@@ -35,28 +37,51 @@ typedef struct tdVMMDLL_VFS_FILELISTBLOB_OPAQUE {
     BYTE pbOpaque[0];
 } VMMDLL_VFS_FILELISTBLOB_OPAQUE, *PVMMDLL_VFS_FILELISTBLOB_OPAQUE;
 
+typedef struct tdVMMDLL_VFS_INITIALIZEBLOB {
+    DWORD dwVersion;                        // VMMDLL_VFS_INITIALIZEBLOB_VERSION
+    DWORD cbStruct;
+    QWORD _FutureUse1[16];
+    DWORD _FutureUse2;
+    DWORD argc;
+    union {
+        LPSTR sz;
+        QWORD qw;
+    } argv[0];
+} VMMDLL_VFS_INITIALIZEBLOB, *PVMMDLL_VFS_INITIALIZEBLOB;
+
+typedef _Success_(return != NULL)   VMM_HANDLE  (*PFN_VMMDLL_Initialize)(_In_ DWORD argc, _In_ LPSTR argv[]);
+typedef _Success_(return)           BOOL        (*PFN_VMMDLL_InitializePlugins)(_In_ VMM_HANDLE hVMM);
+typedef                             VOID        (*PFN_VMMDLL_Close)(_In_opt_ _Post_ptr_invalid_ VMM_HANDLE hVMM);
+typedef                             VOID        (*PFN_VMMDLL_MemFree)(_Frees_ptr_opt_ PVOID pvMem);
+typedef _Success_(return != NULL)   PVMMDLL_VFS_FILELISTBLOB_OPAQUE(*PFN_VMMDLL_VfsListBlobU)(_In_ VMM_HANDLE hVMM, _In_ LPSTR uszPath);
+typedef                             NTSTATUS    (*PFN_VMMDLL_VfsReadU)(_In_ VMM_HANDLE hVMM, _In_ LPSTR  uszFileName, _Out_writes_to_(cb, *pcbRead) PBYTE pb, _In_ DWORD cb, _Out_ PDWORD pcbRead, _In_ ULONG64 cbOffset);
+typedef                             NTSTATUS    (*PFN_VMMDLL_VfsWriteU)(_In_ VMM_HANDLE hVMM, _In_ LPSTR  uszFileName, _In_reads_(cb) PBYTE pb, _In_ DWORD cb, _Out_ PDWORD pcbWrite, _In_ ULONG64 cbOffset);
+typedef _Success_(return)           BOOL        (*PFN_VMMDLL_ConfigGet)(_In_ VMM_HANDLE hVMM, _In_ ULONG64 fOption, _Out_ PULONG64 pqwValue);
+typedef _Success_(return)           BOOL        (*PFN_VMMDLL_ConfigSet)(_In_ VMM_HANDLE hVMM, _In_ ULONG64 fOption, _In_ ULONG64 qwValue);
+typedef _Success_(return)           BOOL        (*PFN_LeechCorePyC_EmbPythonInitialize)(_In_ HMODULE hDllPython);
+typedef                             BOOL        (*PFN_LeechCorePyC_EmbExecPyInMem)(_In_ LPSTR szPythonProgram);
+typedef                             VOID        (*PFN_LeechCorePyC_EmbClose)();
+
 typedef struct tdPROCCHILD_CONTEXT {
     BOOL fStateRunning;
     HMODULE hDllVmm;
     HMODULE hDllPython3;
     HMODULE hDllPython3X;
     HMODULE hDllLeechCorePyC;
-    VMM_HANDLE(*pfnVMMDLL_Initialize)(_In_ DWORD argc, _In_ LPSTR argv[]);
-    BOOL(*pfnVMMDLL_InitializePlugins)(VMM_HANDLE);
-    BOOL(*pfnVMMDLL_Close)(VMM_HANDLE);
-    VOID(*pfnVMMDLL_MemFree)(PVOID);
-    PVMMDLL_VFS_FILELISTBLOB_OPAQUE(*pfnVMMDLL_VfsListBlobU)(VMM_HANDLE, LPSTR);
-    DWORD(*pfnVMMDLL_VfsReadU)(VMM_HANDLE, _In_ LPSTR  uszFileName, _Out_writes_to_(cb, *pcbRead) PBYTE pb, _In_ DWORD cb, _Out_ PDWORD pcbRead, _In_ ULONG64 cbOffset);
-    DWORD(*pfnVMMDLL_VfsWriteU)(VMM_HANDLE, _In_ LPSTR  uszFileName, _In_reads_(cb) PBYTE pb, _In_ DWORD cb, _Out_ PDWORD pcbWrite, _In_ ULONG64 cbOffset);
-    BOOL(*pfnVMMDLL_ConfigGet)(VMM_HANDLE, _In_ ULONG64 fOption, _Out_ PULONG64 pqwValue);
-    BOOL(*pfnVMMDLL_ConfigSet)(VMM_HANDLE, _In_ ULONG64 fOption, _In_ ULONG64 qwValue);
-    BOOL(*pfnLeechCorePyC_EmbPythonInitialize)(_In_ HMODULE hDllPython);
-    BOOL(*pfnLeechCorePyC_EmbExecPyInMem)(_In_ LPSTR szPythonProgram);
-    VOID(*pfnLeechCorePyC_EmbClose)();
+    PFN_VMMDLL_Initialize pfnVMMDLL_Initialize;
+    PFN_VMMDLL_InitializePlugins pfnVMMDLL_InitializePlugins;
+    PFN_VMMDLL_Close pfnVMMDLL_Close;
+    PFN_VMMDLL_MemFree pfnVMMDLL_MemFree;
+    PFN_VMMDLL_VfsListBlobU pfnVMMDLL_VfsListBlobU;
+    PFN_VMMDLL_VfsReadU pfnVMMDLL_VfsReadU;
+    PFN_VMMDLL_VfsWriteU pfnVMMDLL_VfsWriteU;
+    PFN_VMMDLL_ConfigGet pfnVMMDLL_ConfigGet;
+    PFN_VMMDLL_ConfigSet pfnVMMDLL_ConfigSet;
+    PFN_LeechCorePyC_EmbPythonInitialize pfnLeechCorePyC_EmbPythonInitialize;
+    PFN_LeechCorePyC_EmbExecPyInMem pfnLeechCorePyC_EmbExecPyInMem;
+    PFN_LeechCorePyC_EmbClose pfnLeechCorePyC_EmbClose;
     HANDLE hPipeCmd_Rd;
     HANDLE hPipeCmd_Wr;
-    HANDLE hPipeMem_Rd;
-    HANDLE hPipeMem_Wr;
     CHAR szDevice[MAX_PATH];
     CHAR szRemote[MAX_PATH];
 } PROCCHILD_CONTEXT;
@@ -65,14 +90,45 @@ PROCCHILD_CONTEXT ctxProcChild = { 0 };
 
 /*
 * Initialize the MemProcFS / VMM.DLL
+* -- qwRemoteHLC: remote handle to the LeechCore process
+* -- pVfsInitBlob: pointer to the VFS initialization blob
 */
 _Success_(return)
-BOOL LeechAgent_ProcChild_InitializeVmm()
+BOOL LeechAgent_ProcChild_InitializeVmm(_In_opt_ PVMMDLL_VFS_INITIALIZEBLOB pVfsInitBlob)
 {
-    BOOL result;
-    LPSTR szVMM_ARGUMENTS[] = { "", "-device", "existingremote", "-remote", "pipe://" };
-    szVMM_ARGUMENTS[2] = ctxProcChild.szDevice;
-    szVMM_ARGUMENTS[4] = ctxProcChild.szRemote;
+    DWORD i;
+    BOOL f, result;
+    DWORD argc = 0;
+    LPSTR argv[VMMDLL_VFS_INITIALIZEBLOB_MAX_ARGC+5];
+    argv[argc++] = "";
+    argv[argc++] = "-device";
+    argv[argc++] = ctxProcChild.szDevice;
+    argv[argc++] = "-remote";
+    argv[argc++] = ctxProcChild.szRemote;
+    // 1: verify & fix-up init blob:
+    if(pVfsInitBlob) {
+        if(pVfsInitBlob->dwVersion != VMMDLL_VFS_INITIALIZEBLOB_VERSION) {
+            fprintf(stderr, "LeechAgent: FAIL: CHILD VFS init blob version mismatch.\n");
+            return FALSE;
+        }
+        if(pVfsInitBlob->argc > VMMDLL_VFS_INITIALIZEBLOB_MAX_ARGC) {
+            fprintf(stderr, "LeechAgent: FAIL: Too many initialization arguments.\n");
+            return FALSE;
+        }
+        if(pVfsInitBlob->cbStruct < sizeof(VMMDLL_VFS_INITIALIZEBLOB) + pVfsInitBlob->argc * sizeof(LPSTR)) {
+            return FALSE;
+        }
+        for(i = 0; i < pVfsInitBlob->argc; i++) {
+            if(pVfsInitBlob->argv[i].qw) {
+                if(pVfsInitBlob->argv[i].qw >= pVfsInitBlob->cbStruct - 1) {
+                    return FALSE;
+                }
+                argv[argc++] = (LPSTR)((PBYTE)pVfsInitBlob + pVfsInitBlob->argv[i].qw);
+            }
+        }
+        ((PBYTE)pVfsInitBlob)[pVfsInitBlob->cbStruct - 1] = 0;
+    }
+    // 2: fetch vmm.dll library and function pointers:
     ctxProcChild.hDllVmm = LoadLibraryExA("vmm.dll", NULL, LOAD_LIBRARY_SEARCH_APPLICATION_DIR);
     if(!ctxProcChild.hDllVmm) {
         ctxProcChild.hDllVmm = LoadLibraryA("vmm.dll");
@@ -81,20 +137,21 @@ BOOL LeechAgent_ProcChild_InitializeVmm()
         fprintf(stderr, "LeechAgent: FAIL: CHILD could not locate/load MemProcFS library vmm.dll\n");
         return FALSE;
     }
-    ctxProcChild.pfnVMMDLL_Initialize = (VMM_HANDLE(*)(DWORD, LPSTR*))GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_Initialize");
-    ctxProcChild.pfnVMMDLL_InitializePlugins = (BOOL(*)(VMM_HANDLE))GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_InitializePlugins");
-    ctxProcChild.pfnVMMDLL_Close = (BOOL(*)(VMM_HANDLE))GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_Close");
-    ctxProcChild.pfnVMMDLL_MemFree = (VOID(*)(PVOID))GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_MemFree");
-    ctxProcChild.pfnVMMDLL_VfsListBlobU = (PVMMDLL_VFS_FILELISTBLOB_OPAQUE(*)(VMM_HANDLE, LPSTR))GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_VfsListBlobU");
-    ctxProcChild.pfnVMMDLL_VfsReadU = (DWORD(*)(VMM_HANDLE, LPSTR, PBYTE, DWORD, PDWORD, ULONG64))GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_VfsReadU");
-    ctxProcChild.pfnVMMDLL_VfsWriteU = (DWORD(*)(VMM_HANDLE, LPSTR, PBYTE, DWORD, PDWORD, ULONG64))GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_VfsWriteU");
-    ctxProcChild.pfnVMMDLL_ConfigGet = (BOOL(*)(VMM_HANDLE, ULONG64, PULONG64))GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_ConfigGet");
-    ctxProcChild.pfnVMMDLL_ConfigSet = (BOOL(*)(VMM_HANDLE, ULONG64, ULONG64))GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_ConfigSet");
-    if(!ctxProcChild.pfnVMMDLL_Initialize || !ctxProcChild.pfnVMMDLL_InitializePlugins || !ctxProcChild.pfnVMMDLL_Close) {
+    f = (ctxProcChild.pfnVMMDLL_Initialize = (PFN_VMMDLL_Initialize)GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_Initialize")) &&
+        (ctxProcChild.pfnVMMDLL_InitializePlugins = (PFN_VMMDLL_InitializePlugins)GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_InitializePlugins")) &&
+        (ctxProcChild.pfnVMMDLL_Close = (PFN_VMMDLL_Close)GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_Close")) &&
+        (ctxProcChild.pfnVMMDLL_MemFree = (PFN_VMMDLL_MemFree)GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_MemFree")) &&
+        (ctxProcChild.pfnVMMDLL_VfsListBlobU = (PFN_VMMDLL_VfsListBlobU)GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_VfsListBlobU")) &&
+        (ctxProcChild.pfnVMMDLL_VfsReadU = (PFN_VMMDLL_VfsReadU)GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_VfsReadU")) &&
+        (ctxProcChild.pfnVMMDLL_VfsWriteU = (PFN_VMMDLL_VfsWriteU)GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_VfsWriteU")) &&
+        (ctxProcChild.pfnVMMDLL_ConfigGet = (PFN_VMMDLL_ConfigGet)GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_ConfigGet")) &&
+        (ctxProcChild.pfnVMMDLL_ConfigSet = (PFN_VMMDLL_ConfigSet)GetProcAddress(ctxProcChild.hDllVmm, "VMMDLL_ConfigSet"));
+    if(!f) {
         fprintf(stderr, "LeechAgent: FAIL: CHILD could not load MemProcFS library functions.\n");
         return FALSE;
     }
-    g_hVMM = ctxProcChild.pfnVMMDLL_Initialize((sizeof(szVMM_ARGUMENTS) / sizeof(LPCSTR)), szVMM_ARGUMENTS);
+    // 3: initialize MemProcFS vmm.dll library:
+    g_hVMM = ctxProcChild.pfnVMMDLL_Initialize(argc, argv);
     if(!g_hVMM) {
         fprintf(stderr, "LeechAgent: FAIL: CHILD could not initialize MemProcFS library.\n");
         return FALSE;
@@ -269,9 +326,9 @@ BOOL LeechAgent_ProcChild_InitializePython()
         fprintf(stderr, "LeechAgent: FAIL: CHILD could not locate/load library leechcorepyc.pyd\n");
         return FALSE;
     }
-    ctxProcChild.pfnLeechCorePyC_EmbPythonInitialize = (BOOL(*)(HMODULE))GetProcAddress(ctxProcChild.hDllLeechCorePyC, "LeechCorePyC_EmbPythonInitialize");
-    ctxProcChild.pfnLeechCorePyC_EmbExecPyInMem = (BOOL(*)(LPSTR))GetProcAddress(ctxProcChild.hDllLeechCorePyC, "LeechCorePyC_EmbExecPyInMem");
-    ctxProcChild.pfnLeechCorePyC_EmbClose = (VOID(*)())GetProcAddress(ctxProcChild.hDllLeechCorePyC, "LeechCorePyC_EmbClose");
+    ctxProcChild.pfnLeechCorePyC_EmbPythonInitialize = (PFN_LeechCorePyC_EmbPythonInitialize)GetProcAddress(ctxProcChild.hDllLeechCorePyC, "LeechCorePyC_EmbPythonInitialize");
+    ctxProcChild.pfnLeechCorePyC_EmbExecPyInMem = (PFN_LeechCorePyC_EmbExecPyInMem)GetProcAddress(ctxProcChild.hDllLeechCorePyC, "LeechCorePyC_EmbExecPyInMem");
+    ctxProcChild.pfnLeechCorePyC_EmbClose = (PFN_LeechCorePyC_EmbClose)GetProcAddress(ctxProcChild.hDllLeechCorePyC, "LeechCorePyC_EmbClose");
     if(!ctxProcChild.pfnLeechCorePyC_EmbPythonInitialize || !ctxProcChild.pfnLeechCorePyC_EmbExecPyInMem || !ctxProcChild.pfnLeechCorePyC_EmbClose) {
         fprintf(stderr, "LeechAgent: FAIL: CHILD could not load leechcorepyc.pyd library functions.\n");
         return FALSE;
@@ -314,7 +371,7 @@ VOID LeechAgent_ProcChild_Close()
 * Read a command from the parent. This function will hang if there isn't an
 * exact match in the number of bytes transmitted. That shouldn't happen though
 * since both reader/write is trusted.
-* NB! CALLER LocalFree: *ppCmd
+* CALLER LocalFree: *ppCmd
 * -- ppCmd = caller responsible for LocalFree
 * -- return
 */
@@ -339,7 +396,7 @@ BOOL LeechAgent_ProcChild_CmdRead(_Out_opt_ PLEECHAGENT_PROC_CMD* ppCmd)
 * Separate thread that reads and dispatches commands read over the CMD pipe
 * from the parent process.
 */
-VOID LeechAgent_ProcChild_ReaderCmd(_In_opt_ qwRemoteHLC)
+VOID LeechAgent_ProcChild_ReaderCmd()
 {
     BOOL fResult, fResultWritePipe = TRUE;
     DWORD cbWrite, cbRspData = 0;
@@ -353,7 +410,8 @@ VOID LeechAgent_ProcChild_ReaderCmd(_In_opt_ qwRemoteHLC)
                 LeechAgent_ProcChild_Close();
                 break;
             case LEECHAGENT_PROC_CMD_INIT_VMM:
-                fResult = LeechAgent_ProcChild_InitializeVmm(qwRemoteHLC);
+                fResult = ((pCmd->cb == 0) || (pCmd->cb >= sizeof(VMMDLL_VFS_INITIALIZEBLOB)));
+                fResult = fResult && LeechAgent_ProcChild_InitializeVmm(pCmd->cb ? (PVMMDLL_VFS_INITIALIZEBLOB)pCmd->pb : NULL);
                 break;
             case LEECHAGENT_PROC_CMD_INIT_PYTHON:
                 fResult = LeechAgent_ProcChild_InitializePython();
@@ -431,24 +489,24 @@ VOID LeechAgent_ProcChild_ReaderCmd(_In_opt_ qwRemoteHLC)
 }
 
 /*
-* Main entry point for the child process.
+* Main entry point for the child process. (called from leechagent!wmain).
+* -- argc
+* -- argv
 */
 VOID LeechAgent_ProcChild_Main(int argc, wchar_t* argv[])
 {
     QWORD qwRemoteHLC = 0;
     PLEECHAGENT_PROC_CMD pCmd = NULL;
     ctxProcChild.fStateRunning = TRUE;
-    if(argc <= 6) { return; }
+    if(argc <= 4) { return; }
     ctxProcChild.hPipeCmd_Rd = (HANDLE)_wtoi64(argv[2]);
     ctxProcChild.hPipeCmd_Wr = (HANDLE)_wtoi64(argv[3]);
-    ctxProcChild.hPipeMem_Rd = (HANDLE)_wtoi64(argv[4]);
-    ctxProcChild.hPipeMem_Wr = (HANDLE)_wtoi64(argv[5]);
-    qwRemoteHLC = _wtoi64(argv[6]);
-    if(!ctxProcChild.hPipeCmd_Rd || !ctxProcChild.hPipeMem_Rd || !ctxProcChild.hPipeMem_Wr) { goto fail; }
+    qwRemoteHLC = _wtoi64(argv[4]);
+    if(!ctxProcChild.hPipeCmd_Rd || !ctxProcChild.hPipeCmd_Wr) { goto fail; }
     _snprintf_s(ctxProcChild.szDevice, _countof(ctxProcChild.szDevice), _TRUNCATE, "existingremote://0x%llx", qwRemoteHLC);
-    _snprintf_s(ctxProcChild.szRemote, _countof(ctxProcChild.szRemote), _TRUNCATE, "pipe://%llu:%llu", (QWORD)ctxProcChild.hPipeMem_Rd, (QWORD)ctxProcChild.hPipeMem_Wr);
+    _snprintf_s(ctxProcChild.szRemote, _countof(ctxProcChild.szRemote), _TRUNCATE, "smb://ntlm:localhost");
     // use main thread for eternal cmd-read loop
-    LeechAgent_ProcChild_ReaderCmd(qwRemoteHLC);
+    LeechAgent_ProcChild_ReaderCmd();
 fail:
     LeechAgent_ProcChild_Close();
 }

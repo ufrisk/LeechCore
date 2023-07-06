@@ -1,6 +1,6 @@
 // leechrpcclient.h : definitions related to the leech rpc service.
 //
-// (c) Ulf Frisk, 2018-2022
+// (c) Ulf Frisk, 2018-2023
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #ifndef __LEECHRPC_H__
@@ -47,14 +47,15 @@ typedef struct tdLEECHRPC_COMPRESS {
 } LEECHRPC_COMPRESS, *PLEECHRPC_COMPRESS;
 
 typedef struct tdLEECHRPC_CLIENT_CONTEXT {
-    BOOL fIsRpc;
+    BOOL fIsProtoRpc;               // RPC over TCP/IP.
+    BOOL fIsProtoSmb;               // RPC over SMB (named pipe).
     BOOL fHousekeeperThread;
     BOOL fHousekeeperThreadIsRunning;
-    // PIPE functionality below:
-    HANDLE hPipeMem_Rd;
-    HANDLE hPipeMem_Wr;
     // RPC functionality below:
-    BOOL fAllowInsecure;
+    BOOL fIsAuthInsecure;           // No authentication (insecure connection).
+    BOOL fIsAuthNTLM;               // NTLM authentication (no server validation).
+    BOOL fIsAuthKerberos;           // Kerberos authentication (mutual authentication).
+    BOOL fIsAuthNTLMCredPrompt;     // NTLM authentication (with credential prompt).
     CHAR szRemoteSPN[MAX_PATH];
     CHAR szTcpAddr[MAX_PATH];
     CHAR szTcpPort[6];

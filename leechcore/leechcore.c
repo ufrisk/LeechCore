@@ -212,8 +212,8 @@ VOID LcCreate_FetchDevice(_Inout_ PLC_CONTEXT ctx)
         ctx->pfnCreate = LeechRpc_Open;
         return;
     }
-    if(0 == _strnicmp("pipe://", ctx->Config.szRemote, 7)) {
-        strncpy_s(ctx->Config.szDeviceName, sizeof(ctx->Config.szDeviceName), "pipe", _TRUNCATE);
+    if(0 == _strnicmp("smb://", ctx->Config.szRemote, 6)) {
+        strncpy_s(ctx->Config.szDeviceName, sizeof(ctx->Config.szDeviceName), "smb", _TRUNCATE);
         ctx->pfnCreate = LeechRpc_Open;
         return;
     }

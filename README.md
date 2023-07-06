@@ -212,7 +212,9 @@ v1.0-1.8
 [v2.14](https://github.com/ufrisk/LeechCore/releases/tag/v2.14)
 * VMM loopback device.
 
-Latest:
+[v2.15](https://github.com/ufrisk/LeechCore/releases/tag/v2.15)
 * Multi-threaded file access.
 * Volatile memory file support.
 * Support for LiME memory dump files.
+* Improved FPGA performance for smaller reads.
+* Improved [MemProcFS remoting](https://github.com/ufrisk/MemProcFS/wiki/_Remoting) via a remote [LeechAgent](). Full remote support tunneled over SMB/445. Perfect for memory forensics Incident Response (IR)!.

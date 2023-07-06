@@ -2,7 +2,7 @@
 // 
 // tested with vmware workstation 16.1.2
 //
-// (c) Ulf Frisk, 2022
+// (c) Ulf Frisk, 2022-2023
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include "leechcore.h"

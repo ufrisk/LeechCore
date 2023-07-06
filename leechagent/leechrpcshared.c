@@ -1,6 +1,6 @@
 // leechrpcshared.c : implementation of the remote procedure call (RPC) shared functionality (client/server).
 //
-// (c) Ulf Frisk, 2018-2022
+// (c) Ulf Frisk, 2018-2023
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include <stdio.h>
@@ -78,7 +78,7 @@ VOID LeechRPC_Compress(_In_ PLEECHRPC_COMPRESS ctxCompress, _Inout_ PLEECHRPC_MS
     PBYTE pb;
     SIZE_T cb;
     DWORD i;
-    if(ctxCompress->fValid && (pMsg->cb > 0x1000) && !fCompressDisable) {
+    if(ctxCompress->fValid && (pMsg->cb > 0x1800) && !fCompressDisable) {
         if(!(pb = LocalAlloc(0, pMsg->cb))) { return; }
         do {
             i = InterlockedIncrement(&ctxCompress->iCompress) % LEECHRPC_COMPRESS_MAXTHREADS;

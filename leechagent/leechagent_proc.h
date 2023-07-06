@@ -4,7 +4,7 @@
 //                 Child processes are spawned and controlled by the main
 //                 LeechAgent process.
 //
-// (c) Ulf Frisk, 2020-2022
+// (c) Ulf Frisk, 2020-2023
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #ifndef __LEECHAGENT_PROC_H__
@@ -37,8 +37,7 @@ BOOL LeechAgent_ProcParent_ExecPy(_In_ HANDLE hLC, _In_ DWORD dwTimeout, _In_rea
 
 /*
 * Execute a virtual file system command towards MemProcFS / vmm.dll.
-* MemProcFS will automatically be started and terminated if required.
-* CALLER DECREF: *ppbDataOut
+* CALLER LocalFree: *ppbDataOut
 * -- hLC
 * -- phPP = ptr to "ParentProcess" handle to update as required.
 * -- dwCMD = LEECHAGENT_PROC_CMD_VFS_LIST | LEECHAGENT_PROC_CMD_VFS_READ | LEECHAGENT_PROC_CMD_VFS_WRITE
@@ -50,6 +49,33 @@ BOOL LeechAgent_ProcParent_ExecPy(_In_ HANDLE hLC, _In_ DWORD dwTimeout, _In_rea
 */
 _Success_(return)
 BOOL LeechAgent_ProcParent_VfsCMD(_In_ HANDLE hLC, _Inout_ PHANDLE phPP, _In_ DWORD dwCMD, _In_reads_(cbDataIn) PBYTE pbDataIn, _In_ DWORD cbDataIn, _Out_opt_ PBYTE* ppbDataOut, _Out_opt_ PDWORD pcbDataOut);
+
+/*
+* Initialize a virtual file system handle towards MemProcFS / vmm.dll.
+* CALLER LocalFree: *ppbDataOut
+* -- hLC
+* -- phPP = ptr to "ParentProcess" handle to update as required.
+* -- pbDataIn
+* -- cbDataIn
+* -- ppbDataOut
+* -- pcbDataOut
+* -- return
+*/
+_Success_(return)
+BOOL LeechAgent_ProcParent_VfsInitialize(_In_ HANDLE hLC, _Inout_ PHANDLE phPP, _In_reads_(cbDataIn) PBYTE pbDataIn, _In_ DWORD cbDataIn, _Out_opt_ PBYTE * ppbDataOut, _Out_opt_ PDWORD pcbDataOut);
+
+/*
+* Retrieve console information from the child process (if any) and perform a a
+* keepalive operation.
+* CALLER LocalFree: *ppbDataOut
+* -- hLC
+* -- phPP = ptr to "ParentProcess" handle to update as required.
+* -- ppbDataOut
+* -- pcbDataOut
+* -- return
+*/
+_Success_(return)
+BOOL LeechAgent_ProcParent_VfsConsole(_In_ HANDLE hLC, _Inout_ PHANDLE phPP, _Out_opt_ PBYTE *ppbDataOut, _Out_opt_ PDWORD pcbDataOut);
 
 /*
 * Close a ProcParent handle kept by the leechrpcserver.

@@ -137,7 +137,7 @@
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>rpcrt4.lib;setupapi.lib;winusb.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Credui.lib;rpcrt4.lib;Secur32.lib;setupapi.lib;winusb.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ProgramDatabaseFile>$(OutDir)\lib\$(TargetName).pdb</ProgramDatabaseFile>
       <SubSystem>Windows</SubSystem>
       <ImportLibrary>$(OutDir)\lib\$(TargetName).lib</ImportLibrary>
@@ -169,7 +169,7 @@ copy "$(ProjectDir)\leechcore.h" "$(SolutionDir)\includes\" /y
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>rpcrt4.lib;setupapi.lib;winusb.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Credui.lib;rpcrt4.lib;Secur32.lib;setupapi.lib;winusb.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ProgramDatabaseFile>$(OutDir)\lib\$(TargetName).pdb</ProgramDatabaseFile>
       <SubSystem>Windows</SubSystem>
       <ImportLibrary>$(OutDir)\lib\$(TargetName).lib</ImportLibrary>
@@ -201,7 +201,7 @@ copy "$(ProjectDir)\leechcore.h" "$(SolutionDir)\includes\" /y
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>rpcrt4.lib;setupapi.lib;winusb.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Credui.lib;rpcrt4.lib;Secur32.lib;setupapi.lib;winusb.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ProgramDatabaseFile>$(OutDir)\lib\$(TargetName).pdb</ProgramDatabaseFile>
       <SubSystem>Windows</SubSystem>
       <ImportLibrary>$(OutDir)\lib\$(TargetName).lib</ImportLibrary>
@@ -238,7 +238,7 @@ copy "$(ProjectDir)\leechcore.h" "$(SolutionDir)\includes\" /y
     <Link>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <AdditionalDependencies>rpcrt4.lib;setupapi.lib;winusb.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Credui.lib;rpcrt4.lib;Secur32.lib;setupapi.lib;winusb.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ProgramDatabaseFile>$(OutDir)\lib\$(TargetName).pdb</ProgramDatabaseFile>
       <SubSystem>Windows</SubSystem>
       <ImportLibrary>$(OutDir)\lib\$(TargetName).lib</ImportLibrary>
@@ -276,7 +276,7 @@ copy "$(ProjectDir)\leechcore.h" "$(SolutionDir)\includes\" /y
     <Link>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <AdditionalDependencies>rpcrt4.lib;setupapi.lib;winusb.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Credui.lib;rpcrt4.lib;Secur32.lib;setupapi.lib;winusb.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ProgramDatabaseFile>$(OutDir)\lib\$(TargetName).pdb</ProgramDatabaseFile>
       <SubSystem>Windows</SubSystem>
       <ImportLibrary>$(OutDir)\lib\$(TargetName).lib</ImportLibrary>
@@ -313,7 +313,7 @@ copy "$(ProjectDir)\leechcore.h" "$(SolutionDir)\includes\" /y
     <Link>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <AdditionalDependencies>rpcrt4.lib;setupapi.lib;winusb.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Credui.lib;rpcrt4.lib;Secur32.lib;setupapi.lib;winusb.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ProgramDatabaseFile>$(OutDir)\lib\$(TargetName).pdb</ProgramDatabaseFile>
       <SubSystem>Windows</SubSystem>
       <ImportLibrary>$(OutDir)\lib\$(TargetName).lib</ImportLibrary>
@@ -351,6 +351,9 @@ copy "$(ProjectDir)\leechcore.h" "$(SolutionDir)\includes\" /y
     <ClCompile Include="leechrpcclient.c" />
     <ClCompile Include="leechrpc_c.c" />
     <ClCompile Include="memmap.c" />
+    <ClCompile Include="ob\ob_core.c" />
+    <ClCompile Include="ob\ob_map.c" />
+    <ClCompile Include="ob\ob_set.c" />
     <ClCompile Include="oscompatibility.c" />
     <ClCompile Include="util.c" />
   </ItemGroup>
@@ -360,6 +363,7 @@ copy "$(ProjectDir)\leechcore.h" "$(SolutionDir)\includes\" /y
     <ClInclude Include="leechcore_internal.h" />
     <ClInclude Include="leechrpc.h" />
     <ClInclude Include="leechrpc_h.h" />
+    <ClInclude Include="ob\ob.h" />
     <ClInclude Include="oscompatibility.h" />
     <ClInclude Include="util.h" />
     <ClInclude Include="version.h" />

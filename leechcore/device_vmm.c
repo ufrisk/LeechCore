@@ -3,7 +3,7 @@
 // 
 // Syntax: vmm://hvmm=0x<VMM_HANDLE>,hvm=0x<VMMVM_HANDLE>,max=<MAX_ADDRESS>
 // 
-// (c) Ulf Frisk, 2022
+// (c) Ulf Frisk, 2022-2023
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include "leechcore.h"

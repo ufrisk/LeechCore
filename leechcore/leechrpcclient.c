@@ -1,6 +1,6 @@
 // leechrpcclient.c : implementation of the remote procedure call (RPC) client.
 //
-// (c) Ulf Frisk, 2018-2022
+// (c) Ulf Frisk, 2018-2023
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include "leechcore.h"
@@ -11,65 +11,13 @@
 
 #ifdef _WIN32
 #include <rpc.h>
+#include <ntsecapi.h>
+#include <wincred.h>
 #include "leechrpc_h.h"
 
 //-----------------------------------------------------------------------------
 // CORE FUNCTIONALITY BELOW:
 //-----------------------------------------------------------------------------
-
-_Success_(return)
-BOOL Util_GetBytesPipe(_In_ HANDLE hPipe_Rd, _Out_writes_opt_(cb) PBYTE pb, _In_ DWORD cb)
-{
-    DWORD cbReadTotal = 0, cbRead = 0;
-    while((cbReadTotal < cb) && ReadFile(hPipe_Rd, pb + cbReadTotal, cb - cbReadTotal, &cbRead, NULL)) {
-        cbReadTotal += cbRead;
-    }
-    return (cb == cbReadTotal);
-}
-
-/*
-* Send and receive data to the pipe server. First write the pMsgIn then listen
-* for a pMsgOut response from the server and read it.
-* NB! USER_FREE: *ppMsgOut
-* -- ctx
-* -- pMsgIn
-* -- pcbMsgOut
-* -- ppMsgOut
-* -- return
-*/
-_Success_(return)
-BOOL LeechRPC_SubmitCommand_Pipe(_In_ PLEECHRPC_CLIENT_CONTEXT ctx, _In_ PLEECHRPC_MSG_HDR pMsgIn, _Out_ PDWORD pcbMsgOut, _Out_ PPLEECHRPC_MSG_HDR ppMsgOut)
-{
-    static SRWLOCK LockSRW = SRWLOCK_INIT;
-    DWORD cbWrite = 0;
-    LEECHRPC_MSG_HDR Hdr = { 0 };
-    PLEECHRPC_MSG_HDR pMsgOut;
-    AcquireSRWLockExclusive(&LockSRW);
-    if(!pcbMsgOut || !ppMsgOut) { goto fail; }
-    // 1: write contents to pipe
-    if(!ctx->hPipeMem_Wr) { goto fail; }
-    if(!WriteFile(ctx->hPipeMem_Wr, (PVOID)pMsgIn, pMsgIn->cbMsg, &cbWrite, NULL)) { goto fail; }
-    // 2: read resulting contents : header
-    if(!Util_GetBytesPipe(ctx->hPipeMem_Rd, (PBYTE)&Hdr, sizeof(LEECHRPC_MSG_HDR))) { goto fail; }
-    if((Hdr.dwMagic != LEECHRPC_MSGMAGIC) || (Hdr.cbMsg > 0x04000000)) { goto fail; }
-    pMsgOut = (PLEECHRPC_MSG_HDR)LocalAlloc(0, Hdr.cbMsg);
-    if(!pMsgOut) { goto fail; }
-    memcpy(pMsgOut, &Hdr, sizeof(LEECHRPC_MSG_HDR));
-    // 3: read resulting contents : data
-    if(pMsgOut->cbMsg > sizeof(LEECHRPC_MSG_HDR)) {
-        if(!Util_GetBytesPipe(ctx->hPipeMem_Rd, ((PBYTE)pMsgOut) + sizeof(LEECHRPC_MSG_HDR), pMsgOut->cbMsg - sizeof(LEECHRPC_MSG_HDR))) {
-            LocalFree(pMsgOut);
-            goto fail;
-        }
-    }
-    ReleaseSRWLockExclusive(&LockSRW);
-    *pcbMsgOut = pMsgOut->cbMsg;
-    *ppMsgOut = pMsgOut;
-    return TRUE;
-fail:
-    ReleaseSRWLockExclusive(&LockSRW);
-    return FALSE;
-}
 
 _Success_(return)
 BOOL LeechRPC_SubmitCommand(_In_ PLC_CONTEXT ctxLC, _In_ PLEECHRPC_MSG_HDR pMsgIn, _In_ LEECHRPC_MSGTYPE tpMsgRsp, _Out_ PPLEECHRPC_MSG_HDR ppMsgOut)
@@ -104,23 +52,15 @@ BOOL LeechRPC_SubmitCommand(_In_ PLC_CONTEXT ctxLC, _In_ PLEECHRPC_MSG_HDR pMsgI
         default:
             return FALSE;
     }
-    // submit message to RPC server or PIPE parent process.
-    if(ctx->fIsRpc) {
-        // RPC connection method:
+    // submit message to RPC server:
+    if(ctx->fIsProtoRpc || ctx->fIsProtoSmb) {
+        // RPC (over tcp or smb) connection methods:
         __try {
             pMsgIn->dwRpcClientID = ctxLC->Rpc.dwRpcClientId;
             pMsgIn->flags = ctxLC->Rpc.fCompress ? 0 : LEECHRPC_FLAG_NOCOMPRESS;
-            error = LeechRpc_ReservedSubmitCommand(ctx->hRPC, pMsgIn->cbMsg, (PBYTE)pMsgIn, &cbMsgOut, (PBYTE*)ppMsgOut);
+            error = LeechRpc_ReservedSubmitCommand(ctx->hRPC, pMsgIn->cbMsg, (PBYTE)pMsgIn, &cbMsgOut, (PBYTE *)ppMsgOut);
         } __except(EXCEPTION_EXECUTE_HANDLER) { error = E_FAIL; }
         if(error) {
-           *ppMsgOut = NULL;
-            return FALSE;
-        }
-    } else {
-        // PIPE connection method:
-        pMsgIn->dwRpcClientID = ctxLC->Rpc.dwRpcClientId;
-        pMsgIn->flags = LEECHRPC_FLAG_NOCOMPRESS;
-        if(!LeechRPC_SubmitCommand_Pipe(ctx, pMsgIn, &cbMsgOut, ppMsgOut)) {
             *ppMsgOut = NULL;
             return FALSE;
         }
@@ -238,46 +178,161 @@ VOID LeechRPC_Close(_Inout_ PLC_CONTEXT ctxLC)
     while(ctx->fHousekeeperThreadIsRunning) {
         SwitchToThread();
     }
-    if(ctx->hPipeMem_Rd) {
-        CloseHandle(ctx->hPipeMem_Rd);
-        ctx->hPipeMem_Rd = NULL;
-    }
-    if(ctx->hPipeMem_Wr) {
-        CloseHandle(ctx->hPipeMem_Wr);
-        ctx->hPipeMem_Wr = NULL;
-    }
     LeechRPC_RpcClose(ctx);
     LeechRPC_CompressClose(&ctx->Compress);
     LocalFree(ctx);
     ctxLC->hDevice = 0;
 }
 
+/*
+* Helper function - connect with custom ntlm credentials to target:
+*/
+_Success_(return)
+BOOL LeechRPC_RpcInitialize_NtlmWithUserCreds(_In_ PLC_CONTEXT ctxLC, _In_ PLEECHRPC_CLIENT_CONTEXT ctx)
+{
+    BOOL fResult = FALSE;
+    RPC_STATUS status;
+    WCHAR wszTcpAddr[MAX_PATH];
+    WCHAR wszAuthIdentityUser[MAX_PATH] = { 0 };
+    WCHAR wszAuthIdentityDomain[MAX_PATH] = { 0 };
+    WCHAR wszAuthIdentityPassword[MAX_PATH] = { 0 };
+    LPVOID pvAuthBuffer = NULL;
+    ULONG cbAuthBuffer = 0;
+    ULONG AuthenticationPackage = 0;
+    HANDLE LsaHandle = NULL;
+    SEC_WINNT_AUTH_IDENTITY_W AuthIdentity = { 0 };
+    RPC_SECURITY_QOS RpcSecurityQOS = { 0 };
+    LSA_STRING PackageName = { 0 };
+    CREDUI_INFOW credui = { 0 };
+    RpcSecurityQOS.Version = RPC_C_SECURITY_QOS_VERSION;
+    RpcSecurityQOS.Capabilities = RPC_C_QOS_CAPABILITIES_DEFAULT;
+    RpcSecurityQOS.IdentityTracking = RPC_C_QOS_IDENTITY_DYNAMIC;
+    RpcSecurityQOS.ImpersonationType = RPC_C_IMP_LEVEL_IDENTIFY;
+    // prepare ui prompt:
+    swprintf_s(wszTcpAddr, _countof(wszTcpAddr), L"Enter your credentials to connect to: %S", ctx->szTcpAddr);
+    credui.cbSize = sizeof(credui);
+    credui.hwndParent = NULL;
+    credui.pszMessageText = wszTcpAddr;
+    credui.pszCaptionText = L"Enter network credentials";
+    credui.hbmBanner = NULL;
+    // get lsa package:
+    if(ERROR_SUCCESS != LsaConnectUntrusted(&LsaHandle)) { goto fail; }
+    PackageName.Buffer = MICROSOFT_KERBEROS_NAME_A;
+    PackageName.Length = (USHORT)strlen(PackageName.Buffer);
+    PackageName.MaximumLength = (USHORT)strlen(PackageName.Buffer);
+    if(ERROR_SUCCESS != LsaLookupAuthenticationPackage(LsaHandle, &PackageName, &AuthenticationPackage)) { goto fail; }
+    // get user creds:
+    if(ERROR_SUCCESS != CredUIPromptForWindowsCredentialsW(&credui, 0, &AuthenticationPackage, NULL, 0, &pvAuthBuffer, &cbAuthBuffer, NULL, CREDUIWIN_GENERIC)) { goto fail; }
+    // unpack user creds:
+    AuthIdentity.Domain = wszAuthIdentityDomain;
+    AuthIdentity.DomainLength = (DWORD)_countof(wszAuthIdentityDomain);
+    AuthIdentity.User = wszAuthIdentityUser;
+    AuthIdentity.UserLength = (DWORD)_countof(wszAuthIdentityUser);
+    AuthIdentity.Password = wszAuthIdentityPassword;
+    AuthIdentity.PasswordLength = (DWORD)_countof(wszAuthIdentityPassword);
+    AuthIdentity.Flags = SEC_WINNT_AUTH_IDENTITY_UNICODE;
+    if(FALSE == CredUnPackAuthenticationBufferW(CRED_PACK_PROTECTED_CREDENTIALS, pvAuthBuffer, cbAuthBuffer, AuthIdentity.User, &AuthIdentity.UserLength, AuthIdentity.Domain, &AuthIdentity.DomainLength, AuthIdentity.Password, &AuthIdentity.PasswordLength)) { goto fail; }
+    if(AuthIdentity.UserLength && (wszAuthIdentityUser[AuthIdentity.UserLength - 1] == 0)) { AuthIdentity.UserLength--; }
+    if(AuthIdentity.DomainLength && (wszAuthIdentityDomain[AuthIdentity.DomainLength - 1] == 0)) { AuthIdentity.DomainLength--; }
+    if(AuthIdentity.PasswordLength && (wszAuthIdentityPassword[AuthIdentity.PasswordLength - 1] == 0)) { AuthIdentity.PasswordLength--; }
+    status = RpcBindingSetAuthInfoExW(
+        ctx->hRPC,
+        NULL,
+        RPC_C_AUTHN_LEVEL_PKT_PRIVACY,
+        RPC_C_AUTHN_WINNT,
+        &AuthIdentity,
+        RPC_C_AUTHZ_DEFAULT,
+        &RpcSecurityQOS);
+    if(status) {
+        lcprintf(ctxLC, "REMOTE: Failed to set connection security for connection, Error code: 0x%08x\n", status);
+        LeechRPC_RpcClose(ctx);
+        goto fail;
+    }
+    fResult = TRUE;
+fail:
+    SecureZeroMemory(pvAuthBuffer, cbAuthBuffer);
+    SecureZeroMemory(wszAuthIdentityPassword, sizeof(wszAuthIdentityPassword));
+    if(LsaHandle) { LsaDeregisterLogonProcess(LsaHandle); LsaHandle = NULL; }
+    if(pvAuthBuffer) { CoTaskMemFree(pvAuthBuffer); pvAuthBuffer = NULL; }
+    return fResult;
+}
+
 _Success_(return)
 BOOL LeechRPC_RpcInitialize(_In_ PLC_CONTEXT ctxLC, _In_ PLEECHRPC_CLIENT_CONTEXT ctx)
 {
+    LPSTR szTcpAddr;
     RPC_STATUS status;
     RPC_SECURITY_QOS RpcSecurityQOS = { 0 };
     LeechRPC_RpcClose(ctx);
-    status = RpcStringBindingComposeA(
-        CLSID_BINDING_INTERFACE_LEECHRPC,
-        "ncacn_ip_tcp",
-        ctx->szTcpAddr,
-        ctx->szTcpPort,
-        NULL,
-        &ctx->szStringBinding);
-    if(status) {
-        lcprintf(ctxLC, "RPC: Failed compose binding: Error code: 0x%08x\n", status);
-        LeechRPC_RpcClose(ctx);
-        return FALSE;
+    // compose binding string:
+    if(ctx->fIsProtoSmb) {
+        if((ctx->szTcpAddr[0] == 0) || !_stricmp("localhost", ctx->szTcpAddr) || !_stricmp("127.0.0.1", ctx->szTcpAddr)) {
+            szTcpAddr = NULL;
+        } else {
+            szTcpAddr = ctx->szTcpAddr;
+        }
+        status = RpcStringBindingComposeA(
+            CLSID_BINDING_INTERFACE_LEECHRPC,
+            "ncacn_np",
+            szTcpAddr,
+            "\\pipe\\LeechAgent",
+            NULL,
+            &ctx->szStringBinding);
+        if(status) {
+            lcprintf(ctxLC, "REMOTE: Failed compose binding: Error code: 0x%08x\n", status);
+            LeechRPC_RpcClose(ctx);
+            return FALSE;
+        }
     }
+    if(ctx->fIsProtoRpc) {
+        status = RpcStringBindingComposeA(
+            CLSID_BINDING_INTERFACE_LEECHRPC,
+            "ncacn_ip_tcp",
+            ctx->szTcpAddr,
+            ctx->szTcpPort,
+            NULL,
+            &ctx->szStringBinding);
+        if(status) {
+            lcprintf(ctxLC, "REMOTE: Failed compose binding: Error code: 0x%08x\n", status);
+            LeechRPC_RpcClose(ctx);
+            return FALSE;
+        }
+    }
+    // create binding:
     status = RpcBindingFromStringBindingA(ctx->szStringBinding, &ctx->hRPC);
     if(status) {
-        lcprintf(ctxLC, "RPC: Failed create binding: Error code: 0x%08x\n", status);
+        lcprintf(ctxLC, "REMOTE: Failed create binding: Error code: 0x%08x\n", status);
         LeechRPC_RpcClose(ctx);
         return FALSE;
     }
-    if(!ctx->fAllowInsecure) {
-        RpcSecurityQOS.Version = 1;
+    // set connection security (if any):
+    if(ctx->fIsAuthNTLM) {
+        if(ctx->fIsAuthNTLMCredPrompt) {
+            if(!LeechRPC_RpcInitialize_NtlmWithUserCreds(ctxLC, ctx)) { return FALSE; }
+        } else {
+            // NTLM - use default credentials (current user) or user-supplied credentials via prompt:
+            RpcSecurityQOS.Version = RPC_C_SECURITY_QOS_VERSION;
+            RpcSecurityQOS.Capabilities = RPC_C_QOS_CAPABILITIES_DEFAULT;
+            RpcSecurityQOS.IdentityTracking = RPC_C_QOS_IDENTITY_DYNAMIC;
+            RpcSecurityQOS.ImpersonationType = RPC_C_IMP_LEVEL_IDENTIFY;
+            status = RpcBindingSetAuthInfoExA(
+                ctx->hRPC,
+                NULL,
+                RPC_C_AUTHN_LEVEL_PKT_PRIVACY,
+                RPC_C_AUTHN_WINNT,
+                NULL,
+                RPC_C_AUTHZ_DEFAULT,
+                &RpcSecurityQOS);
+            if(status) {
+                lcprintf(ctxLC, "REMOTE: Failed to set connection security for connection, Error code: 0x%08x\n", status);
+                LeechRPC_RpcClose(ctx);
+                return FALSE;
+            }
+        }
+    }
+    if(ctx->fIsAuthKerberos) {
+        // Kerberos - use specified SPN for mutual authentication:
+        RpcSecurityQOS.Version = RPC_C_SECURITY_QOS_VERSION;
         RpcSecurityQOS.Capabilities = RPC_C_QOS_CAPABILITIES_MUTUAL_AUTH;
         RpcSecurityQOS.IdentityTracking = RPC_C_QOS_IDENTITY_DYNAMIC;
         RpcSecurityQOS.ImpersonationType = RPC_C_IMP_LEVEL_IDENTIFY;
@@ -287,17 +342,16 @@ BOOL LeechRPC_RpcInitialize(_In_ PLC_CONTEXT ctxLC, _In_ PLEECHRPC_CLIENT_CONTEX
             RPC_C_AUTHN_LEVEL_PKT_PRIVACY,
             RPC_C_AUTHN_GSS_KERBEROS,
             NULL,
-            0,
+            RPC_C_AUTHZ_NONE,
             &RpcSecurityQOS);
         if(status) {
-            lcprintf(ctxLC, "RPC: Failed to set connection security: SPN: '%s', Error code: 0x%08x\n", ctx->szRemoteSPN, status);
-            lcprintf(ctxLC, "     Maybe try kerberos security disable by specify SPN 'insecure' if server allows...\n");
+            lcprintf(ctxLC, "REMOTE: Failed to set connection security: SPN: '%s', Error code: 0x%08x\n", ctx->szRemoteSPN, status);
+            lcprintf(ctxLC, "        Maybe try kerberos security disable by specify SPN 'insecure' if server allows...\n");
             LeechRPC_RpcClose(ctx);
             return FALSE;
         }
     }
     lcprintfv_fn(ctxLC, "'%s'\n", ctx->szStringBinding);
-    ctx->fIsRpc = TRUE;
     return TRUE;
 }
 
@@ -584,17 +638,26 @@ BOOL LeechRpc_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO pp
     ctx = (PLEECHRPC_CLIENT_CONTEXT)LocalAlloc(LMEM_ZEROINIT, sizeof(LEECHRPC_CLIENT_CONTEXT));
     if(!ctx) { return FALSE; }
     ctxLC->hDevice = (HANDLE)ctx;
-    if(!_stricmp(ctxLC->Config.szDeviceName, "rpc")) {
+    if(!_stricmp(ctxLC->Config.szDeviceName, "rpc")) { ctx->fIsProtoRpc = TRUE; }
+    if(!_stricmp(ctxLC->Config.szDeviceName, "smb")) { ctx->fIsProtoSmb = TRUE; }
+    if(!ctx->fIsProtoRpc && !ctx->fIsProtoSmb) {
+        lcprintf(ctxLC, "REMOTE: ERROR: No valid remote transport protocol specified.\n");
+        goto fail;
+    }
+    if(ctx->fIsProtoRpc || ctx->fIsProtoSmb) {
         // RPC SPECIFIC INITIALIZATION BELOW:
         ctxLC->Rpc.fCompress = !ctxLC->Config.fRemoteDisableCompress;
         // parse arguments
         Util_Split3(ctxLC->Config.szRemote + 6, ':', _szBufferArg, &szArg1, &szArg2, &szArg3);
         if(!szArg1 || !szArg1[0] || !szArg2 || !szArg2[0]) { goto fail; }
-        // Argument1 : Kerberos SPN or "insecure".
+        // Argument1 : Auth method, insecure | ntlm | kerberos_spn
         if(!_stricmp("insecure", szArg1)) {
-            ctx->fAllowInsecure = TRUE;
+            ctx->fIsAuthInsecure = TRUE;
+        } else if(!_stricmp("ntlm", szArg1)) {
+            ctx->fIsAuthNTLM = TRUE;
         } else {
             strncpy_s(ctx->szRemoteSPN, _countof(ctx->szRemoteSPN), szArg1, MAX_PATH);
+            ctx->fIsAuthKerberos = TRUE;
         }
         // Argument2 : Tcp Address.
         strncpy_s(ctx->szTcpAddr, _countof(ctx->szTcpAddr), szArg2, MAX_PATH);
@@ -608,6 +671,9 @@ BOOL LeechRpc_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO pp
                 if(0 == _strnicmp("port=", szOpt[i], 5)) {
                     dwPort = atoi(szOpt[i] + 5);
                 }
+                if(0 == _stricmp("logon", szOpt[i])) {
+                    ctx->fIsAuthNTLMCredPrompt = ctx->fIsAuthNTLM;
+                }
             }
         }
         if(dwPort == 0) {
@@ -616,29 +682,13 @@ BOOL LeechRpc_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO pp
         _itoa_s(dwPort, ctx->szTcpPort, 6, 10);
         // initialize rpc connection and ping
         if(!LeechRPC_RpcInitialize(ctxLC, ctx)) {
-            lcprintf(ctxLC, "RPC: ERROR: Unable to connect to remote service '%s'\n", ctxLC->Config.szRemote);
+            lcprintf(ctxLC, "REMOTE: ERROR: Unable to connect to remote service '%s'\n", ctxLC->Config.szRemote);
             goto fail;
         }
         if(!LeechRPC_Ping(ctxLC)) {
-            lcprintf(ctxLC, "RPC: ERROR: Unable to ping remote service '%s'\n", ctxLC->Config.szRemote);
+            lcprintf(ctxLC, "REMOTE: ERROR: Unable to ping remote service '%s'\n", ctxLC->Config.szRemote);
             goto fail;
         }
-    } else if(!_stricmp(ctxLC->Config.szDeviceName, "pipe")) {
-        // PIPE SPECIFIC INITIALIZATION BELOW:
-        // parse arguments
-        Util_Split2(ctxLC->Config.szRemote + 7, ':', _szBufferArg, &szArg1, &szArg2);
-        if(!szArg1 || !szArg2) { goto fail; }
-        ctx->hPipeMem_Rd = (HANDLE)_atoi64(szArg1);
-        ctx->hPipeMem_Wr = (HANDLE)_atoi64(szArg2);
-        if(!ctx->hPipeMem_Rd || !ctx->hPipeMem_Wr) { goto fail; }
-        // ping parent process via the pipe
-        if(!LeechRPC_Ping(ctxLC)) {
-            lcprintf(ctxLC, "PIPE: ERROR: Unable to ping remote service '%s'\n", ctxLC->Config.szRemote);
-            goto fail;
-        }
-        ctxLC->Rpc.fCompress = FALSE;       // compress = default off on pipe
-    } else {
-        goto fail;
     }
     if(0 == _strnicmp(ctxLC->Config.szDevice, "existingremote", 14)) {
         for(i = 14; i < _countof(ctxLC->Config.szDevice); i++) {
@@ -656,7 +706,7 @@ BOOL LeechRpc_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO pp
     ZeroMemory(MsgReq.cfg.szRemote, _countof(MsgReq.cfg.szRemote));
     MsgReq.cfg.pfn_printf_opt = 0;
     if(!LeechRPC_SubmitCommand(ctxLC, (PLEECHRPC_MSG_HDR)&MsgReq, LEECHRPC_MSGTYPE_OPEN_RSP, (PPLEECHRPC_MSG_HDR)&pMsgRsp)) {
-        lcprintf(ctxLC, "RPC: ERROR: Unable to open remote device #1 '%s'\n", ctxLC->Config.szDevice);
+        lcprintf(ctxLC, "REMOTE: ERROR: Unable to open remote device #1 '%s'\n", ctxLC->Config.szDevice);
         goto fail;
     }
     if(!pMsgRsp->fValidOpen) {
@@ -666,18 +716,18 @@ BOOL LeechRpc_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO pp
                 memcpy(*ppLcCreateErrorInfo, &pMsgRsp->errorinfo, pMsgRsp->errorinfo.cbStruct);
             }
         }
-        lcprintf(ctxLC, "RPC: ERROR: Unable to open remote device #2 '%s'\n", ctxLC->Config.szDevice);
+        lcprintf(ctxLC, "REMOTE: ERROR: Unable to open remote device #2 '%s'\n", ctxLC->Config.szDevice);
         goto fail;
     }
     // sanity check positive result from remote service
     if(pMsgRsp->cfg.dwVersion != LC_CONFIG_VERSION) {
-        lcprintf(ctxLC, "RPC: ERROR: Invalid message received from remote service.\n");
+        lcprintf(ctxLC, "REMOTE: ERROR: Invalid message received from remote service.\n");
         goto fail;
     }
     if(ctxLC->Rpc.fCompress && pMsgRsp->cfg.fRemoteDisableCompress) {
         ctxLC->Config.fRemoteDisableCompress = TRUE;
         ctxLC->Rpc.fCompress = FALSE;
-        lcprintfv(ctxLC, "RPC: INFO: Compression disabled.\n");
+        lcprintfv(ctxLC, "REMOTE: INFO: Compression disabled.\n");
     }
     // all ok - initialize this rpc device stub.
     hThread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)LeechRPC_KeepaliveThreadClient, ctxLC, 0, NULL);
@@ -687,14 +737,14 @@ BOOL LeechRpc_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO pp
     memcpy(&ctxLC->Config, &pMsgRsp->cfg, sizeof(LC_CONFIG));
     ctxLC->Config.pfn_printf_opt = pfn_printf_opt_tmp;
     ctxLC->Config.fRemote = TRUE;
-    ctxLC->fMultiThread = ctx->fIsRpc;        // RPC = multi-thread, PIPE = single-thread access
+    ctxLC->fMultiThread = TRUE;
     ctxLC->pfnClose = LeechRPC_Close;
     ctxLC->pfnReadScatter = LeechRPC_ReadScatter;
     ctxLC->pfnWriteScatter = LeechRPC_WriteScatter;
     ctxLC->pfnGetOption = LeechRPC_GetOption;
     ctxLC->pfnSetOption = LeechRPC_SetOption;
     ctxLC->pfnCommand = LeechRPC_Command;
-    lcprintfv(ctxLC, "RPC: Successfully opened remote device: %s\n", ctxLC->Config.szDeviceName);
+    lcprintfv(ctxLC, "REMOTE: Successfully opened remote device: %s\n", ctxLC->Config.szDeviceName);
     LocalFree(pMsgRsp);
     return TRUE;
 fail:

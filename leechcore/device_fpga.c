@@ -6,7 +6,7 @@
 //     - RawUDP protocol - access FPGA over raw UDP packet stream (NeTV2 ETH)
 //     - FT2232H/FT245 protocol - access FPGA via FT2232H USB2 instead of FT601 USB3.
 //
-// (c) Ulf Frisk, 2017-2022
+// (c) Ulf Frisk, 2017-2023
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include "leechcore.h"
@@ -14,6 +14,7 @@
 #include "leechcore_internal.h"
 #include "oscompatibility.h"
 #include "util.h"
+#include "ob/ob.h"
 
 //-------------------------------------------------------------------------------
 // FPGA defines below.
@@ -128,7 +129,59 @@ const DEVICE_PERFORMANCE PERFORMANCE_PROFILES[DEVICE_ID_MAX + 1] = {
     { .SZ_DEVICE_NAME = "Device #16T",           .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x30000, .MAX_SIZE_TX = 0x13f0, .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 15,  .DELAY_READ = 300, .RETRY_ON_ERROR = 1, .F_TINY = 1 },
 };
 
+/*
+* Per-thread context for FPGA_NEWASYNC2. This may be queued to be processed by other threads.
+*/
+typedef struct tdFPGA_NEWASYNC2_MEM_CONTEXT {
+    BOOL fWrite;
+    BOOL fQueued;
+    DWORD cMEM;
+    DWORD iMem;
+    DWORD cMemCpl;
+    PPMEM_SCATTER ppMEMs;
+} FPGA_NEWASYNC2_MEM_CONTEXT, *PFPGA_NEWASYNC2_MEM_CONTEXT;
+
+/*
+* Type of tag state for FPGA_NEWASYNC2
+*/
+typedef enum tdFPGA_NEWASYNC2_TAG_TYPE {
+    FPGA_NEWASYNC2_TAG_TYPE_NONE = 0,
+    FPGA_NEWASYNC2_TAG_TYPE_4K = 1,
+    FPGA_NEWASYNC2_TAG_TYPE_TINY = 2
+} FPGA_NEWASYNC2_TAG_TYPE;
+
+/*
+* Tag entry/state for FPGA_NEWASYNC2
+*/
+typedef struct tdFPGA_NEWASYNC2_TAG_ENTRY {
+    FPGA_NEWASYNC2_TAG_TYPE tp;
+    WORD oMEM;                          // TINY ONLY
+    union { WORD cbTag; WORD cCpl; };   // TINY ONLY
+    PMEM_SCATTER pMEM;
+    PFPGA_NEWASYNC2_MEM_CONTEXT pMemContext;
+} FPGA_NEWASYNC2_TAG_ENTRY, *PFPGA_NEWASYNC2_TAG_ENTRY;
+
+/*
+* Global context for FPGA_NEWASYNC2
+*/
+typedef struct tdFPGA_NEWASYNC2_CONTEXT {
+    BOOL fEnabled;
+
+    POB_MAP pmQueue;
+
+    BYTE iTag;
+    DWORD cAvailTags;
+    DWORD cbAvailCredits;
+
+    // valid entries are 0x00-0x6f, 0x80-0xef (for backwards compatibility).
+    // tags 0x70-7f, 0xf0-ff are reserved as write tags.
+    FPGA_NEWASYNC2_TAG_ENTRY Tags[0x100];
+} FPGA_NEWASYNC2_CONTEXT, *PFPGA_NEWASYNC2_CONTEXT;
+
+
+
 typedef struct tdDEVICE_CONTEXT_FPGA {
+    CRITICAL_SECTION Lock;
     WORD wDeviceId;
     WORD wFpgaVersionMajor;
     WORD wFpgaVersionMinor;
@@ -141,6 +194,7 @@ typedef struct tdDEVICE_CONTEXT_FPGA {
     QWORD qwDeviceIndex;
     struct {
         PBYTE pb;
+        DWORD o;
         DWORD cb;
         DWORD cbMax;
     } rxbuf;
@@ -205,6 +259,7 @@ typedef struct tdDEVICE_CONTEXT_FPGA {
         BOOL fOldAsync;
         OVERLAPPED oOverlapped;
     } async;
+    FPGA_NEWASYNC2_CONTEXT async2;
     PVOID pMRdBufferX; // NULL || PTLP_CALLBACK_BUF_MRd || PTLP_CALLBACK_BUF_MRd_2
     VOID(*hRxTlpCallbackFn)(_Inout_ PVOID pBufferMrd, _In_ PBYTE pb, _In_ DWORD cb);
     BYTE RxEccBit;
@@ -1045,6 +1100,10 @@ VOID DeviceFPGA_Close(_Inout_ PLC_CONTEXT ctxLC)
     PDEVICE_CONTEXT_FPGA ctx = (PDEVICE_CONTEXT_FPGA)ctxLC->hDevice;
     DWORD cbTMP;
     if(!ctx) { return; }
+    while(!TryEnterCriticalSection(&ctx->Lock)) {
+        Sleep(50);
+    }
+    LeaveCriticalSection(&ctx->Lock);
     if(ctx->async.fEnabled && ctx->dev.pfnFT_GetOverlappedResult) {
         ctx->dev.pfnFT_GetOverlappedResult(ctx->dev.hFTDI, &ctx->async.oOverlapped, &cbTMP, TRUE);
     }
@@ -1062,6 +1121,8 @@ VOID DeviceFPGA_Close(_Inout_ PLC_CONTEXT ctxLC)
 #ifdef WIN32
     } __except(EXCEPTION_EXECUTE_HANDLER) { ; }
 #endif /* WIN32 */
+    DeleteCriticalSection(&ctx->Lock);
+    Ob_DECREF(ctx->async2.pmQueue);
     LocalFree(ctx->rxbuf.pb);
     LocalFree(ctx->txbuf.pb);
     LocalFree(ctx);
@@ -2150,273 +2211,484 @@ VOID DeviceFPGA_ReadScatter_Impl(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _Inou
 
 
 //-------------------------------------------------------------------------------
-// TLP NEW ASYNC handling functionality below:
+// TLP ASYNC2 handling functionality below:
 //-------------------------------------------------------------------------------
 
-#define MEM_SCATTER_DO_PROCESS(pMEM)    (!pMEM->f && pMEM->cb && !(pMEM->cb & 7) && ((pMEM->qwA & 0xfff) + pMEM->cb <= 0x1000) && !MEM_SCATTER_ADDR_ISINVALID(pMEM))
-
-#define FPGA_ASYNC_BUFFER_SIZE      0x10000
-
-typedef struct tdFPGA_ASYNC_MEM_INFO {
-    BOOL f;
-    BOOL fTiny;
-    WORD cb;
-    WORD cbOffset;
-    DWORD iMEM;
-} FPGA_ASYNC_MEM_INFO, *PFPGA_ASYNC_MEM_INFO;
-
-typedef struct tdFPGA_ASYNC_INFO {
-    WORD wReqId;
-    BYTE bEccBit;
-    BYTE iTag;
-    BOOL fTiny;
-    DWORD iMEM;
-    DWORD cTagAvail;
-    DWORD cbReadOngoing;
-    DWORD cMEMsCompleted;
-    FPGA_ASYNC_MEM_INFO tag[0x70];
-    PPMEM_SCATTER ppMEMs;
-} FPGA_ASYNC_INFO, *PFPGA_ASYNC_INFO;
-
-VOID DeviceFPGA_ReadScatter_NewAsync_Impl_Tx(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx, _In_ DWORD cMEMs, _Inout_ PPMEM_SCATTER ppMEMs, _In_ PFPGA_ASYNC_INFO pai)
-{
-    WORD o, cb;
-    DWORD j, cbFlush = 0;
-    BOOL fTiny, f32, fTx = FALSE;
-    PFPGA_ASYNC_MEM_INFO pmi;
-    PMEM_SCATTER pMEM;
-    DWORD tx[4] = { 0 };
-    PTLP_HDR_MRdWr64 hdrRd64 = (PTLP_HDR_MRdWr64)tx;
-    PTLP_HDR_MRdWr32 hdrRd32 = (PTLP_HDR_MRdWr32)tx;
-    while(TRUE) {
-        if((pai->iMEM >= cMEMs) || (pai->cTagAvail < 32) || (pai->cbReadOngoing >= ctx->perf.MAX_SIZE_RX)) { break; }
-        pMEM = ppMEMs[pai->iMEM];
-        if(!MEM_SCATTER_DO_PROCESS(pMEM)) {
-            pai->iMEM++;
-            continue;
-        }
-        // NB! TINY algorithm is not yet supported by 'NewAsync'!
-        f32 = (pMEM->qwA < 0x100000000);
-        fTiny = ctx->fAlgorithmReadTiny || (pMEM->cb != 0x1000);
-        o = 0;
-        while(o < pMEM->cb) {
-            cb = (WORD)(fTiny ? min(0x80, pMEM->cb - o) : pMEM->cb);
-            while((pmi = &pai->tag[pai->iTag]) && pmi->f) {
-                pai->iTag = (pai->iTag == 0x6f) ? 0 : (pai->iTag + 1);
-            }
-            pmi->f = TRUE;
-            pmi->fTiny = fTiny;
-            pmi->cb = cb;
-            pmi->cbOffset = o;
-            pmi->iMEM = pai->iMEM;
-            if(f32) {
-                hdrRd32->h.TypeFmt = TLP_MRd32;
-                hdrRd32->h.Length = (WORD)((cb < 0x1000) ? cb >> 2 : 0);
-                hdrRd32->RequesterID = ctx->wDeviceId;
-                hdrRd32->Tag = pai->iTag + pai->bEccBit;
-                hdrRd32->FirstBE = 0xf;
-                hdrRd32->LastBE = 0xf;
-                hdrRd32->Address = (DWORD)(pMEM->qwA + o);
-            } else {
-                hdrRd64->h.TypeFmt = TLP_MRd64;
-                hdrRd64->h.Length = (WORD)((cb < 0x1000) ? cb >> 2 : 0);
-                hdrRd64->RequesterID = ctx->wDeviceId;
-                hdrRd64->Tag = pai->iTag + pai->bEccBit;
-                hdrRd64->FirstBE = 0xf;
-                hdrRd64->LastBE = 0xf;
-                hdrRd64->AddressHigh = (DWORD)(pMEM->qwA >> 32);
-                hdrRd64->AddressLow = (DWORD)(pMEM->qwA + o);
-            }
-            for(j = 0; j < 4; j++) {
-                ENDIAN_SWAP_DWORD(tx[j]);
-            }
-
-            cbFlush += cb;
-            if(ctx->perf.RX_FLUSH_LIMIT && (cbFlush >= (fTiny ? 0x1000 : ctx->perf.RX_FLUSH_LIMIT))) {
-                // flush is only used by the SP605.
-                DeviceFPGA_TxTlp(ctxLC, ctx, (PBYTE)tx, f32 ? 12 : 16, FALSE, TRUE);
-                usleep(ctx->perf.DELAY_WRITE);
-                cbFlush = 0;
-            } else {
-                DeviceFPGA_TxTlp(ctxLC, ctx, (PBYTE)tx, f32 ? 12 : 16, FALSE, FALSE);
-            }
-            o += cb;
-            pai->cTagAvail--;
-            pai->cbReadOngoing += cb;
-            pai->iTag = (pai->iTag == 0x6f) ? 0 : (pai->iTag + 1);
-        }
-        pai->iMEM++;
-        fTx = TRUE;
-    }
-    if(fTx) {
-        DeviceFPGA_TxTlp(ctxLC, ctx, NULL, 0, TRUE, TRUE);
-    }
-}
+#define DEVICE_FPGA_ASYNC2_MAXREADSIZE       0x10000
 
 /*
 * Generic callback function that may be used by TLP capable devices to aid the
 * collection of memory read completions. Receives single TLP packet.
-* -- pai
+* -- ctxLC
+* -- ctx
 * -- pb
 * -- cb
 */
-VOID DeviceFPGA_ReadScatter_NewAsync_Impl_RxTlpCB(_Inout_ PFPGA_ASYNC_INFO pai, _In_ PBYTE pb, _In_ DWORD cb)
+VOID DeviceFPGA_Async2_Read_RxTlpSingle_MRdCpl(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx, _In_ PBYTE pb, _In_ DWORD cb)
 {
     PTLP_HDR_CplD hdrC = (PTLP_HDR_CplD)pb;
     PTLP_HDR hdr = (PTLP_HDR)pb;
     PDWORD buf = (PDWORD)pb;
-    DWORD o, c, iTag;
+    WORD c, o, cbAdjust = 0;
     PMEM_SCATTER pMEM;
-    PFPGA_ASYNC_MEM_INFO pmi;
-    BOOL fTiny, fCompleted;
+    PFPGA_NEWASYNC2_TAG_ENTRY pTag;
     buf[0] = _byteswap_ulong(buf[0]);
     buf[1] = _byteswap_ulong(buf[1]);
     buf[2] = _byteswap_ulong(buf[2]);
-    if(cb < ((DWORD)hdr->Length << 2) + 12) { return; } // Insufficient length
-    if(hdrC->RequesterID != pai->wReqId) { return; }    // RequesterID mismatch
-    if(pai->bEccBit != (hdrC->Tag & 0x80)) { return; }  // ECC bit mismatch
-    iTag = hdrC->Tag & 0x7f;
-    if(iTag >= 0x70) { return; }                        // tag out of range
-    pmi = &pai->tag[iTag];
-    pMEM = pai->ppMEMs[pmi->iMEM];
-    if(!pmi->f) { return; }                             // non active tag
-    if((hdr->TypeFmt == TLP_Cpl) && hdrC->Status) {
-        pai->cbReadOngoing -= pmi->cb;
-        if(MEM_SCATTER_STACK_PEEK(pMEM, 1) != (DWORD)-1) {
-            MEM_SCATTER_STACK_SET(pMEM, 1, (DWORD)-1);
-            pai->cMEMsCompleted++;
+    if(cb < ((DWORD)hdr->Length << 2) + 12) { return; }                         // Insufficient length
+    if((hdr->TypeFmt != TLP_CplD) && (hdr->TypeFmt != TLP_Cpl)) { return; }     // Not a completion
+    pTag = ctx->async2.Tags + hdrC->Tag;
+    pMEM = pTag->pMEM;
+    // 4K COMPLETION:
+    if(pTag->tp == FPGA_NEWASYNC2_TAG_TYPE_4K) {
+        // Cpl: -> free MEM and tag
+        if(hdr->TypeFmt == TLP_Cpl) {
+            pTag->pMemContext->cMemCpl++;
+            goto free_tag;
         }
-        ZeroMemory(pmi, sizeof(FPGA_ASYNC_MEM_INFO));        
-        pai->cTagAvail++;
-        return;
-    }
-    if(hdr->TypeFmt == TLP_CplD) {
-        fTiny = pai->fTiny || (pMEM->cb != 0x1000);
-        if(fTiny) {
-            if(hdrC->ByteCount > pmi->cb) { return; }
-            o = pmi->cbOffset + pmi->cb - hdrC->ByteCount;
-        } else {
-            o = 0x1000 - (hdrC->ByteCount ? hdrC->ByteCount : 0x1000);
-        }
-        c = (DWORD)hdr->Length << 2;
-        if(o + c > pMEM->cb) { return; }
+        // CplD:
+        o = 0x1000 - (hdrC->ByteCount ? hdrC->ByteCount : 0x1000);
+        c = hdr->Length << 2;
+        if(o + c > (WORD)pMEM->cb) { return; }
         memcpy(pMEM->pb + o, pb + 12, c);
         MEM_SCATTER_STACK_ADD(pMEM, 1, c);
-        pai->cbReadOngoing -= c;
-        fCompleted = (pMEM->cb == MEM_SCATTER_STACK_PEEK(pMEM, 1));
-        if(fCompleted) {
-            pai->cMEMsCompleted++;
+        if(pMEM->cb == MEM_SCATTER_STACK_PEEK(pMEM, 1)) {
+            pTag->pMemContext->cMemCpl++;
+            goto free_tag;
         }
-        if(fCompleted || fTiny) {
-            ZeroMemory(pmi, sizeof(FPGA_ASYNC_MEM_INFO));
-            pai->cTagAvail++;
-            return;
+        return;
+    }
+    // TINY COMPLETION:
+    if(pTag->tp == FPGA_NEWASYNC2_TAG_TYPE_TINY) {
+        if(hdr->TypeFmt == TLP_Cpl) {
+            MEM_SCATTER_STACK_ADD(pMEM, 1, 0x10000ULL + pTag->cbTag);
+            if(pMEM->cb == (MEM_SCATTER_STACK_PEEK(pMEM, 1) & 0x1fff)) {
+                pTag->pMemContext->cMemCpl++;
+            }
+            goto free_tag;
+        }
+        // CplD:
+        c = (hdr->Length << 2);
+        o = pTag->oMEM + (hdrC->LowerAddress - (pTag->pMEM->qwA & 0x7f));
+        if(o > 0xfffc) {
+            cbAdjust = 0x10000 - o;
+            c -= cbAdjust;
+            o = 0;
+        }
+        if((c == 0) || (c > 0x80)) { return; }
+        if(o + c > (WORD)pMEM->cb) {
+            if(o >= (WORD)pMEM->cb) {
+                return;
+            }
+            c = (WORD)pMEM->cb - o;
+        }
+        memcpy(pMEM->pb + o, pb + 12 + cbAdjust, c);
+        MEM_SCATTER_STACK_ADD(pMEM, 1, c);
+        if(pMEM->cb == (MEM_SCATTER_STACK_PEEK(pMEM, 1) & 0x1fff)) {
+            pTag->pMemContext->cMemCpl++;
+        }
+        pTag->cbTag -= c;
+        if(!pTag->cbTag) {
+            goto free_tag;
+        }
+        return;
+    }
+    return;
+free_tag:
+    ctx->async2.cAvailTags++;
+    if(pTag->tp == FPGA_NEWASYNC2_TAG_TYPE_4K) {
+        ctx->async2.cbAvailCredits += 0x1000;
+    }
+    if(pTag->tp == FPGA_NEWASYNC2_TAG_TYPE_TINY) {
+        ctx->async2.cbAvailCredits += 0x80;
+    }
+    pTag->tp = FPGA_NEWASYNC2_TAG_TYPE_NONE;
+    pTag->pMemContext = NULL;
+    pTag->pMEM = NULL;
+}
+
+/*
+* Extract the first TLP out of a byte buffer received from the FPGA and forward
+* the TLP for processing.
+* -- ctxLC
+* -- ctx
+* -- cdwData = number of DWORDs in FPGA data pdwData
+* -- pdwData = FPGA data
+* -- return = the number of DWORDs successfully consumed.
+*/
+DWORD DeviceFPGA_Async2_Read_RxTlpSingle(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx, _In_ DWORD cdwData, _In_ PDWORD pdwData)
+{
+    BYTE pbTlp[TLP_RX_MAX_SIZE];
+    PDWORD pdwTlp = (PDWORD)pbTlp;
+    DWORD i = 0, j, dwStatus, cdwTlp = 0, iStartWord;
+    // skip over initial ftdi workaround dummy fillers / non valid octa-dwords
+    while((i < cdwData) && ((pdwData[i] == 0x55556666) || ((pdwData[i] & 0xf0000000) != 0xe0000000))) {
+        i++;
+    }
+    if(i) { return i; }
+    // fetch and process next complete and valid tlp (if possible)
+    while(i <= cdwData - 8) {
+        iStartWord = i;
+        dwStatus = pdwData[i++];
+        if((dwStatus & 0xf0000000) != 0xe0000000) {
+            continue;
+        }
+        for(j = 0; j < 7; j++, i++) {
+            if((dwStatus & 0x03) == 0x00) { // PCIe TLP
+                if(cdwTlp >= TLP_RX_MAX_SIZE / sizeof(DWORD)) {
+                    // TODO: malformed TLP
+                    pdwData[iStartWord] = pdwData[iStartWord] | (0xffffffff >> (28 - (j << 2)));
+                    return iStartWord;
+                }
+                pdwTlp[cdwTlp++] = pdwData[i];
+            }
+            if((dwStatus & 0x07) == 0x04) { // PCIe TLP and LAST
+                if(cdwTlp < 3) {
+                    printf("Device Info: FPGA: Bad PCIe TLP received! Should not happen!\n");
+                    pdwData[iStartWord] = pdwData[iStartWord] | (0xffffffff >> (28 - (j << 2)));
+                    return iStartWord;
+                }
+                if(ctxLC->fPrintf[LC_PRINTF_VVV]) {
+                    TLP_Print(ctxLC, pbTlp, cdwTlp << 2, FALSE);
+                }
+                if(ctx->read_callback.pfn) {
+                    DeviceFPGA_RxTlp_UserCallback(ctxLC, ctx, pbTlp, cdwTlp << 2);
+                }
+                DeviceFPGA_Async2_Read_RxTlpSingle_MRdCpl(ctxLC, ctx, pbTlp, cdwTlp << 2);
+                pdwData[iStartWord] = pdwData[iStartWord] | (0xffffffff >> (28 - (j << 2)));
+                return iStartWord;
+            }
+            dwStatus >>= 4;
+        }
+    }
+    return 0;
+}
+
+BOOL DeviceFPGA_Async2_Read_RxTlpFromBuffer(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx)
+{
+    BOOL fReadTlp = FALSE;
+    DWORD cdwTlpDataConsumed;
+    while(ctx->rxbuf.o + 32 <= ctx->rxbuf.cb) {
+        cdwTlpDataConsumed = DeviceFPGA_Async2_Read_RxTlpSingle(ctxLC, ctx, (ctx->rxbuf.cb - ctx->rxbuf.o) >> 2, (PDWORD)(ctx->rxbuf.pb + ctx->rxbuf.o));
+        if(!cdwTlpDataConsumed) {
+            break;
+        }
+        ctx->rxbuf.o += cdwTlpDataConsumed << 2;
+        fReadTlp = TRUE;
+    }
+    return fReadTlp;
+}
+
+/*
+* Async2 forward declarations:
+*/
+VOID DeviceFPGA_WriteScatter(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cpMEMs, _Inout_ PPMEM_SCATTER ppMEMs);
+
+inline BYTE DeviceFPGA_Async2_Read_TxTlp_NextTag(_In_ PDEVICE_CONTEXT_FPGA ctx)
+{
+    BYTE iTag = ctx->async2.iTag;
+    while(TRUE) {
+        iTag++;
+        if(iTag == 0xEF) {
+            iTag = 0;
+        }
+        if(ctx->async2.Tags[iTag].tp == FPGA_NEWASYNC2_TAG_TYPE_NONE) {
+            ctx->async2.iTag = iTag;
+            return iTag;
         }
     }
 }
 
-VOID DeviceFPGA_ReadScatter_NewAsync_Impl(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx, _In_ DWORD cMEMs, _Inout_ PPMEM_SCATTER ppMEMs)
+VOID DeviceFPGA_Async2_Read_TxTlpSingle_MrdTlp(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx, _In_ WORD wTlpDwLength, _In_ BYTE iTag, _In_ QWORD qwA)
 {
-    PMEM_SCATTER pMEM;
-    BOOL fAsyncInProgress = FALSE, fAsync;
-    DWORD iMEM, status, cbRead, cbReadMax;
-    DWORD cbBytesToRead = 0, cEmptyRead = 0, cbBuffer = 0, oBuffer = 0;
-    PBYTE pbBuffer;
-    DWORD cdwTlpDataConsumed;
-    FPGA_ASYNC_INFO ai = { 0 };
-    // 0: split too large reads
-    if(cMEMs > 1024) {
-        for(iMEM = 0; iMEM < cMEMs; iMEM += 1024) {
-            DeviceFPGA_ReadScatter_NewAsync_Impl(ctxLC, ctx, min(1024, cMEMs - iMEM), ppMEMs + iMEM);
-        }
+    BOOL f32 = (qwA < 0x100000000);
+    DWORD tx[4] = { 0 };
+    PTLP_HDR_MRdWr64 hdrRd64 = (PTLP_HDR_MRdWr64)tx;
+    PTLP_HDR_MRdWr32 hdrRd32 = (PTLP_HDR_MRdWr32)tx;
+    if(f32) {
+        hdrRd32->h.TypeFmt = TLP_MRd32;
+        hdrRd32->h.Length = wTlpDwLength;
+        hdrRd32->RequesterID = ctx->wDeviceId;
+        hdrRd32->Tag = iTag;
+        hdrRd32->FirstBE = 0xf;
+        hdrRd32->LastBE = (wTlpDwLength == 1) ? 0 : 0xf;
+        hdrRd32->Address = (DWORD)(qwA);
+    } else {
+        hdrRd64->h.TypeFmt = TLP_MRd64;
+        hdrRd64->h.Length = wTlpDwLength;
+        hdrRd64->RequesterID = ctx->wDeviceId;
+        hdrRd64->Tag = iTag;
+        hdrRd64->FirstBE = 0xf;
+        hdrRd64->LastBE = (wTlpDwLength == 1) ? 0 : 0xf;
+        hdrRd64->AddressHigh = (DWORD)(qwA >> 32);
+        hdrRd64->AddressLow = (DWORD)(qwA);
+        ENDIAN_SWAP_DWORD(tx[3]);
+    }
+    ENDIAN_SWAP_DWORD(tx[2]);
+    ENDIAN_SWAP_DWORD(tx[1]);
+    ENDIAN_SWAP_DWORD(tx[0]);
+    DeviceFPGA_TxTlp(ctxLC, ctx, (PBYTE)tx, f32 ? 12 : 16, FALSE, FALSE);
+}
+
+VOID DeviceFPGA_Async2_Read_TxTlpSingle(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx, _In_ PFPGA_NEWASYNC2_MEM_CONTEXT pTX)
+{
+    BYTE iTag;
+    DWORD o, cb, cdw;
+    PFPGA_NEWASYNC2_TAG_ENTRY pTag;
+    PMEM_SCATTER pMEM = pTX->ppMEMs[pTX->iMem];
+    // 4K READ:
+    if((pMEM->cb == 0x1000) && !ctx->fAlgorithmReadTiny && !(pMEM->qwA & 0xfff)) {
+        iTag = DeviceFPGA_Async2_Read_TxTlp_NextTag(ctx);
+        pTag = &ctx->async2.Tags[iTag];
+        pTag->tp = FPGA_NEWASYNC2_TAG_TYPE_4K;
+        pTag->pMemContext = pTX;
+        pTag->pMEM = pMEM;
+        pTag->oMEM = 0;
+        ctx->async2.cbAvailCredits -= 0x1000;
+        ctx->async2.cAvailTags--;
+        DeviceFPGA_Async2_Read_TxTlpSingle_MrdTlp(ctxLC, ctx, 0, iTag, pMEM->qwA);
         return;
     }
-    // 1: init
-    ai.ppMEMs = ppMEMs;
-    ai.cTagAvail = 0x70;
-    ai.wReqId = ctx->wDeviceId;
-    ai.bEccBit = ctx->RxEccBit;
-    ai.fTiny = ctx->fAlgorithmReadTiny;
-    ctx->pMRdBufferX = &ai;
-    ctx->hRxTlpCallbackFn = (VOID(*)(PVOID, PBYTE, DWORD))DeviceFPGA_ReadScatter_NewAsync_Impl_RxTlpCB;
-    pbBuffer = ctx->rxbuf.pb;
-    // 2: pre-check MEMs and set fAsync (if large enough read).
-    for(iMEM = 0; iMEM < cMEMs; iMEM++) {
-        pMEM = ppMEMs[iMEM];
-        if(MEM_SCATTER_DO_PROCESS(pMEM)) {
-            cbBytesToRead += pMEM->cb;
+    // TINY READ: VALIDITY CHECKS:
+    if(!pMEM->cb) { goto fail; }                                            // bad size
+    if((pMEM->qwA & 0xfff) + pMEM->cb > 0x1000) { goto fail; }              // page traverse
+    // TINY READ LOOP:
+    o = 0;
+    while(o < pMEM->cb) {
+        if(o == 0) {
+            cb = min(pMEM->cb, 0x80 - (DWORD)(pMEM->qwA & 0x7f));           // 1st packet, make sure to align to 128-byte boundary:
+            cdw = (cb + (pMEM->qwA & 3) + 3) >> 2;
         } else {
-            ai.cMEMsCompleted++;
+            cb = min(0x80, pMEM->cb - o);
+            cdw = cb >> 2;
+        }
+        iTag = DeviceFPGA_Async2_Read_TxTlp_NextTag(ctx);
+        pTag = &ctx->async2.Tags[iTag];
+        pTag->tp = FPGA_NEWASYNC2_TAG_TYPE_TINY;
+        pTag->pMemContext = pTX;
+        pTag->pMEM = pMEM;
+        pTag->oMEM = (WORD)o;
+        pTag->cbTag = (WORD)cb;
+        ctx->async2.cbAvailCredits -= 0x80;
+        ctx->async2.cAvailTags--;
+        DeviceFPGA_Async2_Read_TxTlpSingle_MrdTlp(ctxLC, ctx, (WORD)cdw, iTag, pMEM->qwA + o);
+        o += cb;
+    }
+    return;
+fail:
+    pTX->cMemCpl++;
+}
+
+PFPGA_NEWASYNC2_MEM_CONTEXT DeviceFPGA_Async2_Read_TxTlp(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx, _In_ PFPGA_NEWASYNC2_MEM_CONTEXT pTX, _In_ BOOL fPrimary)
+{
+    DWORD i = 0;
+    BOOL fTX = FALSE;
+    PMEM_SCATTER pMEM;
+    // Fetch new from queue (if required):
+    if(!pTX) {
+        while((pTX = ObMap_GetByIndex(ctx->async2.pmQueue, i))) {
+            if(pTX->iMem < pTX->cMEM) { break; }
+            i++;
+        }
+        if(!pTX) { return NULL; }
+        if(pTX->fWrite) {
+            // WriteTX: Dequeue and transmit:
+            ObMap_Remove(ctx->async2.pmQueue, pTX);
+            DeviceFPGA_WriteScatter(ctxLC, pTX->cMEM, pTX->ppMEMs);
+            return NULL;
         }
     }
-    if(cMEMs == ai.cMEMsCompleted) {
-        return;
+    // TX TLPs per MEM:
+    while(pTX->iMem < pTX->cMEM) {
+        // Skip already completed/invalid MEMs:
+        pMEM = pTX->ppMEMs[pTX->iMem];
+        if(pMEM->f || MEM_SCATTER_ADDR_ISINVALID(pMEM)) {
+            pTX->cMemCpl++;
+            pTX->iMem++;
+            continue;
+        }
+        // Ensure enough tags and byte credits are available:
+        if(fPrimary) {
+            if(ctx->async2.cbAvailCredits < 0x1000) { break; }
+            if(ctx->fAlgorithmReadTiny) {
+                if(ctx->async2.cAvailTags < 32) { break; }
+            } else {
+                if(ctx->async2.cAvailTags == 0) { break; }
+            }
+        } else {
+            if(ctx->async2.cbAvailCredits < 0x2000) { break; }
+            if(ctx->async2.cAvailTags < 64) { break; }
+        }
+        // TX single TLP:
+        DeviceFPGA_Async2_Read_TxTlpSingle(ctxLC, ctx, pTX);
+        pTX->iMem++;
+        fTX = TRUE;
     }
-    fAsync = !ctx->dev.f2232h && !ai.fTiny && (cbBytesToRead > 0x4000);
-    cbReadMax = min(FPGA_ASYNC_BUFFER_SIZE, max(0x1800, cbBytesToRead + (cbBytesToRead >> 1)));
-    // 3: clear potential lingering dirty TLPs/Cpls (if required)
-    // TODO: IMPLEMENT THIS
-    // 4: transmit initial data:
-    DeviceFPGA_ReadScatter_NewAsync_Impl_Tx(ctxLC, ctx, cMEMs, ppMEMs, &ai);
-    // 5: initial read
-    usleep(15);
-    status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, ctx->rxbuf.pb, cbReadMax, &cbRead, NULL);
+    if(fTX) {
+        // Flush TLPs to FPGA device:
+        DeviceFPGA_TxTlp(ctxLC, ctx, NULL, 0, TRUE, TRUE);
+    }
+    if(pTX->iMem < pTX->cMEM) {
+        return pTX;
+    }
+    // All MEMs completed -> remove from queue and return.
+    ObMap_Remove(ctx->async2.pmQueue, pTX);
+    return NULL;
+}
+
+VOID DeviceFPGA_Async2_ReadScatter_DoWork(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx, _In_ PFPGA_NEWASYNC2_MEM_CONTEXT pMemCtxPrimary)
+{
+    BOOL fAsync;
+    DWORD i, status, cEmptyRead = 0, cbRead = 0, cbReadInitialMax;
+    PFPGA_NEWASYNC2_MEM_CONTEXT pMemCtxTX = pMemCtxPrimary;
+    PFPGA_NEWASYNC2_TAG_ENTRY pTag;
+    fAsync = !ctx->dev.f2232h;
+    // TX PRIMARY and start OVERLAPPED read:
+    pMemCtxTX = DeviceFPGA_Async2_Read_TxTlp(ctxLC, ctx, pMemCtxPrimary, TRUE);
+    // RX INITIAL / (LATENCY OPTIMIZED FOR SMALLER READS):
+    usleep(5);
+    cbReadInitialMax = min(DEVICE_FPGA_ASYNC2_MAXREADSIZE, pMemCtxPrimary->cMEM * 0x1800);
+    status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, ctx->rxbuf.pb + ctx->rxbuf.cb, cbReadInitialMax, &cbRead, NULL);
     if(status && (status != FT_IO_PENDING)) {
         return;
     }
-    // 6: do main read loop
+    ctx->rxbuf.cb += cbRead;
+    DeviceFPGA_Async2_Read_RxTlpFromBuffer(ctxLC, ctx);
+    // MAIN READ LOOP:
     while(TRUE) {
-        // 6.1: check no-read ops and update buffer pointer with previously read data
-        cbBuffer += cbRead;
+        // REALIGN 16MB BUFFER IF REQUIRED:
+        if(ctx->rxbuf.cb + DEVICE_FPGA_ASYNC2_MAXREADSIZE > ctx->rxbuf.cbMax) {
+            memcpy(ctx->rxbuf.pb, ctx->rxbuf.pb + ctx->rxbuf.o, ctx->rxbuf.cb - ctx->rxbuf.o);
+            ctx->rxbuf.cb -= ctx->rxbuf.o;
+            ctx->rxbuf.o = 0;
+        }
+        // EXIT CRITERIA: PRIMARY READ&PROCESSING COMPLETED:
+        if(pMemCtxPrimary->cMEM == pMemCtxPrimary->cMemCpl) {
+            return;
+        }
+        // SLEEP(EXIT) ON EMPTY OVERLAPPED READ:
         if((cbRead == 0) || (cbRead == 0x14)) {
             usleep(5);
             cEmptyRead++;
             if(cEmptyRead >= 0x30) {
-                break;
+                goto fail_timeout;
             }
         }
-        // 6.2: submit async read (if target read is large enough to gain from it)
+        // START OVERLAPPED READ:
         if(fAsync) {
-            status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, pbBuffer + cbBuffer, cbReadMax, &cbRead, &ctx->async.oOverlapped);
+            status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, ctx->rxbuf.pb + ctx->rxbuf.cb, DEVICE_FPGA_ASYNC2_MAXREADSIZE, &cbRead, &ctx->async.oOverlapped);
             if(status && (status != FT_IO_PENDING)) {
-                break;
+                goto fail_overlapped;
             }
-            fAsyncInProgress = TRUE;
         }
-        // 6.3: process (partial) tlp result
-        while(oBuffer + 32 <= cbBuffer) {
-            cdwTlpDataConsumed = DeviceFPGA_RxTlpAsynchronous_Tlp(ctxLC, ctx, (cbBuffer - oBuffer) >> 2, (PDWORD)(pbBuffer + oBuffer));
-            if(cdwTlpDataConsumed == (DWORD)-1) {
-                break;
-            }
-            oBuffer += cdwTlpDataConsumed << 2;
+        // PROCESS RESULT:
+        if(DeviceFPGA_Async2_Read_RxTlpFromBuffer(ctxLC, ctx)) {
             cEmptyRead = 0;
         }
-        // 6.4: check exit criteria
-        if(cbBuffer >= 0x01000000 - cbReadMax) {
-            break;
-        }
-        if(cMEMs == ai.cMEMsCompleted) {
-            break;
-        }
-        // 6.5: transmit additional TLPs
-        DeviceFPGA_ReadScatter_NewAsync_Impl_Tx(ctxLC, ctx, cMEMs, ppMEMs, &ai);
-        // 6.6: read (overlapped) result
+        // TX:
+        pMemCtxTX = DeviceFPGA_Async2_Read_TxTlp(ctxLC, ctx, pMemCtxTX, (pMemCtxTX == pMemCtxPrimary));
+        // READ OVERLAPPED RESULT:
         if(fAsync) {
             status = ctx->dev.pfnFT_GetOverlappedResult(ctx->dev.hFTDI, &ctx->async.oOverlapped, &cbRead, TRUE);
-            fAsyncInProgress = FALSE;
         } else {
-            status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, pbBuffer + cbBuffer, cbReadMax, &cbRead, NULL);
+            status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, ctx->rxbuf.pb + ctx->rxbuf.cb, cbReadInitialMax, &cbRead, NULL);
         }
-        if(status) {
-            break;
+        if(status) { goto fail_overlapped; }
+        ctx->rxbuf.cb += cbRead;
+    }
+fail_timeout:
+    // CLEAR ANY TAGS RESERVED FOR PRIMARY MEM CTX ON TIMEOUT FAILURE:
+    for(i = 0; i < 0x100; i++) {
+        pTag = ctx->async2.Tags + i;
+        if(pTag->pMemContext == pMemCtxPrimary) {
+            if(pTag->tp == FPGA_NEWASYNC2_TAG_TYPE_4K) {
+                ctx->async2.cbAvailCredits += 0x1000;
+            } else if(pTag->tp == FPGA_NEWASYNC2_TAG_TYPE_TINY) {
+                ctx->async2.cbAvailCredits += 0x80;
+            }
+            ctx->async2.cAvailTags++;
+            pTag->tp = FPGA_NEWASYNC2_TAG_TYPE_NONE;
+            pTag->oMEM = 0;
+            pTag->pMEM = NULL;
+            pTag->pMemContext = NULL;
         }
     }
-    if(fAsyncInProgress) {
-        // clear any on-going overlapped reads
-        ctx->dev.pfnFT_GetOverlappedResult(ctx->dev.hFTDI, &ctx->async.oOverlapped, &cbRead, TRUE);
+    return;
+fail_overlapped:
+    return;
+}
+
+
+VOID DeviceFPGA_Async2_ReadScatter(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _Inout_ PPMEM_SCATTER ppMEMs, _In_ BOOL fRetry)
+{
+    PDEVICE_CONTEXT_FPGA ctx = (PDEVICE_CONTEXT_FPGA)ctxLC->hDevice;
+    FPGA_NEWASYNC2_MEM_CONTEXT MemCtx = { 0 };
+    BOOL fFail = FALSE;
+    DWORD i;
+    PMEM_SCATTER pMEM;
+    // 1: Prepare MEMs and MemContext:
+    for(i = 0; i < cMEMs; i++) {
+        pMEM = ppMEMs[i];
+        if(!pMEM->f && MEM_SCATTER_ADDR_ISVALID(pMEM)) {
+            MEM_SCATTER_STACK_PUSH(pMEM, 0);
+        }
     }
-    ctx->RxEccBit = ctx->RxEccBit ? 0 : 0x80;
+    MemCtx.cMEM = cMEMs;
+    MemCtx.ppMEMs = ppMEMs;
+    // 2: Dispatch to worker function (behind lock):
+    if(TryEnterCriticalSection(&ctx->Lock)) {
+        // lock aquired without blocking -> do work without queuing:
+        DeviceFPGA_Async2_ReadScatter_DoWork(ctxLC, ctx, &MemCtx);
+        LeaveCriticalSection(&ctx->Lock);
+    } else {
+        // lock not aquired -> queue work:
+        ObMap_Push(ctx->async2.pmQueue, 0, &MemCtx);
+        EnterCriticalSection(&ctx->Lock);
+        ObMap_Remove(ctx->async2.pmQueue, &MemCtx);
+        if(MemCtx.cMemCpl < MemCtx.cMEM) {
+            DeviceFPGA_Async2_ReadScatter_DoWork(ctxLC, ctx, &MemCtx);
+        }
+        LeaveCriticalSection(&ctx->Lock);
+    }
+    // 3: Restore MEMs (and retry if required):
+    for(i = 0; i < cMEMs; i++) {
+        pMEM = ppMEMs[i];
+        if(!pMEM->f && MEM_SCATTER_ADDR_ISVALID(pMEM)) {
+            pMEM->f = pMEM->cb == MEM_SCATTER_STACK_POP(pMEM);
+            fFail = fFail || !pMEM->f;
+        }
+    }
+    if(fFail && fRetry) {
+        DeviceFPGA_Async2_ReadScatter(ctxLC, cMEMs, ppMEMs, FALSE);
+    }
+}
+
+/*
+* Async2 write scatter implementation. This will in the normal case just call
+* the normal write scatter implementation. If the device is busy, it will queue
+* the write request and wait for the device to become available.
+*/
+VOID DeviceFPGA_Async2_WriteScatter(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cpMEMs, _Inout_ PPMEM_SCATTER ppMEMs)
+{
+    PDEVICE_CONTEXT_FPGA ctx = (PDEVICE_CONTEXT_FPGA)ctxLC->hDevice;
+    FPGA_NEWASYNC2_MEM_CONTEXT MemCtx = { 0 };
+    // 1: try lock and write:
+    if(TryEnterCriticalSection(&ctx->Lock)) {
+        DeviceFPGA_WriteScatter(ctxLC, cpMEMs, ppMEMs);
+        LeaveCriticalSection(&ctx->Lock);
+        return;
+    }
+    // 2: try lock failed -> queue and wait for lock:
+    MemCtx.fWrite = TRUE;
+    MemCtx.cMEM = cpMEMs;
+    MemCtx.ppMEMs = ppMEMs;
+    ObMap_Push(ctx->async2.pmQueue, 0, &MemCtx);
+    EnterCriticalSection(&ctx->Lock);
+    if(ObMap_Remove(ctx->async2.pmQueue, &MemCtx)) {
+        // if object is still in the queue, it means it was not processed yet.
+        DeviceFPGA_WriteScatter(ctxLC, cpMEMs, ppMEMs);
+    }
+    LeaveCriticalSection(&ctx->Lock);
 }
 
 
@@ -2429,29 +2701,17 @@ VOID DeviceFPGA_ReadScatter(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _Inout_ PP
 {
     PDEVICE_CONTEXT_FPGA ctx = (PDEVICE_CONTEXT_FPGA)ctxLC->hDevice;
     DWORD i, iRetry;
-    BOOL fRetry, fNewAsync;
+    BOOL fRetry;
     PMEM_SCATTER pMEM;
-    if(!ctx->wDeviceId) { return; }
-    // NewAsync is faster but currently do not support partial page TLP reads.
-    // NewAsync non-full page reads may fail or may be corrupted. Support is
-    // planned for the future - but for now use the old async for partial pages.
-    fNewAsync = ctx->async.fEnabled && !ctx->async.fOldAsync;
     for(iRetry = 0, fRetry = TRUE; (fRetry && (iRetry <= ctx->perf.RETRY_ON_ERROR)); iRetry++) {
         fRetry = FALSE;
         for(i = 0; i < cMEMs; i++) {
             pMEM = ppMEMs[i];
             if(!pMEM->f && MEM_SCATTER_ADDR_ISVALID(pMEM)) {
                 MEM_SCATTER_STACK_PUSH(pMEM, 0);
-                // NewAsync lack of functionality for non-full pages
-                // -> use old async for partial pages.
-                fNewAsync = fNewAsync && (pMEM->cb == 0x1000);
             }
         }
-        if(fNewAsync) {
-            DeviceFPGA_ReadScatter_NewAsync_Impl(ctxLC, ctx, cMEMs, ppMEMs);
-        } else {
-            DeviceFPGA_ReadScatter_Impl(ctxLC, cMEMs, ppMEMs);
-        }
+        DeviceFPGA_ReadScatter_Impl(ctxLC, cMEMs, ppMEMs);
         for(i = 0; i < cMEMs; i++) {
             pMEM = ppMEMs[i];
             if(!pMEM->f && MEM_SCATTER_ADDR_ISVALID(pMEM)) {
@@ -2459,6 +2719,19 @@ VOID DeviceFPGA_ReadScatter(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _Inout_ PP
                 fRetry = fRetry || !pMEM->f;
             }
         }
+    }
+}
+
+VOID DeviceFPGA_ReadScatter_DoLock(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _Inout_ PPMEM_SCATTER ppMEMs)
+{
+    PDEVICE_CONTEXT_FPGA ctx = (PDEVICE_CONTEXT_FPGA)ctxLC->hDevice;
+    if(!ctx->wDeviceId) { return; }
+    if(ctx->async2.fEnabled) {
+        DeviceFPGA_Async2_ReadScatter(ctxLC, cMEMs, ppMEMs, ctx->perf.RETRY_ON_ERROR);
+    } else {
+        EnterCriticalSection(&ctx->Lock);
+        DeviceFPGA_ReadScatter(ctxLC, cMEMs, ppMEMs);
+        LeaveCriticalSection(&ctx->Lock);
     }
 }
 
@@ -2546,17 +2819,14 @@ VOID DeviceFPGA_ProbeMEM(_In_ PLC_CONTEXT ctxLC, _In_ QWORD pa, _In_ DWORD cPage
 _Success_(return) LINUX_NO_OPTIMIZE
 BOOL DeviceFPGA_WriteMEM_TXP(_In_ PLC_CONTEXT ctxLC, _Inout_ PDEVICE_CONTEXT_FPGA ctx, _In_ QWORD pa, _In_ BYTE bFirstBE, _In_ BYTE bLastBE, _In_ PBYTE pb, _In_ DWORD cb)
 {
-    static BYTE bTag = 0x70;
+    static BYTE bTag = 0xe0;
     DWORD txbuf[36], i, cbTlp;
     PBYTE pbTlp = (PBYTE)txbuf;
     PTLP_HDR_MRdWr32 hdrWr32 = (PTLP_HDR_MRdWr32)txbuf;
     PTLP_HDR_MRdWr64 hdrWr64 = (PTLP_HDR_MRdWr64)txbuf;
-    if(bTag == 0x7f) {
+    bTag++;
+    if(bTag == 0) {
         bTag = 0xe0;
-    } else if(bTag == 0xff) {
-        bTag = 0x70;
-    } else {
-        bTag++;
     }
     memset(pbTlp, 0, 16);
     if(pa < 0x100000000) {
@@ -2630,6 +2900,18 @@ VOID DeviceFPGA_WriteScatter(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cpMEMs, _Inout_ 
         pMEM->f = TRUE;
     }
     DeviceFPGA_TxTlp(ctxLC, ctx, NULL, 0, FALSE, TRUE) && result; // Flush and Return.
+}
+
+VOID DeviceFPGA_WriteScatter_DoLock(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cpMEMs, _Inout_ PPMEM_SCATTER ppMEMs)
+{
+    PDEVICE_CONTEXT_FPGA ctx = (PDEVICE_CONTEXT_FPGA)ctxLC->hDevice;
+    if(ctx->async2.fEnabled) {
+        DeviceFPGA_Async2_WriteScatter(ctxLC, cpMEMs, ppMEMs);
+    } else {
+        EnterCriticalSection(&ctx->Lock);
+        DeviceFPGA_WriteScatter(ctxLC, cpMEMs, ppMEMs);
+        LeaveCriticalSection(&ctx->Lock);
+    }
 }
 
 _Success_(return)
@@ -2763,6 +3045,16 @@ BOOL DeviceFPGA_Command(
 }
 
 _Success_(return)
+BOOL DeviceFPGA_Command_DoLock(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _In_ DWORD cbDataIn, _In_reads_opt_(cbDataIn) PBYTE pbDataIn, _Out_opt_ PBYTE *ppbDataOut, _Out_opt_ PDWORD pcbDataOut)
+{
+    BOOL fResult;
+    EnterCriticalSection(&((PDEVICE_CONTEXT_FPGA)ctxLC)->Lock);
+    fResult = DeviceFPGA_Command(ctxLC, fOption, cbDataIn, pbDataIn, ppbDataOut, pcbDataOut);
+    LeaveCriticalSection(&((PDEVICE_CONTEXT_FPGA)ctxLC)->Lock);
+    return fResult;
+}
+
+_Success_(return)
 BOOL DeviceFPGA_GetOption(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _Out_ PQWORD pqwValue)
 {
     PDEVICE_CONTEXT_FPGA ctx = (PDEVICE_CONTEXT_FPGA)ctxLC->hDevice;
@@ -2825,6 +3117,16 @@ BOOL DeviceFPGA_GetOption(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _Out_ PQWO
             return TRUE;
     }
     return FALSE;
+}
+
+_Success_(return)
+BOOL DeviceFPGA_GetOption_DoLock(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _Out_ PQWORD pqwValue)
+{
+    BOOL fResult;
+    EnterCriticalSection(&((PDEVICE_CONTEXT_FPGA)ctxLC)->Lock);
+    fResult = DeviceFPGA_GetOption(ctxLC, fOption, pqwValue);
+    LeaveCriticalSection(&((PDEVICE_CONTEXT_FPGA)ctxLC)->Lock);
+    return fResult;
 }
 
 _Success_(return)
@@ -2893,6 +3195,16 @@ BOOL DeviceFPGA_SetOption(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _In_ QWORD
     return FALSE;
 }
 
+_Success_(return)
+BOOL DeviceFPGA_SetOption_DoLock(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _In_ QWORD qwValue)
+{
+    BOOL fResult;
+    EnterCriticalSection(&((PDEVICE_CONTEXT_FPGA)ctxLC)->Lock);
+    fResult = DeviceFPGA_SetOption(ctxLC, fOption, qwValue);
+    LeaveCriticalSection(&((PDEVICE_CONTEXT_FPGA)ctxLC)->Lock);
+    return fResult;
+}
+
 #define FPGA_PARAMETER_UDP_ADDRESS     "ip"
 #define FPGA_PARAMETER_FT2232H         "ft2232h"
 #define FPGA_PARAMETER_PCIE            "pciegen"
@@ -2922,6 +3234,7 @@ BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
     if(ppLcCreateErrorInfo) { *ppLcCreateErrorInfo = NULL; }
     ctx = LocalAlloc(LMEM_ZEROINIT, sizeof(DEVICE_CONTEXT_FPGA));
     if(!ctx) { return FALSE; }
+    InitializeCriticalSection(&ctx->Lock);
     ctxLC->hDevice = (HANDLE)ctx;
     if((pParam = LcDeviceParameterGet(ctxLC, FPGA_PARAMETER_UDP_ADDRESS)) && pParam->szValue) {
         dwIpAddr = inet_addr(pParam->szValue);
@@ -2956,13 +3269,14 @@ BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
     ctx->txbuf.pb = LocalAlloc(0, ctx->txbuf.cbMax);
     if(!ctx->txbuf.pb) { goto fail; }
     // set callback functions and fix up config
+    ctxLC->fMultiThread = TRUE;
     ctxLC->Config.fVolatile = TRUE;
     ctxLC->pfnClose = DeviceFPGA_Close;
-    ctxLC->pfnReadScatter = DeviceFPGA_ReadScatter;
-    ctxLC->pfnWriteScatter = DeviceFPGA_WriteScatter;
-    ctxLC->pfnGetOption = DeviceFPGA_GetOption;
-    ctxLC->pfnSetOption = DeviceFPGA_SetOption;
-    ctxLC->pfnCommand = DeviceFPGA_Command;
+    ctxLC->pfnReadScatter = DeviceFPGA_ReadScatter_DoLock;
+    ctxLC->pfnWriteScatter = DeviceFPGA_WriteScatter_DoLock;
+    ctxLC->pfnGetOption = DeviceFPGA_GetOption_DoLock;
+    ctxLC->pfnSetOption = DeviceFPGA_SetOption_DoLock;
+    ctxLC->pfnCommand = DeviceFPGA_Command_DoLock;
     if((v = LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_DELAY_READ)))  { ctx->perf.DELAY_READ = (DWORD)v; }
     if((v = LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_DELAY_WRITE))) { ctx->perf.DELAY_WRITE = (DWORD)v; }
     if((v = LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_DELAY_PROBE))) { ctx->perf.DELAY_PROBE_READ = (DWORD)v; }
@@ -2972,8 +3286,15 @@ BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
     v = LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_READ_ALGORITHM);
     ctx->fAlgorithmReadTiny = ((v & FPGA_PARAMETER_ALGO_TINY) ? TRUE : FALSE) || ctx->perf.F_TINY;
     ctx->async.fEnabled = ctx->async.fEnabled && !(v & FPGA_PARAMETER_ALGO_SYNCHRONOUS);
-    ctx->async.fOldAsync = ctx->async.fEnabled && (v & FPGA_PARAMETER_ALGO_OLDASYNCHRONOUS);
-
+    ctx->async.fOldAsync = ctx->async.fEnabled && ((v & FPGA_PARAMETER_ALGO_OLDASYNCHRONOUS) || ctx->perf.RX_FLUSH_LIMIT);
+    if(ctx->async.fEnabled && !ctx->async.fOldAsync) {
+        // try new async2
+        if(!(ctx->async2.pmQueue = ObMap_New(NULL, OB_MAP_FLAGS_NOKEY))) { goto fail; }
+        ctx->async2.cbAvailCredits = ctx->perf.MAX_SIZE_RX;
+        ctx->async2.fEnabled = TRUE;
+        ctx->async2.cAvailTags = 0xe0;
+        ctx->rxbuf.cbMax = 0x01000000;
+    }
     // return
     lcprintfv(ctxLC, 
         "DEVICE: FPGA: %s PCIe gen%i x%i [%i,%i,%i] [v%i.%i,%04x] [%s,%s]\n",

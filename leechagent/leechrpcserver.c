@@ -1,6 +1,6 @@
 // leechrpc.c : implementation of RPC server-side functionality.
 //
-// (c) Ulf Frisk, 2018-2022
+// (c) Ulf Frisk, 2018-2023
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include "leechagent.h"
@@ -295,7 +295,7 @@ fail:
 * Transfer commands/data to/from the remote service (if it exists).
 * NB! USER-FREE: ppbDataOut (LocalFree)
 * -- hLC
-* -- hPP
+* -- phPP
 * -- fOption = the command as specified by LC_CMD_AGENT_*
 * -- cbDataIn
 * -- pbDataIn
@@ -314,6 +314,12 @@ BOOL LeechRpc_CommandAgent(_In_ HANDLE hLC, _In_opt_ PHANDLE phPP, _In_ QWORD fO
         case LC_CMD_AGENT_EXIT_PROCESS:
             ExitProcess(fOption & 0xffffffff);
             return FALSE;   // not reached ...
+        case LC_CMD_AGENT_VFS_INITIALIZE:
+            if(!phPP) { return FALSE; }
+            return LeechAgent_ProcParent_VfsInitialize(hLC, phPP, pbDataIn, cbDataIn, ppbDataOut, pcbDataOut);
+        case LC_CMD_AGENT_VFS_CONSOLE:
+            if(!phPP) { return FALSE; }
+            return LeechAgent_ProcParent_VfsConsole(hLC, phPP, ppbDataOut, pcbDataOut);
         case LC_CMD_AGENT_VFS_LIST:
             if(!phPP) { return FALSE; }
             return LeechAgent_ProcParent_VfsCMD(hLC, phPP, LEECHAGENT_PROC_CMD_VFS_LIST, pbDataIn, cbDataIn, ppbDataOut, pcbDataOut);

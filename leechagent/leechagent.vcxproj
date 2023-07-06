@@ -240,6 +240,7 @@ copy "$(SolutionDir)leechcore\leechrpcshared.c" "$(ProjectDir)" /y
     <ClCompile Include="leechagent_procchild.c" />
     <ClCompile Include="leechagent_procparent.c" />
     <ClCompile Include="leechagent_rpc.c" />
+    <ClCompile Include="leechagent_svc.c" />
     <ClCompile Include="leechrpcserver.c" />
     <ClCompile Include="leechrpcshared.c" />
     <ClCompile Include="leechrpc_s.c" />
@@ -250,6 +251,7 @@ copy "$(SolutionDir)leechcore\leechrpcshared.c" "$(ProjectDir)" /y
     <ClInclude Include="leechagent.h" />
     <ClInclude Include="leechagent_proc.h" />
     <ClInclude Include="leechagent_rpc.h" />
+    <ClInclude Include="leechagent_svc.h" />
     <ClInclude Include="leechrpc.h" />
     <ClInclude Include="leechrpc_h.h" />
     <ClInclude Include="util.h" />

@@ -3,7 +3,7 @@
 //                 Python environment which allows for execution of scripts.
 //                 The Parent process controls the child processes.
 //
-// (c) Ulf Frisk, 2020-2022
+// (c) Ulf Frisk, 2020-2023
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include "leechagent_proc.h"
@@ -12,8 +12,28 @@
 #include "util.h"
 #include <stdio.h>
 
-#define PROCPARENT_STDOUT_SIZE  0x00400000      // 4MB
-#define PROCPARENT_STDERR_SIZE  0x00040000      // 256kB
+#define VMMDLL_VFS_CONSOLE_RSP_VERSION                  0xf00f0001
+
+typedef struct tdVMMDLL_VFS_CONSOLE_RSP {
+    // core:
+    DWORD dwVersion;                        // VMMDLL_VFS_KEEPALIVE_RSP_VERSION
+    DWORD cbStruct;
+    // stdout/stderr:
+    union { LPSTR szStdOut; QWORD qwStdOut; };
+    union { LPSTR szStdErr; QWORD qwStdErr; };
+    BYTE pbBuffer[0];
+} VMMDLL_VFS_CONSOLE_RSP, *PVMMDLL_VFS_CONSOLE_RSP;
+
+#define PROCPARENT_STDOUTERR_SIZE   0x00400000      // 4MB
+
+typedef struct tdPROCPARENT_CONTEXT_STDHND {
+    SRWLOCK LockSRW;        // buffer access lock
+    HANDLE hPipeStd_Rd;     // stdout or stderr
+    HANDLE hThreadReader;
+    DWORD cbBuffer;
+    DWORD cbBufferOffset;
+    BYTE pbBuffer[PROCPARENT_STDOUTERR_SIZE];
+} PROCPARENT_CONTEXT_STDHND, *PPROCPARENT_CONTEXT_STDHND;
 
 typedef struct tdPROCPARENT_CONTEXT {
     PROCESS_INFORMATION ChildProcessInfo;
@@ -24,23 +44,12 @@ typedef struct tdPROCPARENT_CONTEXT {
         HANDLE hPipeStdErr_Wr;
         HANDLE hPipeCmd_Rd;
         HANDLE hPipeCmd_Wr;
-        HANDLE hPipeMem_Rd;
-        HANDLE hPipeMem_Wr;
     } ChildPipe;
-    HANDLE hPipeStdOut_Rd;
-    HANDLE hPipeStdErr_Rd;
+    PROCPARENT_CONTEXT_STDHND StdOut;
+    PROCPARENT_CONTEXT_STDHND StdErr;
     HANDLE hPipeCmd_Wr;
     HANDLE hPipeCmd_Rd;
-    HANDLE hPipeMem_Rd;
-    HANDLE hPipeMem_Wr;
-    HANDLE hThreadReaderStdOut;
-    HANDLE hThreadReaderStdErr;
-    HANDLE hThreadReaderMem;
     HANDLE hThreadChildTerminator;
-    DWORD cbStdOutPos;
-    DWORD cbStdErrPos;
-    BYTE pbStdOut[PROCPARENT_STDOUT_SIZE];
-    BYTE pbStdErr[PROCPARENT_STDERR_SIZE];
 } PROCPARENT_CONTEXT, *PPROCPARENT_CONTEXT;
 
 /*
@@ -52,15 +61,12 @@ VOID LeechAgent_ProcParent_CloseInternal(_In_ PPROCPARENT_CONTEXT ctx)
 {
     if(ctx->ChildProcessInfo.hProcess) { CloseHandle(ctx->ChildProcessInfo.hProcess); }
     if(ctx->ChildProcessInfo.hThread) { CloseHandle(ctx->ChildProcessInfo.hThread); }
-    if(ctx->hPipeStdOut_Rd) { CloseHandle(ctx->hPipeStdOut_Rd); }
-    if(ctx->hPipeStdErr_Rd) { CloseHandle(ctx->hPipeStdErr_Rd); }
-    if(ctx->hPipeCmd_Wr) { CloseHandle(ctx->hPipeCmd_Wr); }
     if(ctx->hPipeCmd_Rd) { CloseHandle(ctx->hPipeCmd_Rd); }
-    if(ctx->hPipeMem_Rd) { CloseHandle(ctx->hPipeMem_Rd); }
-    if(ctx->hPipeMem_Wr) { CloseHandle(ctx->hPipeMem_Wr); }
-    if(ctx->hThreadReaderStdOut) { CloseHandle(ctx->hThreadReaderStdOut); }
-    if(ctx->hThreadReaderStdErr) { CloseHandle(ctx->hThreadReaderStdErr); }
-    if(ctx->hThreadReaderMem) { CloseHandle(ctx->hThreadReaderMem); }
+    if(ctx->hPipeCmd_Wr) { CloseHandle(ctx->hPipeCmd_Wr); }
+    if(ctx->StdOut.hPipeStd_Rd) { CloseHandle(ctx->StdOut.hPipeStd_Rd); }
+    if(ctx->StdErr.hPipeStd_Rd) { CloseHandle(ctx->StdErr.hPipeStd_Rd); }
+    if(ctx->StdOut.hThreadReader) { CloseHandle(ctx->StdOut.hThreadReader); }
+    if(ctx->StdErr.hThreadReader) { CloseHandle(ctx->StdErr.hThreadReader); }
     if(ctx->hThreadChildTerminator) { CloseHandle(ctx->hThreadChildTerminator); }
     if(ctx->hJobKillSubprocess) { CloseHandle(ctx->hJobKillSubprocess); }
     LocalFree(ctx);
@@ -99,68 +105,37 @@ VOID LeechAgent_ProcParent_ChildTerminatorThread(_In_ PPROCPARENT_CONTEXT ctx)
     ctx->hThreadChildTerminator = NULL;
 }
 
-VOID LeechAgent_ProcParent_ReaderStdOut(PPROCPARENT_CONTEXT ctx)
+/*
+* Helper function to read from a pipe into a pre-allocated buffer.
+* This is done for stdin and stderr.
+*/
+VOID LeechAgent_ProcParent_ReaderStdOutErr(_In_ PPROCPARENT_CONTEXT_STDHND ctx)
 {
-    BOOL result = TRUE;
-    DWORD cbRead = 0;
-    while((ctx->cbStdOutPos + 0x1000 < PROCPARENT_STDOUT_SIZE) && ReadFile(ctx->hPipeStdOut_Rd, ctx->pbStdOut + ctx->cbStdOutPos, 0x1000, &cbRead, NULL)) {
-        ctx->cbStdOutPos += cbRead;
-    }
-    ctx->hThreadReaderStdOut = NULL;
-}
-
-VOID LeechAgent_ProcParent_ReaderStdErr(PPROCPARENT_CONTEXT ctx)
-{
-    BOOL result = TRUE;
-    DWORD cbRead = 0;
-    while((ctx->cbStdErrPos + 0x1000 < PROCPARENT_STDERR_SIZE) && ReadFile(ctx->hPipeStdErr_Rd, ctx->pbStdErr + ctx->cbStdErrPos, 0x1000, &cbRead, NULL)) {
-        ctx->cbStdErrPos += cbRead;
-    }
-    ctx->hThreadReaderStdErr = NULL;
-}
-
-VOID LeechAgent_ProcParent_ReaderMem(PPROCPARENT_CONTEXT ctx)
-{
-    error_status_t status;
-    DWORD cRuns = 0, cbMsgRsp, cbWrite = 0;
-    LEECHRPC_MSG_HDR Hdr;
-    PLEECHRPC_MSG_HDR pMsgReq = NULL, pMsgRsp = NULL;
+    DWORD cbRead;
+    BYTE bFirstRead;
     while(TRUE) {
-        cRuns++;
-        ZeroMemory(&Hdr, sizeof(LEECHRPC_MSG_HDR));
-        // 1: read incoming request : header
-        if(!Util_GetBytesPipe(ctx->hPipeMem_Rd, (PBYTE)&Hdr, sizeof(LEECHRPC_MSG_HDR))) { goto fail; }
-        if((Hdr.dwMagic != LEECHRPC_MSGMAGIC) || (Hdr.cbMsg > 0x04000000)) { goto fail; }
-        pMsgReq = (PLEECHRPC_MSG_HDR)LocalAlloc(0, Hdr.cbMsg);
-        if(!pMsgReq) { goto fail; }
-        memcpy(pMsgReq, &Hdr, sizeof(LEECHRPC_MSG_HDR));
-        // 2: read resulting contents : data
-        if(pMsgReq->cbMsg > sizeof(LEECHRPC_MSG_HDR)) {
-            if(!Util_GetBytesPipe(ctx->hPipeMem_Rd, ((PBYTE)pMsgReq) + sizeof(LEECHRPC_MSG_HDR), pMsgReq->cbMsg - sizeof(LEECHRPC_MSG_HDR))) { goto fail; }
+        if(!ReadFile(ctx->hPipeStd_Rd, &bFirstRead, 1, &cbRead, NULL) || (cbRead == 0)) {
+            break;
         }
-        // 3: SEND COMMAND TO ORDINARY LEECHRPC
-        status = LeechRpc_ReservedSubmitCommand(NULL, pMsgReq->cbMsg, (PBYTE)pMsgReq, &cbMsgRsp, (PBYTE*)&pMsgRsp);
-        LocalFree(pMsgReq);
-        pMsgReq = NULL;
-        if(status != RPC_S_OK) {
-            pMsgRsp = NULL;
-            Hdr.dwMagic = LEECHRPC_MSGMAGIC;
-            Hdr.cbMsg = sizeof(LEECHRPC_MSG_HDR);
-            Hdr.tpMsg = LEECHRPC_MSGTYPE_NA;
-            Hdr.fMsgResult = FALSE;
-            Hdr.dwRpcClientID = 0;
-            Hdr.flags = 0;
-            if(!WriteFile(ctx->hPipeMem_Wr, (PVOID)&Hdr, Hdr.cbMsg, &cbWrite, NULL)) { goto fail; }
-        } else {
-            if(!WriteFile(ctx->hPipeMem_Wr, (PVOID)pMsgRsp, pMsgRsp->cbMsg, &cbWrite, NULL)) { goto fail; }
-            LocalFree(pMsgRsp);
-            pMsgRsp = NULL;
+        if(!PeekNamedPipe(ctx->hPipeStd_Rd, NULL, 0, NULL, &cbRead, NULL)) {
+            break;
         }
+        if(ctx->cbBufferOffset + cbRead + 2 >= ctx->cbBuffer) {
+            break;
+        }
+        AcquireSRWLockExclusive(&ctx->LockSRW);
+        ctx->pbBuffer[ctx->cbBufferOffset] = bFirstRead;
+        if(cbRead && !ReadFile(ctx->hPipeStd_Rd, ctx->pbBuffer + ctx->cbBufferOffset + 1, cbRead, &cbRead, NULL)) {
+            ReleaseSRWLockExclusive(&ctx->LockSRW);
+            break;
+        }
+        ctx->cbBufferOffset += 1 + cbRead;
+        ReleaseSRWLockExclusive(&ctx->LockSRW);
     }
-fail:
-    LocalFree(pMsgReq);
-    LocalFree(pMsgRsp);
-    ctx->hThreadReaderMem = NULL;
+    if(ctx->hThreadReader) {
+        CloseHandle(ctx->hThreadReader);
+        ctx->hThreadReader = NULL;
+    }
 }
 
 /*
@@ -244,8 +219,7 @@ BOOL LeechAgent_ProcParent_CmdExecPy(_In_ PPROCPARENT_CONTEXT ctx, _In_ PBYTE pb
 }
 
 /*
-* Read child process stdout / stderr data. When calling this function the caller
-* must ensure that no additional reads may happen when executing this function.
+* Read child process stdout / stderr data and clear existing data in buffers.
 * -- ctx
 * -- pbData
 * -- cbData
@@ -257,67 +231,164 @@ BOOL LeechAgent_ProcParent_GetStdOutErrText(_In_ PPROCPARENT_CONTEXT ctx, _Out_w
     LPCSTR szERROR_OUTPUT = "\n========== ERROR OUTPUT BELOW ==========\n";
     DWORD cb, cbPos = 0;
     DWORD cbERROR_OUTOUT = (DWORD)strlen(szERROR_OUTPUT);
-    cb = ctx->cbStdOutPos + 1;
-    if(ctx->cbStdErrPos) {
-        cb += cbERROR_OUTOUT + ctx->cbStdErrPos;
+    BOOL fResult = FALSE;
+    AcquireSRWLockExclusive(&ctx->StdOut.LockSRW);
+    AcquireSRWLockExclusive(&ctx->StdErr.LockSRW);
+    cb = ctx->StdOut.cbBufferOffset + 1;
+    if(ctx->StdErr.cbBufferOffset) {
+        cb += cbERROR_OUTOUT + ctx->StdErr.cbBufferOffset;
     }
     *pcbData = cb;
-    if(!pbData) { return TRUE; }
-    if(cbData < cb) { return FALSE; }
-    memcpy(pbData + cbPos, ctx->pbStdOut, ctx->cbStdOutPos); cbPos += ctx->cbStdOutPos;
-    if(ctx->cbStdErrPos) {
+    if(!pbData) {
+        fResult = TRUE;
+        goto fail;
+    }
+    if(cbData < cb) {
+        goto fail;
+    }
+    memcpy(pbData + cbPos, ctx->StdOut.pbBuffer, ctx->StdOut.cbBufferOffset); cbPos += ctx->StdOut.cbBufferOffset;
+    if(ctx->StdErr.cbBufferOffset) {
         memcpy(pbData + cbPos, szERROR_OUTPUT, cbERROR_OUTOUT); cbPos += cbERROR_OUTOUT;
-        memcpy(pbData + cbPos, ctx->pbStdErr, ctx->cbStdErrPos); cbPos += ctx->cbStdErrPos;
+        memcpy(pbData + cbPos, ctx->StdErr.pbBuffer, ctx->StdErr.cbBufferOffset); cbPos += ctx->StdErr.cbBufferOffset;
     }
     pbData[cbPos] = '\0';
+    ctx->StdOut.cbBufferOffset = 0;
+    ctx->StdErr.cbBufferOffset = 0;
+    fResult = TRUE;
+fail:
+    ReleaseSRWLockExclusive(&ctx->StdErr.LockSRW);
+    ReleaseSRWLockExclusive(&ctx->StdOut.LockSRW);
+    return fResult;
+}
+
+VOID LeechAgent_ProcParent_Close(_In_opt_ HANDLE hPP)
+{
+    PPROCPARENT_CONTEXT ctx = (PPROCPARENT_CONTEXT)hPP;
+    DWORD dwExitCode;
+    if(!ctx) { return; }
+    // ensure child process is killed before continue.
+    if(ctx->ChildProcessInfo.hProcess) {
+        if(GetExitCodeProcess(ctx->ChildProcessInfo.hProcess, &dwExitCode) && (STILL_ACTIVE == dwExitCode)) {
+            TerminateProcess(ctx->ChildProcessInfo.hProcess, 1);
+            WaitForSingleObject(ctx->ChildProcessInfo.hProcess, 500);
+        }
+        Sleep(100);
+    }
+    // cleanup and return
+    LeechAgent_ProcParent_CloseInternal(ctx);
+}
+
+/*
+* Check whether the vfs is loaded and is active or not.
+* -- hLC
+* -- phPP
+* -- return
+*/
+BOOL LeechAgent_ProcParent_VfsEnsure(_In_ HANDLE hLC, _Inout_ PHANDLE phPP)
+{
+    PPROCPARENT_CONTEXT ctx = (PPROCPARENT_CONTEXT)*phPP;
+    DWORD dwExitCode;
+    if(!ctx) { return FALSE; }
+    if(GetExitCodeProcess(ctx->ChildProcessInfo.hProcess, &dwExitCode) && (STILL_ACTIVE != dwExitCode)) {
+        *phPP = NULL;
+        LeechAgent_ProcParent_Close((HANDLE)ctx);
+        ctx = NULL;
+        return FALSE;
+    }
+    ctx->qwChildKillAfterTickCount64 = GetTickCount64() + LEECHAGENT_CHILDPROCESS_TIMEOUT_DEFAULT_MS;
     return TRUE;
 }
 
 _Success_(return)
-BOOL LeechAgent_ProcParent_ExecPy(_In_ HANDLE hLC, _In_ DWORD dwTimeout, _In_reads_(cbDataIn) PBYTE pbDataIn, _In_ DWORD cbDataIn, _Out_opt_ PBYTE* ppbDataOut, _Out_opt_ PDWORD pcbDataOut)
+BOOL LeechAgent_ProcParent_VfsCMD(_In_ HANDLE hLC, _Inout_ PHANDLE phPP, _In_ DWORD dwCMD, _In_reads_(cbDataIn) PBYTE pbDataIn, _In_ DWORD cbDataIn, _Out_opt_ PBYTE* ppbDataOut, _Out_opt_ PDWORD pcbDataOut)
 {
+    if(!LeechAgent_ProcParent_VfsEnsure(hLC, phPP)) { return FALSE; }
+    return LeechAgent_ProcParent_ChildSendCmd((PPROCPARENT_CONTEXT)*phPP, dwCMD, pbDataIn, cbDataIn, ppbDataOut, pcbDataOut);
+}
+
+_Success_(return)
+BOOL LeechAgent_ProcParent_VfsConsole(_In_ HANDLE hLC, _Inout_ PHANDLE phPP, _Out_opt_ PBYTE *ppbDataOut, _Out_opt_ PDWORD pcbDataOut)
+{
+    PPROCPARENT_CONTEXT ctx = (PPROCPARENT_CONTEXT)*phPP;
+    PVMMDLL_VFS_CONSOLE_RSP pRsp;
+    DWORD o = 0, cbStruct;
+    if(ppbDataOut) { *ppbDataOut = NULL; }
+    if(pcbDataOut) { *pcbDataOut = 0; }
+    if(!LeechAgent_ProcParent_VfsEnsure(hLC, phPP)) { return FALSE; }
+    if((ctx->StdOut.cbBufferOffset == 0) && (ctx->StdErr.cbBufferOffset == 0)) { return TRUE; }
+    AcquireSRWLockExclusive(&ctx->StdOut.LockSRW);
+    AcquireSRWLockExclusive(&ctx->StdErr.LockSRW);
+    cbStruct = sizeof(VMMDLL_VFS_CONSOLE_RSP) + ctx->StdOut.cbBufferOffset + ctx->StdErr.cbBufferOffset + 2;
+    pRsp = (PVMMDLL_VFS_CONSOLE_RSP)LocalAlloc(LMEM_ZEROINIT, cbStruct);
+    if(!pRsp) { goto fail; }
+    pRsp->dwVersion = VMMDLL_VFS_CONSOLE_RSP_VERSION;
+    pRsp->cbStruct = cbStruct;
+    if(ctx->StdOut.cbBufferOffset) {
+        pRsp->qwStdOut = sizeof(VMMDLL_VFS_CONSOLE_RSP) + o;
+        memcpy(pRsp->pbBuffer + o, ctx->StdOut.pbBuffer, ctx->StdOut.cbBufferOffset);
+        o += ctx->StdOut.cbBufferOffset + 1;
+        ctx->StdOut.cbBufferOffset = 0;
+    }
+    if(ctx->StdErr.cbBufferOffset) {
+        pRsp->qwStdErr = sizeof(VMMDLL_VFS_CONSOLE_RSP) + o;
+        memcpy(pRsp->pbBuffer + o, ctx->StdErr.pbBuffer, ctx->StdErr.cbBufferOffset);
+        o += ctx->StdErr.cbBufferOffset + 1;
+        ctx->StdErr.cbBufferOffset = 0;
+    }
+    if(ppbDataOut) { *ppbDataOut = (PBYTE)pRsp; }
+    if(pcbDataOut) { *pcbDataOut = cbStruct; }
+fail:
+    ReleaseSRWLockExclusive(&ctx->StdErr.LockSRW);
+    ReleaseSRWLockExclusive(&ctx->StdOut.LockSRW);
+    return TRUE;
+}
+
+_Success_(return)
+BOOL LeechAgent_ProcParent_VfsInitialize(_In_ HANDLE hLC, _Inout_ PHANDLE phPP, _In_reads_(cbDataIn) PBYTE pbDataIn, _In_ DWORD cbDataIn, _Out_opt_ PBYTE* ppbDataOut, _Out_opt_ PDWORD pcbDataOut)
+{
+    PPROCPARENT_CONTEXT ctx = (PPROCPARENT_CONTEXT)*phPP;
     WCHAR wszProcessPathName[MAX_PATH] = { 0 };
     WCHAR wszProcessArgs[MAX_PATH] = { 0 };
     STARTUPINFOW StartupInfo = { 0 };
-    PPROCPARENT_CONTEXT ctx = NULL;
     SECURITY_ATTRIBUTES SecAttr = { 0 };
-    BOOL result, fChildInitVmmPython;
-    DWORD dwExitCode;
+    BOOL result;
     if(ppbDataOut) { *ppbDataOut = NULL; }
-    // set up context
-    ctx = LocalAlloc(LMEM_ZEROINIT, sizeof(PROCPARENT_CONTEXT));
-    if(!ctx) {
+    if(pcbDataOut) { *pcbDataOut = 0; }
+    // 1: ensure no existing context exists:
+    if(LeechAgent_ProcParent_VfsEnsure(hLC, phPP)) {
+        fprintf(stderr, "LeechAgent: FAIL: Already Initialized\n");
+        goto fail;
+    }
+    // 2: setup new context:
+    if(!(ctx = LocalAlloc(LMEM_ZEROINIT, sizeof(PROCPARENT_CONTEXT)))) {
         fprintf(stderr, "LeechAgent: FAIL: LocalAlloc()\n");
         goto fail;
     }
-    // set up redirect pipes for child stdout/stderr 
+    ctx->StdOut.cbBuffer = sizeof(ctx->StdOut.pbBuffer);
+    ctx->StdErr.cbBuffer = sizeof(ctx->StdErr.pbBuffer);
+    // 3: set up redirect pipes for child stdout/stderr:
     SecAttr.nLength = sizeof(SECURITY_ATTRIBUTES);
     SecAttr.bInheritHandle = TRUE;
     SecAttr.lpSecurityDescriptor = NULL;
-    if(!CreatePipe(&ctx->hPipeStdOut_Rd, &ctx->ChildPipe.hPipeStdOut_Wr, &SecAttr, 0x01000000) || !CreatePipe(&ctx->hPipeStdErr_Rd, &ctx->ChildPipe.hPipeStdErr_Wr, &SecAttr, 0x01000000)) {
+    SecAttr.nLength = sizeof(SECURITY_ATTRIBUTES);
+    SecAttr.bInheritHandle = TRUE;
+    SecAttr.lpSecurityDescriptor = NULL;
+    if(!CreatePipe(&ctx->StdOut.hPipeStd_Rd, &ctx->ChildPipe.hPipeStdOut_Wr, &SecAttr, 0) || !CreatePipe(&ctx->StdErr.hPipeStd_Rd, &ctx->ChildPipe.hPipeStdErr_Wr, &SecAttr, 0)) {
         fprintf(stderr, "LeechAgent: FAIL: CreatePipe() STD\n");
-        goto fail;
     }
-    // set up command pipe
+    // 4: set up command pipe:
     if(!CreatePipe(&ctx->hPipeCmd_Rd, &ctx->ChildPipe.hPipeCmd_Wr, &SecAttr, 0x02000000) || !CreatePipe(&ctx->ChildPipe.hPipeCmd_Rd, &ctx->hPipeCmd_Wr, &SecAttr, 0x02000000)) {
         fprintf(stderr, "LeechAgent: FAIL: CreatePipe() CMD\n");
         goto fail;
     }
-    // set up memory read/write pipe
-    if(!CreatePipe(&ctx->hPipeMem_Rd, &ctx->ChildPipe.hPipeMem_Wr, &SecAttr, 0x04000000) || !CreatePipe(&ctx->ChildPipe.hPipeMem_Rd, &ctx->hPipeMem_Wr, &SecAttr, 0x04000000)) {
-        fprintf(stderr, "LeechAgent: FAIL: CreatePipe() MEM\n");
-        goto fail;
-    }
-    // create process
+    // 5: create process:
     _snwprintf_s(
         wszProcessArgs,
         MAX_PATH - 1,
         _TRUNCATE,
-        L"-child -child %llu %llu %llu %llu %llu",
+        L"-child -child %llu %llu %llu",
         (QWORD)ctx->ChildPipe.hPipeCmd_Rd,
         (QWORD)ctx->ChildPipe.hPipeCmd_Wr,
-        (QWORD)ctx->ChildPipe.hPipeMem_Rd,
-        (QWORD)ctx->ChildPipe.hPipeMem_Wr,
         (QWORD)hLC);
     GetModuleFileNameW(NULL, wszProcessPathName, MAX_PATH - 1);
     StartupInfo.cb = sizeof(STARTUPINFOW);
@@ -341,50 +412,71 @@ BOOL LeechAgent_ProcParent_ExecPy(_In_ HANDLE hLC, _In_ DWORD dwTimeout, _In_rea
     }
     LeechAgent_ProcParent_KillChildOnExit(ctx);
     ResumeThread(ctx->ChildProcessInfo.hThread);
-    // set up pipe readers
+    // 6: set up pipe readers:
     CloseHandle(ctx->ChildPipe.hPipeStdOut_Wr); ctx->ChildPipe.hPipeStdOut_Wr = NULL;
     CloseHandle(ctx->ChildPipe.hPipeStdErr_Wr); ctx->ChildPipe.hPipeStdErr_Wr = NULL;
     CloseHandle(ctx->ChildPipe.hPipeCmd_Rd); ctx->ChildPipe.hPipeCmd_Rd = NULL;
     CloseHandle(ctx->ChildPipe.hPipeCmd_Wr); ctx->ChildPipe.hPipeCmd_Wr = NULL;
-    CloseHandle(ctx->ChildPipe.hPipeMem_Rd); ctx->ChildPipe.hPipeMem_Rd = NULL;
-    CloseHandle(ctx->ChildPipe.hPipeMem_Wr); ctx->ChildPipe.hPipeMem_Wr = NULL;
-    ctx->hThreadReaderStdOut = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)LeechAgent_ProcParent_ReaderStdOut, (LPVOID)ctx, 0, NULL);
-    ctx->hThreadReaderStdErr = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)LeechAgent_ProcParent_ReaderStdErr, (LPVOID)ctx, 0, NULL);
-    ctx->hThreadReaderMem = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)LeechAgent_ProcParent_ReaderMem, (LPVOID)ctx, 0, NULL);
-    if(!ctx->hThreadReaderStdOut || !ctx->hThreadReaderStdErr || !ctx->hThreadReaderMem) {
+    ctx->StdOut.hThreadReader = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)LeechAgent_ProcParent_ReaderStdOutErr, (LPVOID)&ctx->StdOut, 0, NULL);
+    ctx->StdErr.hThreadReader = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)LeechAgent_ProcParent_ReaderStdOutErr, (LPVOID)&ctx->StdErr, 0, NULL);
+    if(!ctx->StdOut.hThreadReader || !ctx->StdErr.hThreadReader) {
         fprintf(stderr, "LeechAgent: FAIL: CreateThread()\n");
         goto fail;
     }
-    // set up child process auto-terminator watchdog
-    // NB! no 'goto fail' must be made after this
-    ctx->qwChildKillAfterTickCount64 = GetTickCount64();
-    ctx->qwChildKillAfterTickCount64 += (dwTimeout && (dwTimeout < LEECHAGENT_CHILDPROCESS_TIMEOUT_MAX_MS)) ? dwTimeout : LEECHAGENT_CHILDPROCESS_TIMEOUT_DEFAULT_MS;  // kill child after time
+    // 7: initialize
+    if(!LeechAgent_ProcParent_ChildSendCmd(ctx, LEECHAGENT_PROC_CMD_INIT_VMM, pbDataIn, cbDataIn, NULL, NULL)) {
+        fprintf(stderr, "LeechAgent: FAIL: ChildSendCmd_VmmInit()\n");
+        goto fail;
+    }
+    // 8: set up child process auto-terminator watchdog:
+    //    NB! no 'goto fail' must be made after this
+    ctx->qwChildKillAfterTickCount64 = GetTickCount64() + LEECHAGENT_CHILDPROCESS_TIMEOUT_DEFAULT_MS;  // kill child after time
     ctx->hThreadChildTerminator = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)LeechAgent_ProcParent_ChildTerminatorThread, (LPVOID)ctx, 0, NULL);
-    // send commands to child process to initialize MemProcFS, Python and execute code.
-    fChildInitVmmPython =
-        LeechAgent_ProcParent_ChildSendCmd(ctx, LEECHAGENT_PROC_CMD_INIT_VMM, NULL, 0, NULL, NULL) &&
-        LeechAgent_ProcParent_ChildSendCmd(ctx, LEECHAGENT_PROC_CMD_INIT_PYTHON, NULL, 0, NULL, NULL);
-    if(fChildInitVmmPython) {
+    // 9: finalize:
+    *phPP = (HANDLE)ctx;
+    return TRUE;
+fail:
+    LeechAgent_ProcParent_Close((HANDLE)ctx);
+    return FALSE;
+}
+
+_Success_(return)
+BOOL LeechAgent_ProcParent_ExecPy(_In_ HANDLE hLC, _In_ DWORD dwTimeout, _In_reads_(cbDataIn) PBYTE pbDataIn, _In_ DWORD cbDataIn, _Out_opt_ PBYTE* ppbDataOut, _Out_opt_ PDWORD pcbDataOut)
+{
+    BOOL fResult;
+    DWORD dwExitCode;
+    PPROCPARENT_CONTEXT ctx = NULL;
+    if(ppbDataOut) { *ppbDataOut = NULL; }
+    // 1: create and start vmm child process:
+    if(!LeechAgent_ProcParent_VfsInitialize(hLC, &ctx, NULL, 0, NULL, NULL) || !ctx) {
+        goto fail;
+    }
+    // 2: update child auto-terminator watchdog timeout:
+    if(dwTimeout && (dwTimeout < LEECHAGENT_CHILDPROCESS_TIMEOUT_MAX_MS)) {
+        ctx->qwChildKillAfterTickCount64 = GetTickCount64() + dwTimeout;
+    }
+    // 3: send commands to child process to  load Python and execute code.
+    if(LeechAgent_ProcParent_ChildSendCmd(ctx, LEECHAGENT_PROC_CMD_INIT_PYTHON, NULL, 0, NULL, NULL)) {
         LeechAgent_ProcParent_ChildSendCmd(ctx, LEECHAGENT_PROC_CMD_EXEC_PYTHON, pbDataIn, cbDataIn, NULL, NULL);
     }
     LeechAgent_ProcParent_ChildSendCmd(ctx, LEECHAGENT_PROC_CMD_EXITCLIENT, NULL, 0, NULL, NULL);
-    // wait for child process termination
+    // 4: wait for child process termination
     WaitForSingleObject(ctx->ChildProcessInfo.hProcess, INFINITE);
-    while(ctx->hThreadReaderStdOut || ctx->hThreadReaderStdErr || ctx->hThreadReaderMem || ctx->hThreadChildTerminator) {
+    while(ctx->StdOut.hThreadReader || ctx->StdErr.hThreadReader || ctx->hThreadChildTerminator) {
         SwitchToThread();
     }
-    // read child process stdout/stderr data
-    result =
+    // 5: read child process stdout/stderr data
+    fResult =
         ppbDataOut && pcbDataOut &&
         LeechAgent_ProcParent_GetStdOutErrText(ctx, NULL, 0, pcbDataOut) &&
         (*ppbDataOut = LocalAlloc(0, *pcbDataOut)) &&
         LeechAgent_ProcParent_GetStdOutErrText(ctx, *ppbDataOut, *pcbDataOut, pcbDataOut);
-    if(!result) {
+    if(!fResult) {
         fprintf(stderr, "LeechAgent: FAIL: LeechAgent_ProcParent_GetStdOutErrText()\n");
     }
-    if(!result && ppbDataOut && *ppbDataOut) { LocalFree(*ppbDataOut); }
+    if(!fResult && ppbDataOut && *ppbDataOut) { LocalFree(*ppbDataOut); }
     LeechAgent_ProcParent_CloseInternal(ctx);
-    return result;
+    return fResult;
 fail:
     if(!ctx) { return FALSE; }
     // ensure child process is killed before continue.
@@ -396,134 +488,13 @@ fail:
         }
     }
     // fetch data from client (if any)
-    result =
-        ppbDataOut && pcbDataOut&&
+    fResult =
+        ppbDataOut && pcbDataOut &&
         LeechAgent_ProcParent_GetStdOutErrText(ctx, NULL, 0, pcbDataOut) &&
         (*ppbDataOut = LocalAlloc(0, *pcbDataOut)) &&
         LeechAgent_ProcParent_GetStdOutErrText(ctx, *ppbDataOut, *pcbDataOut, pcbDataOut);
     // cleanup and return
-    if(!result && ppbDataOut && *ppbDataOut) { LocalFree(*ppbDataOut); }
+    if(!fResult && ppbDataOut && *ppbDataOut) { LocalFree(*ppbDataOut); }
     LeechAgent_ProcParent_CloseInternal(ctx);
-    return result;
-}
-
-VOID LeechAgent_ProcParent_Close(_In_opt_ HANDLE hPP)
-{
-    PPROCPARENT_CONTEXT ctx = (PPROCPARENT_CONTEXT)hPP;
-    DWORD dwExitCode;
-    if(!ctx) { return; }
-    // ensure child process is killed before continue.
-    if(ctx->ChildProcessInfo.hProcess) {
-        if(GetExitCodeProcess(ctx->ChildProcessInfo.hProcess, &dwExitCode) && (STILL_ACTIVE == dwExitCode)) {
-            TerminateProcess(ctx->ChildProcessInfo.hProcess, 1);
-            WaitForSingleObject(ctx->ChildProcessInfo.hProcess, 500);
-            Sleep(100);
-        }
-    }
-    // cleanup and return
-    LeechAgent_ProcParent_CloseInternal(ctx);
-}
-
-_Success_(return)
-BOOL LeechAgent_ProcParent_VfsEnsure(_In_ HANDLE hLC, _Inout_ PHANDLE phPP)
-{
-    PPROCPARENT_CONTEXT ctx = (PPROCPARENT_CONTEXT)*phPP;
-    WCHAR wszProcessPathName[MAX_PATH] = { 0 };
-    WCHAR wszProcessArgs[MAX_PATH] = { 0 };
-    STARTUPINFOW StartupInfo = { 0 };
-    SECURITY_ATTRIBUTES SecAttr = { 0 };
-    DWORD dwExitCode;
-    BOOL result;
-    // 1: check pre-existing context if it's still good
-    if(ctx) {
-        if(GetExitCodeProcess(ctx->ChildProcessInfo.hProcess, &dwExitCode) && (STILL_ACTIVE != dwExitCode)) {
-            *phPP = NULL;
-            LeechAgent_ProcParent_Close((HANDLE)ctx);
-            ctx = NULL;
-        } else {
-            ctx->qwChildKillAfterTickCount64 = GetTickCount64() + LEECHAGENT_CHILDPROCESS_TIMEOUT_DEFAULT_MS;
-        }
-    }
-    // 2: setup new context (if required)
-    if(!ctx) {
-        if(!(ctx = LocalAlloc(LMEM_ZEROINIT, sizeof(PROCPARENT_CONTEXT)))) {
-            fprintf(stderr, "LeechAgent: FAIL: LocalAlloc()\n");
-            goto fail;
-        }
-        // set up redirect pipes for child stdout/stderr 
-        SecAttr.nLength = sizeof(SECURITY_ATTRIBUTES);
-        SecAttr.bInheritHandle = TRUE;
-        SecAttr.lpSecurityDescriptor = NULL;
-        // set up command pipe
-        if(!CreatePipe(&ctx->hPipeCmd_Rd, &ctx->ChildPipe.hPipeCmd_Wr, &SecAttr, 0x02000000) || !CreatePipe(&ctx->ChildPipe.hPipeCmd_Rd, &ctx->hPipeCmd_Wr, &SecAttr, 0x02000000)) {
-            fprintf(stderr, "LeechAgent: FAIL: CreatePipe() CMD\n");
-            goto fail;
-        }
-        // set up memory read/write pipe
-        if(!CreatePipe(&ctx->hPipeMem_Rd, &ctx->ChildPipe.hPipeMem_Wr, &SecAttr, 0x04000000) || !CreatePipe(&ctx->ChildPipe.hPipeMem_Rd, &ctx->hPipeMem_Wr, &SecAttr, 0x04000000)) {
-            fprintf(stderr, "LeechAgent: FAIL: CreatePipe() MEM\n");
-            goto fail;
-        }
-        // create process
-        _snwprintf_s(
-            wszProcessArgs,
-            MAX_PATH - 1,
-            _TRUNCATE,
-            L"-child -child %llu %llu %llu %llu %llu",
-            (QWORD)ctx->ChildPipe.hPipeCmd_Rd,
-            (QWORD)ctx->ChildPipe.hPipeCmd_Wr,
-            (QWORD)ctx->ChildPipe.hPipeMem_Rd,
-            (QWORD)ctx->ChildPipe.hPipeMem_Wr,
-            (QWORD)hLC);
-        GetModuleFileNameW(NULL, wszProcessPathName, MAX_PATH - 1);
-        StartupInfo.cb = sizeof(STARTUPINFOW);
-        result = CreateProcessW(
-            wszProcessPathName,
-            wszProcessArgs,
-            NULL,
-            NULL,
-            TRUE,
-            CREATE_NO_WINDOW | CREATE_SUSPENDED | CREATE_BREAKAWAY_FROM_JOB,
-            NULL,
-            NULL,
-            &StartupInfo,
-            &ctx->ChildProcessInfo);
-        if(!result) {
-            fprintf(stderr, "LeechAgent: FAIL: CreateProcessW() -> %08x\n", GetLastError());
-            goto fail;
-        }
-        LeechAgent_ProcParent_KillChildOnExit(ctx);
-        ResumeThread(ctx->ChildProcessInfo.hThread);
-        // set up pipe readers
-        CloseHandle(ctx->ChildPipe.hPipeCmd_Rd); ctx->ChildPipe.hPipeCmd_Rd = NULL;
-        CloseHandle(ctx->ChildPipe.hPipeCmd_Wr); ctx->ChildPipe.hPipeCmd_Wr = NULL;
-        CloseHandle(ctx->ChildPipe.hPipeMem_Rd); ctx->ChildPipe.hPipeMem_Rd = NULL;
-        CloseHandle(ctx->ChildPipe.hPipeMem_Wr); ctx->ChildPipe.hPipeMem_Wr = NULL;
-        ctx->hThreadReaderMem = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)LeechAgent_ProcParent_ReaderMem, (LPVOID)ctx, 0, NULL);
-        if(!ctx->hThreadReaderMem) {
-            fprintf(stderr, "LeechAgent: FAIL: CreateThread()\n");
-            goto fail;
-        }
-        // set up child process auto-terminator watchdog
-        // NB! no 'goto fail' must be made after this
-        ctx->qwChildKillAfterTickCount64 = GetTickCount64() + LEECHAGENT_CHILDPROCESS_TIMEOUT_DEFAULT_MS;  // kill child after time
-        ctx->hThreadChildTerminator = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)LeechAgent_ProcParent_ChildTerminatorThread, (LPVOID)ctx, 0, NULL);
-        // send commands to child process to initialize MemProcFS, Python and execute code.
-        if(!LeechAgent_ProcParent_ChildSendCmd(ctx, LEECHAGENT_PROC_CMD_INIT_VMM, NULL, 0, NULL, NULL)) {
-            fprintf(stderr, "LeechAgent: FAIL: ChildSendCmd_VmmInit()\n");
-            goto fail;
-        }
-        *phPP = (HANDLE)ctx;
-    }
-    return TRUE;
-fail:
-    LeechAgent_ProcParent_Close((HANDLE)ctx);
-    return FALSE;
-}
-
-_Success_(return)
-BOOL LeechAgent_ProcParent_VfsCMD(_In_ HANDLE hLC, _Inout_ PHANDLE phPP, _In_ DWORD dwCMD, _In_reads_(cbDataIn) PBYTE pbDataIn, _In_ DWORD cbDataIn, _Out_opt_ PBYTE* ppbDataOut, _Out_opt_ PDWORD pcbDataOut)
-{
-    if(!LeechAgent_ProcParent_VfsEnsure(hLC, phPP)) { return FALSE; }
-    return LeechAgent_ProcParent_ChildSendCmd((PPROCPARENT_CONTEXT)*phPP, dwCMD, pbDataIn, cbDataIn, ppbDataOut, pcbDataOut);
+    return fResult;
 }

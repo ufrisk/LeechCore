@@ -52,6 +52,7 @@ typedef uint32_t                            BOOL, *PBOOL;
 typedef uint8_t                             BYTE, *PBYTE;
 typedef uint8_t                             UCHAR, *PUCHAR;
 typedef char                                CHAR, *PCHAR, *PSTR, *LPSTR;
+typedef int32_t                             UINT, LONG;
 typedef uint16_t                            WORD, *PWORD, USHORT, *PUSHORT;
 typedef uint16_t                            WCHAR, *PWCHAR, *LPWSTR, *LPCWSTR;
 typedef uint32_t                            DWORD, *PDWORD, ULONG, *PULONG;
@@ -61,6 +62,7 @@ typedef size_t                              SIZE_T, *PSIZE_T;
 typedef void                                *OVERLAPPED, *LPOVERLAPPED;
 typedef struct tdEXCEPTION_RECORD32         { CHAR sz[80]; } EXCEPTION_RECORD32;
 typedef struct tdEXCEPTION_RECORD64         { CHAR sz[152]; } EXCEPTION_RECORD64;
+typedef int(*_CoreCrtNonSecureSearchSortCompareFunction)(void const *, void const *);
 #define TRUE                                1
 #define FALSE                               0
 #define MAX_PATH                            260
@@ -98,6 +100,7 @@ typedef struct tdEXCEPTION_RECORD64         { CHAR sz[152]; } EXCEPTION_RECORD64
 #define _Inout_
 #define _Inout_opt_
 #define _In_opt_
+#define _In_opt_z_
 #define _Out_opt_
 #define _Check_return_opt_
 #define _Frees_ptr_opt_
@@ -120,6 +123,12 @@ typedef struct tdEXCEPTION_RECORD64         { CHAR sz[152]; } EXCEPTION_RECORD64
 #define _byteswap_ushort(v)                 (bswap_16(v))
 #define _byteswap_ulong(v)                  (bswap_32(v))
 #define _byteswap_uint64(v)                 (bswap_64(v))
+#ifndef _rotr
+#define _rotr(v,c)                          ((((DWORD)v) >> ((DWORD)c) | (DWORD)((DWORD)v) << (32 - (DWORD)c)))
+#endif /* _rotr */
+#define _rotr16(v,c)                        ((((WORD)v) >> ((WORD)c) | (WORD)((WORD)v) << (16 - (WORD)c)))
+#define _rotr64(v,c)                        ((((QWORD)v) >> ((QWORD)c) | (QWORD)((QWORD)v) << (64 - (QWORD)c)))
+#define _rotl64(v,c)                        ((QWORD)(((QWORD)v) << ((QWORD)c)) | (((QWORD)v) >> (64 - (QWORD)c)))
 #define _countof(_Array)                    (sizeof(_Array) / sizeof(_Array[0]))
 #define sprintf_s(s, maxcount, ...)         (snprintf(s, maxcount, __VA_ARGS__))
 #define strnlen_s(s, maxcount)              (strnlen(s, maxcount))
@@ -146,9 +155,10 @@ typedef struct tdEXCEPTION_RECORD64         { CHAR sz[152]; } EXCEPTION_RECORD64
 #define _fseeki64(f, o, w)                  (fseeko64(f, o, w))
 #define _chsize_s(fd, cb)                   (ftruncate64(fd, cb))
 #define _fileno(f)                          (fileno(f))
-#define InterlockedAdd64(p, v)              (__sync_add_and_fetch(p, v))
-#define InterlockedIncrement64(p)           (__sync_add_and_fetch(p, 1))
+#define InterlockedAdd64(p, v)              (__sync_add_and_fetch_8(p, v))
+#define InterlockedIncrement64(p)           (__sync_add_and_fetch_8(p, 1))
 #define InterlockedIncrement(p)             (__sync_add_and_fetch_4(p, 1))
+#define InterlockedDecrement(p)             (__sync_sub_and_fetch_4(p, 1))
 #define GetCurrentProcess()					((HANDLE)-1)
 #define closesocket(s)                      close(s)
 
@@ -224,6 +234,18 @@ BOOL SetEvent(_In_ HANDLE hEvent);
 HANDLE CreateEvent(_In_opt_ PVOID lpEventAttributes, _In_ BOOL bManualReset, _In_ BOOL bInitialState, _In_opt_ PVOID lpName);
 DWORD WaitForMultipleObjects(_In_ DWORD nCount, HANDLE *lpHandles, _In_ BOOL bWaitAll, _In_ DWORD dwMilliseconds);
 DWORD WaitForSingleObject(_In_ HANDLE hHandle, _In_ DWORD dwMilliseconds);
+
+// SRWLOCK
+typedef struct tdSRWLOCK {
+    uint32_t xchg;
+    int c;
+} SRWLOCK, *PSRWLOCK;
+VOID InitializeSRWLock(PSRWLOCK SRWLock);
+VOID AcquireSRWLockExclusive(_Inout_ PSRWLOCK SRWLock);
+VOID ReleaseSRWLockExclusive(_Inout_ PSRWLOCK SRWLock);
+#define AcquireSRWLockShared    AcquireSRWLockExclusive
+#define ReleaseSRWLockShared    ReleaseSRWLockExclusive
+#define SRWLOCK_INIT            { 0 }
 
 // for some unexplainable reasons the gcc on -O2 will optimize out functionality
 // and destroy the proper workings on some functions due to an unexplainable

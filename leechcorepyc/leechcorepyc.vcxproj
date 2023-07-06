@@ -126,8 +126,8 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <TargetExt>.pyd</TargetExt>
-    <IncludePath>$(VC_IncludePath);$(WindowsSDK_IncludePath);C:\Program Files (x86)\Microsoft Visual Studio\Shared\Python39_86\include;$(SolutionDir)includes;</IncludePath>
-    <LibraryPath>$(VC_LibraryPath_x86);$(WindowsSDK_LibraryPath_x86);$(NETFXKitsDir)Lib\um\x64;C:\Program Files (x86)\Microsoft Visual Studio\Shared\Python39_86\libs;$(SolutionDir)includes\lib32;</LibraryPath>
+    <IncludePath>$(VC_IncludePath);$(WindowsSDK_IncludePath);$(WindowsSDK_IncludePath);C:\Program Files (x86)\Microsoft Visual Studio\Shared\Python39_86\include\;C:\Program Files (x86)\Python39\include;$(SolutionDir)includes;</IncludePath>
+    <LibraryPath>$(VC_LibraryPath_x86);$(WindowsSDK_LibraryPath_x86);$(NETFXKitsDir)Lib\um\x86;$(WindowsSDK_LibraryPath_x86);$(NETFXKitsDir)Lib\um\x64;C:\Program Files (x86)\Microsoft Visual Studio\Shared\Python39_86\libs;C:\Program Files (x86)\Python39\libs;$(SolutionDir)includes\lib32;</LibraryPath>
     <OutDir>$(SolutionDir)files\$(PlatformShortName)\</OutDir>
     <IntDir>$(SolutionDir)files\temp\$(ProjectName)\$(PlatformShortName)\</IntDir>
   </PropertyGroup>
