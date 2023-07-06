@@ -24,6 +24,7 @@ Please find a summary of the supported software based memory acquisition methods
 | [RAW physical memory dump](https://github.com/ufrisk/LeechCore/wiki/Device_File)         | File             | No  | No  | Yes | No  |
 | [Full Microsoft Crash Dump](https://github.com/ufrisk/LeechCore/wiki/Device_File)        | File             | No  | No  | Yes | No  |
 | [Full ELF Core Dump](https://github.com/ufrisk/LeechCore/wiki/Device_File)               | File             | No  | No  | Yes | No  |
+| [QEMU](https://github.com/ufrisk/LeechCore/wiki/Device_QEMU)                             | Live&nbsp;Memory | Yes | Yes | No  | No  |
 | [VMware](https://github.com/ufrisk/LeechCore/wiki/Device_VMWare)                         | Live&nbsp;Memory | Yes | Yes | No  | No  |
 | [VMware memory save file](https://github.com/ufrisk/LeechCore/wiki/Device_File)          | File             | No  | No  | Yes | No  |
 | [TotalMeltdown](https://github.com/ufrisk/LeechCore/wiki/Device_Totalmeltdown)           | CVE-2018-1038    | Yes | Yes | No  | No  |
@@ -217,4 +218,5 @@ v1.0-1.8
 * Volatile memory file support.
 * Support for LiME memory dump files.
 * Improved FPGA performance for smaller reads.
-* Improved [MemProcFS remoting](https://github.com/ufrisk/MemProcFS/wiki/_Remoting) via a remote [LeechAgent](). Full remote support tunneled over SMB/445. Perfect for memory forensics Incident Response (IR)!.
+* QEMU support on Linux (VM live memory introspection).
+* Improved [MemProcFS remoting](https://github.com/ufrisk/MemProcFS/wiki/_Remoting) via a remote [LeechAgent](https://github.com/ufrisk/LeechCore/wiki/LeechAgent). Full MemProcFS remote support over SMB - tcp/445. Perfect for memory forensics Incident Response (IR)!
