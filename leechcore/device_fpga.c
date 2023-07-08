@@ -3047,10 +3047,11 @@ BOOL DeviceFPGA_Command(
 _Success_(return)
 BOOL DeviceFPGA_Command_DoLock(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _In_ DWORD cbDataIn, _In_reads_opt_(cbDataIn) PBYTE pbDataIn, _Out_opt_ PBYTE *ppbDataOut, _Out_opt_ PDWORD pcbDataOut)
 {
+    PDEVICE_CONTEXT_FPGA ctx = (PDEVICE_CONTEXT_FPGA)ctxLC->hDevice;
     BOOL fResult;
-    EnterCriticalSection(&((PDEVICE_CONTEXT_FPGA)ctxLC)->Lock);
+    EnterCriticalSection(&ctx->Lock);
     fResult = DeviceFPGA_Command(ctxLC, fOption, cbDataIn, pbDataIn, ppbDataOut, pcbDataOut);
-    LeaveCriticalSection(&((PDEVICE_CONTEXT_FPGA)ctxLC)->Lock);
+    LeaveCriticalSection(&ctx->Lock);
     return fResult;
 }
 
@@ -3122,10 +3123,11 @@ BOOL DeviceFPGA_GetOption(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _Out_ PQWO
 _Success_(return)
 BOOL DeviceFPGA_GetOption_DoLock(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _Out_ PQWORD pqwValue)
 {
+    PDEVICE_CONTEXT_FPGA ctx = (PDEVICE_CONTEXT_FPGA)ctxLC->hDevice;
     BOOL fResult;
-    EnterCriticalSection(&((PDEVICE_CONTEXT_FPGA)ctxLC)->Lock);
+    EnterCriticalSection(&ctx->Lock);
     fResult = DeviceFPGA_GetOption(ctxLC, fOption, pqwValue);
-    LeaveCriticalSection(&((PDEVICE_CONTEXT_FPGA)ctxLC)->Lock);
+    LeaveCriticalSection(&ctx->Lock);
     return fResult;
 }
 
@@ -3198,10 +3200,11 @@ BOOL DeviceFPGA_SetOption(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _In_ QWORD
 _Success_(return)
 BOOL DeviceFPGA_SetOption_DoLock(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _In_ QWORD qwValue)
 {
+    PDEVICE_CONTEXT_FPGA ctx = (PDEVICE_CONTEXT_FPGA)ctxLC->hDevice;
     BOOL fResult;
-    EnterCriticalSection(&((PDEVICE_CONTEXT_FPGA)ctxLC)->Lock);
+    EnterCriticalSection(&ctx->Lock);
     fResult = DeviceFPGA_SetOption(ctxLC, fOption, qwValue);
-    LeaveCriticalSection(&((PDEVICE_CONTEXT_FPGA)ctxLC)->Lock);
+    LeaveCriticalSection(&ctx->Lock);
     return fResult;
 }
 
