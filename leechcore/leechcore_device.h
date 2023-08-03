@@ -41,6 +41,8 @@ typedef struct tdCRITICAL_SECTION {
 #define LC_CONTEXT_VERSION                  0xc0e10004
 #define LC_DEVICE_PARAMETER_MAX_ENTRIES     0x10
 
+#define LC_MEMMAP_FORCE_OFFSET              0x8000000000000000
+
 typedef struct tdLC_DEVICE_PARAMETER_ENTRY {
     CHAR szName[MAX_PATH];
     CHAR szValue[MAX_PATH];

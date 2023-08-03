@@ -45,7 +45,7 @@ EXPORTED_FUNCTION BOOL LcMemMap_AddRange(_In_ PLC_CONTEXT ctxLC, _In_ QWORD pa, 
     if(ctxLC->cMemMap && (ctxLC->pMemMap[ctxLC->cMemMap - 1].pa + ctxLC->pMemMap[ctxLC->cMemMap - 1].cb > pa)) { return FALSE; }
     ctxLC->pMemMap[ctxLC->cMemMap].pa = pa;
     ctxLC->pMemMap[ctxLC->cMemMap].cb = cb;
-    ctxLC->pMemMap[ctxLC->cMemMap].paRemap = paRemap ? paRemap : pa;
+    ctxLC->pMemMap[ctxLC->cMemMap].paRemap = paRemap ? (paRemap & ~LC_MEMMAP_FORCE_OFFSET) : pa;
     ctxLC->cMemMap++;
     lcprintfvv_fn(ctxLC, "%016llx-%016llx -> %016llx\n", pa, pa + cb - 1, paRemap);
     return TRUE;

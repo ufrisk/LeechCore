@@ -384,6 +384,7 @@ BOOL LcCommand(
 #define LC_OPT_MEMORYINFO_VALID                     0x0200000100000000  // R
 #define LC_OPT_MEMORYINFO_FLAG_32BIT                0x0200000300000000  // R
 #define LC_OPT_MEMORYINFO_FLAG_PAE                  0x0200000400000000  // R
+#define LC_OPT_MEMORYINFO_ARCH                      0x0200001200000000  // R - LC_ARCH_TP
 #define LC_OPT_MEMORYINFO_OS_VERSION_MINOR          0x0200000500000000  // R
 #define LC_OPT_MEMORYINFO_OS_VERSION_MAJOR          0x0200000600000000  // R
 #define LC_OPT_MEMORYINFO_OS_DTB                    0x0200000700000000  // R
@@ -514,6 +515,14 @@ typedef struct tdLC_MEMMAP_ENTRY {
     QWORD cb;
     QWORD paRemap;
 } LC_MEMMAP_ENTRY, *PLC_MEMMAP_ENTRY;
+
+typedef enum tdLC_ARCH_TP {
+    LC_ARCH_NA      = 0,
+    LC_ARCH_X86     = 1,
+    LC_ARCH_X86PAE  = 2,
+    LC_ARCH_X64     = 3,
+    LC_ARCH_ARM64   = 4,
+} LC_ARCH_TP;
 
 typedef struct tdLC_TLP {
     DWORD cb;

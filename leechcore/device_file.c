@@ -20,7 +20,8 @@
 #define DUMP_TYPE_ACTIVE_MEMORY     6
 #define IMAGE_FILE_MACHINE_I386     0x014c
 #define IMAGE_FILE_MACHINE_AMD64    0x8664
-#define _PHYSICAL_MEMORY_MAX_RUNS   0x20
+#define IMAGE_FILE_MACHINE_ARM64    0xAA64
+#define _PHYSICAL_MEMORY_MAX_RUNS   0x80
 
 typedef struct {
     QWORD BasePage;
@@ -173,6 +174,8 @@ typedef struct tdDEVICE_CONTEXT_FILE {
             LIME_MEM_RANGE_HEADER LiME;
         };
     } CrashOrCoreDump;
+    LC_ARCH_TP tpArch;              // LC_ARCH_TP
+    QWORD paDtbHint;
 } DEVICE_CONTEXT_FILE, *PDEVICE_CONTEXT_FILE;
 
 //-----------------------------------------------------------------------------
@@ -330,9 +333,10 @@ typedef struct tdFILE_VMWARE_MEMORY_REGION {
 } FILE_VMWARE_MEMORY_REGION;
 
 /*
-* Try to initialize a VMware Dump/Save File (.vmem + vmss/vmsn).
+* Try to initialize a VMWare Dump/Save File (.vmem + vmss/vmsn).
+* Also, older VMWare versions may have memory in-lined inside the vmsn file.
 */
-VOID DeviceFile_VMwareDumpInitialize(_In_ PLC_CONTEXT ctxLC)
+VOID DeviceFile_VMwareDumpInitialize(_In_ PLC_CONTEXT ctxLC, _In_ BOOL fInlineMemory)
 {
     PDEVICE_CONTEXT_FILE ctx = (PDEVICE_CONTEXT_FILE)ctxLC->hDevice;
     FILE_VMWARE_HEADER hdr = { 0 };
@@ -341,8 +345,8 @@ VOID DeviceFile_VMwareDumpInitialize(_In_ PLC_CONTEXT ctxLC)
     CHAR szFileName[MAX_PATH];
     FILE *pFile = NULL;
     PBYTE pb;
-    QWORD oTag;
-    DWORD iGroup, iMemoryRegion, cbTag, cchTag;
+    QWORD oTag, paDtbHint = 0, qwMemorySizeMB = 0, qwInlineMemoryOffset = 0;
+    DWORD iGroup, iMemoryRegion, cbTag, cchTag, dwPlatform = 0;
     strcpy_s(szFileName, _countof(szFileName), ctx->szFileName);
     // 1: open and verify metadata file
     memcpy(szFileName + strlen(szFileName) - 5, ".vmss", 5);
@@ -365,8 +369,52 @@ VOID DeviceFile_VMwareDumpInitialize(_In_ PLC_CONTEXT ctxLC)
     for(iGroup = 0; iGroup < hdr.cGroups; iGroup++) {
         _fseeki64(pFile, 12 + iGroup * sizeof(FILE_VMWARE_GROUP), SEEK_SET);
         fread(&grp, 1, sizeof(FILE_VMWARE_GROUP), pFile);
+        if(0 == strcmp("Checkpoint", grp.szName)) {
+            if(grp.cbSize > 0x00100000) { continue; }
+            if(_fseeki64(pFile, grp.cbOffset, SEEK_SET)) { continue; }
+            if(!(pb = LocalAlloc(LMEM_ZEROINIT, (SIZE_T)grp.cbSize))) { continue; }
+            if(grp.cbSize != fread(pb, 1, (SIZE_T)grp.cbSize, pFile)) {
+                LocalFree(pb);
+                continue;
+            }
+            oTag = 0;
+            while(oTag + 8 + 4 <= grp.cbSize) {
+                if(!dwPlatform && !memcmp(pb + oTag, "Platform", 0x08)) {
+                    dwPlatform = *(PDWORD)(pb + oTag + 0x08);
+                }
+                if(!qwMemorySizeMB && !memcmp(pb + oTag, "memSize", 0x07)) {
+                    qwMemorySizeMB = *(PDWORD)(pb + oTag + 0x07);
+                }
+                oTag++;
+            }
+        }
+        if(0 == strcmp("cpu", grp.szName)) {
+            if(grp.cbSize > 0x00100000) { continue; }
+            if(_fseeki64(pFile, grp.cbOffset, SEEK_SET)) { continue; }
+            if(!(pb = LocalAlloc(LMEM_ZEROINIT, (SIZE_T)grp.cbSize))) { continue; }
+            if(grp.cbSize != fread(pb, 1, (SIZE_T)grp.cbSize, pFile)) {
+                LocalFree(pb);
+                continue;
+            }
+            oTag = 0;
+            while(oTag + 13 + 8 <= grp.cbSize) {
+                if(!paDtbHint && !memcmp(pb + oTag, "hv:ttbrEL1[0]", 13)) {
+                    if(*(PDWORD)(pb + oTag + 13 + 4) >= 0x80000000) {
+                        paDtbHint = *(PDWORD)(pb + oTag + 13 + 4);
+                    }
+                }
+                oTag++;
+            }
+        }
         if(0 == strcmp("memory", grp.szName)) {
-            if(grp.cbSize > 0x01000000) { continue; }
+            if(grp.cbSize > 0x01000000) { 
+                if(fInlineMemory) {
+                    qwInlineMemoryOffset = (grp.cbOffset + (grp.cbSize & 0xfffff)) & ~0xfff;
+                    grp.cbSize = grp.cbSize & 0xfffff;
+                } else {
+                    continue;
+                }
+            }
             if(_fseeki64(pFile, grp.cbOffset, SEEK_SET)) { continue; }
             if(!(pb = LocalAlloc(LMEM_ZEROINIT, (SIZE_T)grp.cbSize))) { continue; }
             if(grp.cbSize != fread(pb, 1, (SIZE_T)grp.cbSize, pFile)) {
@@ -388,7 +436,7 @@ VOID DeviceFile_VMwareDumpInitialize(_In_ PLC_CONTEXT ctxLC)
                 }
                 if((cchTag == 0x0d) && !memcmp(pb + oTag + 2, "regionPageNum", 0x0d) && ((iMemoryRegion = *(PDWORD)(pb + oTag + 2 + 0x0d)) < FILE_VMWARE_MEMORY_REGIONS_MAX)) {
                     regions[iMemoryRegion].fOffsetFile = TRUE;
-                    regions[iMemoryRegion].cbOffsetFile = *(PDWORD)(pb + oTag + 2 + 0x0d + 4) * 0x1000ULL;
+                    regions[iMemoryRegion].cbOffsetFile = qwInlineMemoryOffset + *(PDWORD)(pb + oTag + 2 + 0x0d + 4) * 0x1000ULL;
                 }
                 oTag += cbTag;
                 if((oTag + 4 <= grp.cbSize) && (0 == *(PDWORD)(pb + oTag))) { oTag += 4; }
@@ -396,12 +444,17 @@ VOID DeviceFile_VMwareDumpInitialize(_In_ PLC_CONTEXT ctxLC)
             LocalFree(pb);
             for(iMemoryRegion = 0; iMemoryRegion < FILE_VMWARE_MEMORY_REGIONS_MAX; iMemoryRegion++) {
                 if(regions[iMemoryRegion].fSize && regions[iMemoryRegion].fOffsetMemory && regions[iMemoryRegion].fOffsetFile) {
-                    LcMemMap_AddRange(ctxLC, regions[iMemoryRegion].cbOffsetMemory, regions[iMemoryRegion].cbSize, regions[iMemoryRegion].cbOffsetFile);
+                    LcMemMap_AddRange(ctxLC, regions[iMemoryRegion].cbOffsetMemory, regions[iMemoryRegion].cbSize, LC_MEMMAP_FORCE_OFFSET | regions[iMemoryRegion].cbOffsetFile);
                     ctx->CrashOrCoreDump.fValidVMwareDump = TRUE;
                 }
             }
-
         }
+    }
+    ctx->paDtbHint = paDtbHint;
+    if(!LcMemMap_IsInitialized(ctxLC) && (dwPlatform == 3) && (qwMemorySizeMB > 16)) {
+        // ARM64 - initialize with default physical memory offset of 0x80000000 at zero file offset.
+        ctx->tpArch = LC_ARCH_ARM64;
+        LcMemMap_AddRange(ctxLC, 0x80000000, qwMemorySizeMB * 0x00100000ULL, LC_MEMMAP_FORCE_OFFSET | 0);
     }
     if(!LcMemMap_IsInitialized(ctxLC)) {
         lcprintf(ctxLC, "DEVICE: WARN: No VMware memory regions located - file will be treated as single-region.\n");
@@ -476,6 +529,7 @@ BOOL DeviceFile_MsCrashCoreDumpInitialize_BitmapFullOrActiveMemory(_In_ PLC_CONT
             return FALSE;
         }
     }
+    ctx->CrashOrCoreDump.fValidCrashDump = TRUE;
     fResult = TRUE;
 fail:
     if(!fResult) {
@@ -549,11 +603,13 @@ BOOL DeviceFile_DumpInitialize(_In_ PLC_CONTEXT ctxLC)
     _PPHYSICAL_MEMORY_DESCRIPTOR64 pM64 = (_PPHYSICAL_MEMORY_DESCRIPTOR64)(ctx->CrashOrCoreDump.pbHdr + 0x088);
     _fseeki64(ctx->File[0].h, 0, SEEK_SET);
     fread(ctx->CrashOrCoreDump.pbHdr, 1, 0x2000, ctx->File[0].h);
-    if((CDMP_DWORD(0x000) == DUMP_SIGNATURE) && (CDMP_DWORD(0x004) == DUMP_VALID_DUMP64) && (CDMP_DWORD(0xf98) == DUMP_TYPE_FULL) && (CDMP_DWORD(0x030) == IMAGE_FILE_MACHINE_AMD64)) {
+    if((CDMP_DWORD(0x000) == DUMP_SIGNATURE) && (CDMP_DWORD(0x004) == DUMP_VALID_DUMP64) && (CDMP_DWORD(0xf98) == DUMP_TYPE_FULL) && ((CDMP_DWORD(0x030) == IMAGE_FILE_MACHINE_AMD64) || (CDMP_DWORD(0x030) == IMAGE_FILE_MACHINE_ARM64))) {
         // PAGEDUMP (64-bit memory dump) and FULL DUMP
         lcprintfvv_fn(ctxLC, "64-bit Microsoft Crash Dump identified.\n");
         ctx->CrashOrCoreDump.fValidCrashDump = TRUE;
         ctx->CrashOrCoreDump.f32 = FALSE;
+        if(CDMP_DWORD(0x030) == IMAGE_FILE_MACHINE_AMD64) { ctx->tpArch = LC_ARCH_X64; }
+        if(CDMP_DWORD(0x030) == IMAGE_FILE_MACHINE_ARM64) { ctx->tpArch = LC_ARCH_ARM64; }
         // process runs
         if(pM64->NumberOfRuns > _PHYSICAL_MEMORY_MAX_RUNS) {
             lcprintf(ctxLC, "DEVICE: FAIL: too many memory segments in crash dump file. (%i)\n", pM64->NumberOfRuns);
@@ -568,11 +624,15 @@ BOOL DeviceFile_DumpInitialize(_In_ PLC_CONTEXT ctxLC)
             cbFileOffset += pM64->Run[i].PageCount << 12;
         }
     }
-    if((CDMP_DWORD(0x000) == DUMP_SIGNATURE) && (CDMP_DWORD(0x004) == DUMP_VALID_DUMP64) && (CDMP_DWORD(0xf98) == DUMP_TYPE_BITMAP_FULL) && (CDMP_DWORD(0x030) == IMAGE_FILE_MACHINE_AMD64)) {
+    if((CDMP_DWORD(0x000) == DUMP_SIGNATURE) && (CDMP_DWORD(0x004) == DUMP_VALID_DUMP64) && (CDMP_DWORD(0xf98) == DUMP_TYPE_BITMAP_FULL) && ((CDMP_DWORD(0x030) == IMAGE_FILE_MACHINE_AMD64) || (CDMP_DWORD(0x030) == IMAGE_FILE_MACHINE_ARM64))) {
+        if(CDMP_DWORD(0x030) == IMAGE_FILE_MACHINE_AMD64) { ctx->tpArch = LC_ARCH_X64; }
+        if(CDMP_DWORD(0x030) == IMAGE_FILE_MACHINE_ARM64) { ctx->tpArch = LC_ARCH_ARM64; }
         return DeviceFile_MsCrashCoreDumpInitialize_BitmapFullOrActiveMemory(ctxLC);
     }
-    if((CDMP_DWORD(0x000) == DUMP_SIGNATURE) && (CDMP_DWORD(0x004) == DUMP_VALID_DUMP64) && (CDMP_DWORD(0xf98) == DUMP_TYPE_ACTIVE_MEMORY) && (CDMP_DWORD(0x030) == IMAGE_FILE_MACHINE_AMD64)) {
+    if((CDMP_DWORD(0x000) == DUMP_SIGNATURE) && (CDMP_DWORD(0x004) == DUMP_VALID_DUMP64) && (CDMP_DWORD(0xf98) == DUMP_TYPE_ACTIVE_MEMORY) && ((CDMP_DWORD(0x030) == IMAGE_FILE_MACHINE_AMD64) || (CDMP_DWORD(0x030) == IMAGE_FILE_MACHINE_ARM64))) {
         lcprintfv(ctxLC, "DEVICE: WARN: active only memory dump - analysis will be degraded!\n");
+        if(CDMP_DWORD(0x030) == IMAGE_FILE_MACHINE_AMD64) { ctx->tpArch = LC_ARCH_X64; }
+        if(CDMP_DWORD(0x030) == IMAGE_FILE_MACHINE_ARM64) { ctx->tpArch = LC_ARCH_ARM64; }
         return DeviceFile_MsCrashCoreDumpInitialize_BitmapFullOrActiveMemory(ctxLC);
     }
     if((CDMP_DWORD(0x000) == DUMP_SIGNATURE) && (CDMP_DWORD(0x004) == DUMP_VALID_DUMP) && (CDMP_DWORD(0xf88) == DUMP_TYPE_FULL) && (CDMP_DWORD(0x020) == IMAGE_FILE_MACHINE_I386)) {
@@ -656,12 +716,28 @@ BOOL DeviceFile_GetOption(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _Out_ PQWO
 {
     PDEVICE_CONTEXT_FILE ctx = (PDEVICE_CONTEXT_FILE)ctxLC->hDevice;
     BOOL f32 = ctx->CrashOrCoreDump.f32;
+    *pqwValue = 0;
     if(fOption == LC_OPT_MEMORYINFO_VALID) {
         *pqwValue = ctx->CrashOrCoreDump.fValidCrashDump ? 1 : 0;
         return TRUE;
     }
+    // general options below:
+    switch(fOption) {
+        case LC_OPT_MEMORYINFO_ARCH:
+            if(ctx->tpArch != LC_ARCH_NA) {
+                *pqwValue = (QWORD)ctx->tpArch;
+                return TRUE;
+            }
+            break;
+        case LC_OPT_MEMORYINFO_OS_DTB:
+            if(ctx->paDtbHint) {
+                *pqwValue = ctx->paDtbHint;
+                return TRUE;
+            }
+            break;
+    }
+    // crash dump options below:
     if(!ctx->CrashOrCoreDump.fValidCrashDump) {
-        *pqwValue = 0;
         return FALSE;
     }
     switch(fOption) {
@@ -705,7 +781,6 @@ BOOL DeviceFile_GetOption(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _Out_ PQWO
             *pqwValue = VMM_PTR_OFFSET_DUAL(f32, ctx->CrashOrCoreDump.pbHdr, 0x060, 0x080);
             return TRUE;
     }
-    *pqwValue = 0;
     return FALSE;
 }
 
@@ -823,7 +898,9 @@ BOOL DeviceFile_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
         ctxLC->pfnReadContigious = DeviceFile_ReadContigious;
     }
     if((strlen(ctx->szFileName) >= 6) && (0 == _stricmp(".vmem", ctx->szFileName + strlen(ctx->szFileName) - 5))) {
-        DeviceFile_VMwareDumpInitialize(ctxLC);
+        DeviceFile_VMwareDumpInitialize(ctxLC, FALSE);     // vmem - vmware memory dump
+    } else if((ctx->cbFile > 0x10000000) && (strlen(ctx->szFileName) >= 6) && (0 == _stricmp(".vmsn", ctx->szFileName + strlen(ctx->szFileName) - 5))) {
+        DeviceFile_VMwareDumpInitialize(ctxLC, TRUE);     // vmsn - vmware snapshot with memory in-line in file
     }
     if(!ctx->CrashOrCoreDump.fValidVMwareDump) {
         if(!DeviceFile_DumpInitialize(ctxLC)) { goto fail; }
