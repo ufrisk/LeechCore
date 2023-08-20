@@ -7,8 +7,8 @@ touch pkg_linux/files/dummy
 mkdir pkg_linux/leechcorepyc
 cp -r ../includes pkg_linux/
 cp -r ../leechcore pkg_linux/
+cp -r ../../LeechCore-plugins*/leechcore_device_qemu pkg_linux/
 cp -r ../../LeechCore-plugins*/leechcore_device_rawtcp pkg_linux/
-cp -r ../../LeechCore-plugins*/leechcore_device_sp605tcp pkg_linux/
 cp -r ../../LeechCore-plugins*/leechcore_ft601_driver_linux pkg_linux/
 cp    ../leechcore/leechcore_device.h pkg_linux/includes/leechcore_device.h
 cp    ../LICENSE pkg_linux/
@@ -27,7 +27,7 @@ subprocess.call(['make'])
 
 leechcorepyc = Extension(
     'leechcorepyc.leechcorepyc',
-    sources = ['leechcorepyc.c', 'oscompatibility.c'],
+    sources = ['leechcorepyc.c', 'leechcorepyc_barrequest.c', 'oscompatibility.c'],
     libraries = ['usb-1.0', ':leechcore.so'],
     library_dirs = ['.'],
     define_macros = [("LINUX", "")],
@@ -39,7 +39,7 @@ leechcorepyc = Extension(
 
 setup(
     name='leechcorepyc',
-    version='2.15.3', # VERSION_END
+    version='2.16.0', # VERSION_END
     description='LeechCore for Python',
     long_description='LeechCore for Python : native extension for physical memory access',
     url='https://github.com/ufrisk/LeechCore',
@@ -55,7 +55,7 @@ setup(
         "Operating System :: POSIX :: Linux",
     ],
 	packages=['leechcorepyc'],
-	package_data={'leechcorepyc': ['leechcore.so', 'leechcore_ft601_driver_linux.so', 'leechcore_device_sp605tcp.so', 'leechcore_device_rawtcp.so']},
+	package_data={'leechcorepyc': ['leechcore.so', 'leechcore_ft601_driver_linux.so', 'leechcore_device_qemu.so', 'leechcore_device_rawtcp.so']},
     ext_modules = [leechcorepyc],
     )
 
@@ -95,7 +95,7 @@ from .leechcorepyc import LeechCore
 
 # CONSTANTS AUTO-GENERATED FROM 'leechcore.h' BELOW:
 EOF
-cat ../includes/leechcore.h |grep "#define LC_" |grep -v "_VERSION  " >> pkg_linux/leechcorepyc/__init__.py
+cat ../includes/leechcore.h |grep "#define LC_" |grep -v "_VERSION  " |grep -v "_FUNCTION_CALLBACK_"  >> pkg_linux/leechcorepyc/__init__.py
 sed -i 's/#define //' pkg_linux/leechcorepyc/__init__.py
 sed -i 's/0x/= 0x/'   pkg_linux/leechcorepyc/__init__.py
 sed -i 's/\/\//#/'    pkg_linux/leechcorepyc/__init__.py
@@ -107,16 +107,16 @@ cat << 'EOF' > pkg_linux/Makefile
 all:
 	$(MAKE) -C leechcore
 	$(MAKE) -C leechcore_ft601_driver_linux || true
+	$(MAKE) -C leechcore_device_qemu || true
 	$(MAKE) -C leechcore_device_rawtcp || true
-	$(MAKE) -C leechcore_device_sp605tcp || true
 	cp files/leechcore.so .
 	cp files/*.so leechcorepyc/
 
 clean:
 	$(MAKE) clean -C leechcore
 	$(MAKE) clean -C leechcore_ft601_driver_linux || true
+	$(MAKE) clean -C leechcore_device_qemu || true
 	$(MAKE) clean -C leechcore_device_rawtcp || true
-	$(MAKE) clean -C leechcore_device_sp605tcp || true
 	rm files/*.so || true
 	rm leechcore.so || true
 	rm leechcorepyc/*.so || true

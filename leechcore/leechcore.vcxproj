@@ -351,6 +351,7 @@ copy "$(ProjectDir)\leechcore.h" "$(SolutionDir)\includes\" /y
     <ClCompile Include="leechrpcclient.c" />
     <ClCompile Include="leechrpc_c.c" />
     <ClCompile Include="memmap.c" />
+    <ClCompile Include="ob\ob_bytequeue.c" />
     <ClCompile Include="ob\ob_core.c" />
     <ClCompile Include="ob\ob_map.c" />
     <ClCompile Include="ob\ob_set.c" />

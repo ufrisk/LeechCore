@@ -196,12 +196,12 @@ v1.0-1.8
   - Support for Xen, KVM, VirtualBox, QEMU on Linux.
   - Pre-bundled on Linux x64 (libmicrovmi)
   - Thank you [Wenzel](https://github.com/Wenzel/) for this contribution.
-</details>
 
 [v2.11](https://github.com/ufrisk/LeechCore/releases/tag/v2.11)
 * Bug fixes.
 * Visual Studio 2022 Support.
 * New write fpga algorithm.
+</details>
 
 [v2.12](https://github.com/ufrisk/LeechCore/releases/tag/v2.12)
 * Support for MemProcFS v5.
@@ -220,3 +220,8 @@ v1.0-1.8
 * Improved FPGA performance for smaller reads.
 * QEMU support on Linux (VM live memory introspection).
 * Improved [MemProcFS remoting](https://github.com/ufrisk/MemProcFS/wiki/_Remoting) via a remote [LeechAgent](https://github.com/ufrisk/LeechCore/wiki/LeechAgent). Full MemProcFS remote support over SMB - tcp/445. Perfect for memory forensics Incident Response (IR)!
+
+[v2.16](https://github.com/ufrisk/LeechCore/releases/tag/v2.16)
+* PCIe BAR information and user callback (easier implementation of custom devices).
+* ARM64 memory dump (.dmp) and VMWare Fusion (.vmem/.vmsn) support.
+* Improved handling of PCIe TLP user callback.

@@ -306,6 +306,7 @@ copy $(OutDir)leechcorepyc.pyd $(OutDir)\agent\x64\Plugins\leechcorepyc\ /y
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="leechcorepyc.c" />
+    <ClCompile Include="leechcorepyc_barrequest.c" />
     <ClCompile Include="leechcorepyemb.c" />
     <ClCompile Include="oscompatibility.c" />
   </ItemGroup>

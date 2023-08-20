@@ -72,6 +72,9 @@
     <ClCompile Include="ob\ob_set.c">
       <Filter>Source Files\ob</Filter>
     </ClCompile>
+    <ClCompile Include="ob\ob_bytequeue.c">
+      <Filter>Source Files\ob</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="leechrpc.h">

@@ -586,6 +586,7 @@ BOOL LeechRPC_Command(
     PLEECHRPC_MSG_BIN pMsgRsp = NULL;
     // 1: prepare message to send
     if(!pbDataIn && cbDataIn) { return FALSE; }
+    if(fCMD & 0x2000000000000000) { return FALSE; }     // command is marked as no-remote.
     if(!(pMsgReq = LocalAlloc(0, sizeof(LEECHRPC_MSG_BIN) + cbDataIn))) { return FALSE; }
     ZeroMemory(pMsgReq, sizeof(LEECHRPC_MSG_BIN));
     pMsgReq->tpMsg = LEECHRPC_MSGTYPE_COMMAND_REQ;

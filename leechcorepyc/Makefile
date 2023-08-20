@@ -2,7 +2,7 @@ CC=gcc
 CFLAGS= -I. -I../includes -D LINUX  -L. -l:leechcore.so -shared -fPIC -fvisibility=hidden `pkg-config python3 --libs --cflags`
 LDFLAGS= -Wl,-rpath,'$$ORIGIN' -g -ldl -shared
 DEPS = 
-OBJ = leechcorepyc.o oscompatibility.o
+OBJ = leechcorepyc.o leechcorepyc_barrequest.o oscompatibility.o
 
 %.o: %.c $(DEPS)
 	$(CC) -c -o $@ $< $(CFLAGS)

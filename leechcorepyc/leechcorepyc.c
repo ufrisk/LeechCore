@@ -3,34 +3,10 @@
 // (c) Ulf Frisk, 2020-2023
 // Author: Ulf Frisk, pcileech@frizk.net
 //
-#define PY_SSIZE_T_CLEAN
-#define Py_LIMITED_API 0x03060000
-#ifdef _DEBUG
-#undef _DEBUG
-#include <Python.h>
-#include <structmember.h>
-#define _DEBUG
-#else
-#include <Python.h>
-#include <structmember.h>
-#endif
-#ifdef _WIN32
-#include <Windows.h>
-#endif /* _WIN32 */
-#include <leechcore.h>
-#include "oscompatibility.h"
+#include "leechcorepyc.h"
 
-typedef struct tdPyObjectLeechCore {
-    PyObject_HEAD
-    BOOL fValid;
-    HANDLE hLC;
-    LC_CONFIG cfg;
-    PHANDLE phLCkeepalive;
-    PyObject *fnTlpReadCB;
-} PyObjectLeechCore;
-
-static PyObject *g_pPyTypeObjectLeechCore = NULL;
-static PLC_CONFIG_ERRORINFO g_LEECHCORE_LAST_ERRORINFO = NULL;  // will be memory leaked - but it should be very rare.
+PyObject *g_pPyType_LeechCore = NULL;
+PLC_CONFIG_ERRORINFO g_LEECHCORE_LAST_ERRORINFO = NULL;  // will be memory leaked - but it should be very rare.
 
 int PyDict_SetItemString_DECREF(PyObject *dp, const char *key, PyObject *item)
 {
@@ -139,7 +115,7 @@ fail:
 */
 VOID LcPy_TlpReadCB(PVOID ctx, _In_ DWORD cbTlp, _In_ PBYTE pbTlp, _In_opt_ DWORD cbInfo, _In_opt_ LPSTR szInfo)
 {
-    PyObjectLeechCore *self = (PyObjectLeechCore*)ctx;
+    PyObj_LeechCore *self = (PyObj_LeechCore*)ctx;
     PyGILState_STATE gstate;
     PyObject *pyReturn, *pyArgs = NULL;
     gstate = PyGILState_Ensure();
@@ -154,11 +130,10 @@ cleanup:
 
 // (FUNCTION_CALLBACK, (BOOL, BOOL)) -> None
 static PyObject*
-LcPy_TlpRead(PyObjectLeechCore *self, PyObject *args)
+LcPy_TlpRead(PyObj_LeechCore *self, PyObject *args)
 {
     PyObject *pyCallback = NULL, *pyCallbackOld = NULL;
     BOOL fCallback = FALSE, fFilterCpl = FALSE, fThread = FALSE;
-    LC_TLP_CALLBACK LcTlpCallback;
     if(!self->fValid) { return PyErr_Format(PyExc_RuntimeError, "tlp_read: LeechCore object not initialized."); }
     if(!PyArg_ParseTuple(args, "|Opp", &pyCallback, &fFilterCpl, &fThread)) { return PyErr_Format(PyExc_RuntimeError, "tlp_read: Illegal argument."); }    // borrowed reference
     fCallback = PyCallable_Check(pyCallback);
@@ -173,13 +148,11 @@ LcPy_TlpRead(PyObjectLeechCore *self, PyObject *args)
     if(fCallback) {
         LcSetOption(self->hLC, LC_OPT_FPGA_TLP_READ_CB_WITHINFO, 1);
         LcSetOption(self->hLC, LC_OPT_FPGA_TLP_READ_CB_FILTERCPL, fFilterCpl ? 1 : 0);
-        LcTlpCallback.ctx = self;
-        LcTlpCallback.pfn = LcPy_TlpReadCB;
-        if(LcCommand(self->hLC, LC_CMD_FPGA_TLP_READ_FUNCTION_CALLBACK, sizeof(LC_TLP_CALLBACK), (PBYTE)&LcTlpCallback, NULL, 0)) {
-            LcSetOption(self->hLC, LC_OPT_FPGA_TLP_READ_CB_BACKGROUND_THREAD, fThread ? 1 : 0);
-        }
+        LcCommand(self->hLC, LC_CMD_FPGA_TLP_CONTEXT, 0, (PBYTE)self, NULL, 0);
+        LcCommand(self->hLC, LC_CMD_FPGA_TLP_FUNCTION_CALLBACK, 0, (PBYTE)LcPy_TlpReadCB, NULL, 0);
     } else {
-        LcCommand(self->hLC, LC_CMD_FPGA_TLP_READ_FUNCTION_CALLBACK, 0, NULL, NULL, 0);
+        LcCommand(self->hLC, LC_CMD_FPGA_TLP_CONTEXT, 0, NULL, NULL, 0);
+        LcCommand(self->hLC, LC_CMD_FPGA_TLP_FUNCTION_CALLBACK, 0, NULL, NULL, 0);
     }
     Py_END_ALLOW_THREADS;
     if(!fCallback) {
@@ -192,7 +165,7 @@ LcPy_TlpRead(PyObjectLeechCore *self, PyObject *args)
 
 // ([PBYTE]) -> None
 static PyObject*
-LcPy_TlpWrite(PyObjectLeechCore *self, PyObject *args)
+LcPy_TlpWrite(PyObj_LeechCore *self, PyObject *args)
 {
     PyObject *pyListSrc, *pyListItemSrc;
     DWORD i, cTLPs;
@@ -223,7 +196,7 @@ LcPy_TlpWrite(PyObjectLeechCore *self, PyObject *args)
 
 // (PBYTE) -> STRING
 static PyObject*
-LcPy_TlpToString(PyObjectLeechCore *self, PyObject *args)
+LcPy_TlpToString(PyObj_LeechCore *self, PyObject *args)
 {
     PyObject *pyString;
     PBYTE pb, sz = NULL;
@@ -248,12 +221,152 @@ LcPy_TlpToString(PyObjectLeechCore *self, PyObject *args)
 
 
 //-----------------------------------------------------------------------------
+// FPGA-ONLY PCIe BAR FUNCTIONS BELOW:
+//-----------------------------------------------------------------------------
+
+/*
+* Helper function to initialize PCIe BAR info.
+*/
+_Success_(return)
+BOOL LcPy_BarInfoFetch(PyObj_LeechCore* self)
+{
+    PyObject *pyList, *pyDictEntry;
+    BOOL result;
+    DWORD i;
+    PLC_BAR pBarInfo = NULL;
+    if(!self->fValid) { return FALSE; }
+    if(self->pyBarListAll) { return TRUE; }
+    Py_BEGIN_ALLOW_THREADS;
+    result = LcCommand(self->hLC, LC_CMD_FPGA_BAR_INFO, 0, NULL, (PBYTE*)&pBarInfo, NULL) && pBarInfo;
+    Py_END_ALLOW_THREADS;
+    if(!result) { return FALSE; }
+    if(!(pyList = PyList_New(0))) { return FALSE; }
+    for(i = 0; i < 6; i++) {
+        if(pBarInfo[i].fValid) {
+            pyDictEntry = PyDict_New();
+            if(!pyDictEntry) {
+                Py_DECREF(pyList);
+                return FALSE;
+            }
+            PyDict_SetItemString_DECREF(pyDictEntry, "i_bar", PyLong_FromUnsignedLongLong(pBarInfo[i].iBar));
+            PyDict_SetItemString_DECREF(pyDictEntry, "base", PyLong_FromUnsignedLongLong(pBarInfo[i].pa));
+            PyDict_SetItemString_DECREF(pyDictEntry, "size", PyLong_FromUnsignedLongLong(pBarInfo[i].cb));
+            PyDict_SetItemString_DECREF(pyDictEntry, "is_64_bit", PyBool_FromLong((long)pBarInfo[i].f64Bit));
+            PyDict_SetItemString_DECREF(pyDictEntry, "is_prefetchable", PyBool_FromLong((long)pBarInfo[i].fPrefetchable));
+            PyList_Append(pyList, pyDictEntry);
+            self->pyBarDictSingle[i] = pyDictEntry;
+        } else {
+            PyList_Append(pyList, Py_None);
+        }
+    }
+    self->pyBarListAll = pyList;
+    return TRUE;
+}
+
+// -> [{...}, ..., {...}]
+static PyObject*
+LcPy_BarInfo(PyObj_LeechCore *self, void *closure)
+{
+    if(!self->fValid) { return PyErr_Format(PyExc_RuntimeError, "LeechCore object not initialized."); }
+    if(self->pyBarListAll || LcPy_BarInfoFetch(self)) {
+        Py_IncRef(self->pyBarListAll);
+        return self->pyBarListAll;
+    }
+    return PyErr_Format(PyExc_RuntimeError, "bar_info: failed.");
+}
+
+// -> None
+static PyObject*
+LcPy_BarDisable(PyObj_LeechCore *self, PyObject *args)
+{
+    BOOL result;
+    if(!self->fValid) { return PyErr_Format(PyExc_RuntimeError, "LeechCore object not initialized."); }
+    if(self->fnBarCB) {
+        Py_DECREF(self->fnBarCB);
+        self->fnBarCB = NULL;
+    }
+    Py_BEGIN_ALLOW_THREADS;
+    result = LcCommand(self->hLC, LC_CMD_FPGA_BAR_FUNCTION_CALLBACK, 0, (PBYTE)LC_BAR_FUNCTION_CALLBACK_DISABLE, NULL, NULL);
+    Py_END_ALLOW_THREADS;
+    if(!result) { return PyErr_Format(PyExc_RuntimeError, "bar_disable(): failed."); }
+    Py_RETURN_NONE;
+}
+
+// -> None
+static PyObject*
+LcPy_BarEnableZero(PyObj_LeechCore *self, PyObject *args)
+{
+    BOOL result;
+    if(!self->fValid) { return PyErr_Format(PyExc_RuntimeError, "LeechCore object not initialized."); }
+    if(self->fnBarCB) {
+        Py_DECREF(self->fnBarCB);
+        self->fnBarCB = NULL;
+    }
+    Py_BEGIN_ALLOW_THREADS;
+    result = LcCommand(self->hLC, LC_CMD_FPGA_BAR_FUNCTION_CALLBACK, 0, (PBYTE)LC_BAR_FUNCTION_CALLBACK_ZEROBAR, NULL, NULL);
+    Py_END_ALLOW_THREADS;
+    if(!result) { return PyErr_Format(PyExc_RuntimeError, "bar_enable_zero(): failed."); }
+    Py_RETURN_NONE;
+}
+
+/*
+* Callback function for BAR requests.
+* Updating of pReq with read replies is handled inside LcPy_BarRequest object.
+*/
+VOID LcPy_BarCB(_Inout_ PLC_BAR_REQUEST pReq)
+{
+    PyObj_LeechCore *self = (PyObj_LeechCore*)pReq->ctx;
+    PyObject *pyReturn = NULL, *pyArgs = NULL;
+    PyObj_BarRequest *pyLcBarReq = NULL;
+    PyGILState_STATE gstate;
+    gstate = PyGILState_Ensure();
+    if(!self || !self->fnBarCB) { goto cleanup; }
+    pyLcBarReq = LcPy_BarRequest_InitializeInternal(self, pReq);
+    if(!pyLcBarReq) { goto cleanup; }
+    pyArgs = Py_BuildValue("OO", self->pyBarDictSingle[pReq->pBar->iBar], pyLcBarReq);
+    pyReturn = PyObject_CallObject(self->fnBarCB, pyArgs);
+    pyLcBarReq->fValid = FALSE;
+cleanup:
+    Py_XDECREF(pyArgs);
+    Py_XDECREF(pyReturn);
+    Py_XDECREF(pyLcBarReq);
+    PyGILState_Release(gstate);
+}
+
+// -> None
+static PyObject*
+LcPy_BarEnable(PyObj_LeechCore *self, PyObject *args)
+{
+    PyObject *pyCallback = NULL;
+    BOOL result;
+    if(!self->fValid) { return PyErr_Format(PyExc_RuntimeError, "LeechCore object not initialized."); }
+    if(self->fnBarCB) {
+        Py_DECREF(self->fnBarCB);
+        self->fnBarCB = NULL;
+    }
+    if(!self->pyBarListAll && !LcPy_BarInfoFetch(self)) { return PyErr_Format(PyExc_RuntimeError, "bar_enable(): failed."); }
+    if(!PyArg_ParseTuple(args, "O", &pyCallback)) { return PyErr_Format(PyExc_RuntimeError, "bar_enable: Illegal argument."); }    // borrowed reference
+    if(!PyCallable_Check(pyCallback)) { return PyErr_Format(PyExc_RuntimeError, "bar_enable: Callback not callable."); }
+    Py_XINCREF(pyCallback);
+    self->fnBarCB = pyCallback;
+    Py_BEGIN_ALLOW_THREADS;
+    result = 
+        LcCommand(self->hLC, LC_CMD_FPGA_BAR_CONTEXT, 0, (PBYTE)self, NULL, NULL) &&
+        LcCommand(self->hLC, LC_CMD_FPGA_BAR_FUNCTION_CALLBACK, 0, (PBYTE)LcPy_BarCB, NULL, NULL);
+    Py_END_ALLOW_THREADS;
+    if(!result) { return PyErr_Format(PyExc_RuntimeError, "bar_enable(): failed."); }
+    Py_RETURN_NONE;
+}
+
+
+
+//-----------------------------------------------------------------------------
 // GENERAL LEECHCORE FUNCTIONS BELOW:
 //-----------------------------------------------------------------------------
 
 // (ULONG64, DWORD, (BOOL)) -> PBYTE
 static PyObject* LINUX_NO_OPTIMIZE
-LcPy_Read(PyObjectLeechCore *self, PyObject *args)
+LcPy_Read(PyObj_LeechCore *self, PyObject *args)
 {
     PyObject *pyBytes;
     BOOL result, fZeroPadFail = FALSE;
@@ -280,7 +393,7 @@ LcPy_Read(PyObjectLeechCore *self, PyObject *args)
 
 // ([ULONG64]) -> [{...}]
 static PyObject *
-LcPy_ReadScatter(PyObjectLeechCore *self, PyObject *args)
+LcPy_ReadScatter(PyObj_LeechCore *self, PyObject *args)
 {
     PyObject *pyListSrc, *pyListItemSrc, *pyListDst, *pyDict;
     DWORD i, cMEMs;
@@ -323,7 +436,7 @@ LcPy_ReadScatter(PyObjectLeechCore *self, PyObject *args)
 
 // (ULONG64, PBYTE, (DWORD)) -> None
 static PyObject*
-LcPy_Write(PyObjectLeechCore *self, PyObject *args)
+LcPy_Write(PyObj_LeechCore *self, PyObject *args)
 {
     BOOL result;
     ULONG64 va;
@@ -343,7 +456,7 @@ LcPy_Write(PyObjectLeechCore *self, PyObject *args)
 
 // (ULONG64) -> ULONG64
 static PyObject*
-LcPy_GetOption(PyObjectLeechCore *self, PyObject *args)
+LcPy_GetOption(PyObj_LeechCore *self, PyObject *args)
 {
     BOOL result;
     ULONG64 fOption, qwValue = 0;
@@ -358,7 +471,7 @@ LcPy_GetOption(PyObjectLeechCore *self, PyObject *args)
 
 // (ULONG64, ULONG64) -> None
 static PyObject*
-LcPy_SetOption(PyObjectLeechCore *self, PyObject *args)
+LcPy_SetOption(PyObj_LeechCore *self, PyObject *args)
 {
     BOOL result;
     ULONG64 fOption, qwValue = 0;
@@ -373,7 +486,7 @@ LcPy_SetOption(PyObjectLeechCore *self, PyObject *args)
 
 // (ULONG64, PBYTE) -> PBYTE
 static PyObject*
-LcPy_CommandData(PyObjectLeechCore *self, PyObject *args)
+LcPy_CommandData(PyObj_LeechCore *self, PyObject *args)
 {
     PyObject *pyBytes;
     BOOL result;
@@ -397,7 +510,7 @@ LcPy_CommandData(PyObjectLeechCore *self, PyObject *args)
 
 // -> {'pfn1': {...}, ...}
 static PyObject*
-LcPy_GetCallStatistics(PyObjectLeechCore *self, void *closure)
+LcPy_GetCallStatistics(PyObj_LeechCore *self, void *closure)
 {
     BOOL result;
     PyObject *pyDictResult, *pyDict;
@@ -432,7 +545,7 @@ LcPy_GetCallStatistics(PyObjectLeechCore *self, void *closure)
 
 // -> LONG
 static PyObject *
-LcPy_GetMaxAddr(PyObjectLeechCore *self, void *closure)
+LcPy_GetMaxAddr(PyObj_LeechCore *self, void *closure)
 {
     BOOL result;
     QWORD pa;
@@ -448,7 +561,7 @@ LcPy_GetMaxAddr(PyObjectLeechCore *self, void *closure)
 
 // -> [{'base': int, 'size': int, 'offset': int}, ...]
 static PyObject*
-LcPy_GetMemMap(PyObjectLeechCore *self, void *closure)
+LcPy_GetMemMap(PyObj_LeechCore *self, void *closure)
 {
     PyObject *pyList, *pyDictEntry;
     PLC_MEMMAP_ENTRY pMemMap;
@@ -475,7 +588,7 @@ LcPy_GetMemMap(PyObjectLeechCore *self, void *closure)
 
 // [{'base': int, 'size': int, 'offset': int}, ...]
 static int
-LcPy_SetMemMap(PyObjectLeechCore *self, PyObject *pyRuns, void *closure)
+LcPy_SetMemMap(PyObj_LeechCore *self, PyObject *pyRuns, void *closure)
 {
     PyObject *pyMemEntry, *pyMemValue;
     LPSTR sz = NULL;
@@ -551,7 +664,7 @@ DWORD LeechCorePYC_KeepaliveThread(_In_ PHANDLE ctx)
 
 // [{'base': int, 'size': int, 'offset': int}, ...]
 static int
-LcPy_SetKeepalive(PyObjectLeechCore *self, PyObject *pyKeepalive, void *closure)
+LcPy_SetKeepalive(PyObj_LeechCore *self, PyObject *pyKeepalive, void *closure)
 {
     HANDLE hThread;
     BOOL fResult = FALSE;
@@ -592,14 +705,14 @@ fail:
 
 // -> True|False
 static PyObject*
-LcPy_GetKeepalive(PyObjectLeechCore *self, void *closure)
+LcPy_GetKeepalive(PyObj_LeechCore *self, void *closure)
 {
     if(!self->fValid) { return PyErr_Format(PyExc_RuntimeError, "LeechCore object not initialized."); }
     return PyBool_FromLong(self->phLCkeepalive ? 1 : 0);
 }
 
 static PyObject*
-LcPy_repr(PyObjectLeechCore *self)
+LcPy_repr(PyObj_LeechCore *self)
 {
     PyObject *pyResult, *pyDictInfo;
     if(!self->fValid || !(pyDictInfo = PyDict_New())) {
@@ -618,7 +731,7 @@ LcPy_repr(PyObjectLeechCore *self)
 * Initialize the object type - i.e. open up a handle to the leechcore library.
 */
 static int
-LcPy_init(PyObjectLeechCore *self, PyObject *args, PyObject *kwds)
+LcPy_init(PyObj_LeechCore *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = { "device", "remote", "flags", "maxaddr", NULL };
     QWORD paMax = 0;
@@ -656,12 +769,14 @@ LcPy_init(PyObjectLeechCore *self, PyObject *args, PyObject *kwds)
 }
 
 static void
-LcPy_dealloc(PyObjectLeechCore *self)
+LcPy_dealloc(PyObj_LeechCore *self)
 {
+    DWORD i;
     self->fValid = FALSE;
     if(self->fnTlpReadCB) {
         Py_BEGIN_ALLOW_THREADS;
-        LcCommand(self->hLC, LC_CMD_FPGA_TLP_READ_FUNCTION_CALLBACK, 0, NULL, NULL, 0);
+        LcCommand(self->hLC, LC_CMD_FPGA_TLP_CONTEXT, 0, NULL, NULL, 0);
+        LcCommand(self->hLC, LC_CMD_FPGA_TLP_FUNCTION_CALLBACK, 0, NULL, NULL, 0);
         Sleep(5);
         Py_END_ALLOW_THREADS;
     }
@@ -670,12 +785,17 @@ LcPy_dealloc(PyObjectLeechCore *self)
     LcClose(self->hLC);
     self->hLC = 0;
     Py_END_ALLOW_THREADS;
+    Py_XDECREF(self->fnBarCB);
     Py_XDECREF(self->fnTlpReadCB);
+    Py_XDECREF(self->pyBarListAll);
+    for(i = 0; i < 6; i++) {
+        Py_XDECREF(self->pyBarDictSingle[i]);
+    }
 }
 
 // () -> None
 static PyObject*
-LcPy_Close(PyObjectLeechCore *self, PyObject *args)
+LcPy_Close(PyObj_LeechCore *self, PyObject *args)
 {
     if(!self->fValid) { return PyErr_Format(PyExc_RuntimeError, "LeechCore object not initialized."); }
     LcPy_dealloc(self);
@@ -699,26 +819,30 @@ BOOL LcPy_InitializeType(PyObject *pModule)
         {"set_option", (PyCFunction)LcPy_SetOption, METH_VARARGS, "Set option value"},
         {"command_data", (PyCFunction)LcPy_CommandData, METH_VARARGS, "Send/Receive command/data"},
         // fpga-only functions below:
+        {"bar_disable", (PyCFunction)LcPy_BarDisable, METH_VARARGS, "Disable PCIe BARs."},
+        {"bar_enable", (PyCFunction)LcPy_BarEnable, METH_VARARGS, "Enable callback function for PCIe BARs"},
+        {"bar_enable_zero", (PyCFunction)LcPy_BarEnableZero, METH_VARARGS, "Enable ZERO/NULL PCIe BARs"},
         {"tlp_tostring", (PyCFunction)LcPy_TlpToString, METH_VARARGS, "Convert binary PCIe TLP to string"},
         {"tlp_read", (PyCFunction)LcPy_TlpRead, METH_VARARGS, "Read PCIe TLPs using callback function"},
         {"tlp_write", (PyCFunction)LcPy_TlpWrite, METH_VARARGS, "Write a number of raw PCIe TLPs"},
         {NULL, NULL, 0, NULL}
     };
     static PyMemberDef PyMembers[] = {
-        {"device", T_STRING_INPLACE, offsetof(PyObjectLeechCore, cfg.szDevice), READONLY, "device string"},
-        {"remote", T_STRING_INPLACE, offsetof(PyObjectLeechCore, cfg.szRemote), READONLY, "remote string"},
-        {"type", T_STRING_INPLACE, offsetof(PyObjectLeechCore, cfg.szDeviceName), READONLY, "device type string"},
-        {"is_volatile", T_BOOL, offsetof(PyObjectLeechCore, cfg.fVolatile), READONLY, "memory is volatile"},
-        {"is_writable", T_BOOL, offsetof(PyObjectLeechCore, cfg.fWritable), READONLY, "memory is writable"},
-        {"is_remote", T_BOOL, offsetof(PyObjectLeechCore, cfg.fRemote), READONLY, "memory is remote"},
-        {"is_remote_nocompress", T_BOOL, offsetof(PyObjectLeechCore, cfg.fRemoteDisableCompress), READONLY, "remote connection compression disabled"},
+        {"device", T_STRING_INPLACE, offsetof(PyObj_LeechCore, cfg.szDevice), READONLY, "device string"},
+        {"remote", T_STRING_INPLACE, offsetof(PyObj_LeechCore, cfg.szRemote), READONLY, "remote string"},
+        {"type", T_STRING_INPLACE, offsetof(PyObj_LeechCore, cfg.szDeviceName), READONLY, "device type string"},
+        {"is_volatile", T_BOOL, offsetof(PyObj_LeechCore, cfg.fVolatile), READONLY, "memory is volatile"},
+        {"is_writable", T_BOOL, offsetof(PyObj_LeechCore, cfg.fWritable), READONLY, "memory is writable"},
+        {"is_remote", T_BOOL, offsetof(PyObj_LeechCore, cfg.fRemote), READONLY, "memory is remote"},
+        {"is_remote_nocompress", T_BOOL, offsetof(PyObj_LeechCore, cfg.fRemoteDisableCompress), READONLY, "remote connection compression disabled"},
         {NULL}
     };
     static PyGetSetDef PyGetSet[] = {
-        {"maxaddr", (getter)LcPy_GetMaxAddr, (setter)NULL, "max physical address", NULL},
-        {"memmap", (getter)LcPy_GetMemMap, (setter)LcPy_SetMemMap, "memory map", NULL},
+        {"bar_info", (getter)LcPy_BarInfo, (setter)NULL, "pcie bar information", NULL},
         {"call_statistics", (getter)LcPy_GetCallStatistics, (setter)NULL, "memory map", NULL},
         {"is_keepalive", (getter)LcPy_GetKeepalive, (setter)LcPy_SetKeepalive, "keepalive enable/disable", NULL},
+        {"maxaddr", (getter)LcPy_GetMaxAddr, (setter)NULL, "max physical address", NULL},
+        {"memmap", (getter)LcPy_GetMemMap, (setter)LcPy_SetMemMap, "memory map", NULL},
         {NULL}
     };
     static PyType_Slot PyTypeSlot[] = {
@@ -732,18 +856,18 @@ BOOL LcPy_InitializeType(PyObject *pModule)
     };
     static PyType_Spec PyTypeSpec = {
         .name = "leechcorepyc.LeechCore",
-        .basicsize = sizeof(PyObjectLeechCore),
+        .basicsize = sizeof(PyObj_LeechCore),
         .itemsize = 0,
         .flags = Py_TPFLAGS_DEFAULT,
         .slots = PyTypeSlot,
     };
-    if((g_pPyTypeObjectLeechCore = PyType_FromSpec(&PyTypeSpec))) {
-        if(PyModule_AddObject(pModule, "LeechCore", g_pPyTypeObjectLeechCore) < 0) {
-            Py_DECREF(g_pPyTypeObjectLeechCore);
-            g_pPyTypeObjectLeechCore = NULL;
+    if((g_pPyType_LeechCore = PyType_FromSpec(&PyTypeSpec))) {
+        if(PyModule_AddObject(pModule, "LeechCore", g_pPyType_LeechCore) < 0) {
+            Py_DECREF(g_pPyType_LeechCore);
+            g_pPyType_LeechCore = NULL;
         }
     }
-    return g_pPyTypeObjectLeechCore ? TRUE : FALSE;
+    return g_pPyType_LeechCore ? TRUE : FALSE;
 }
 
 /*
@@ -763,6 +887,10 @@ EXPORTED_FUNCTION PyObject* PyInit_leechcorepyc(void)
     pPyModule = PyModule_Create(&ModuleDefinition);
     if(!pPyModule) { return NULL; }
     if(!LcPy_InitializeType(pPyModule)) {
+        Py_DECREF(pPyModule);
+        return NULL;
+    }
+    if(!LcPy_BarRequest_InitializeType(pPyModule)) {
         Py_DECREF(pPyModule);
         return NULL;
     }
