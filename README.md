@@ -225,3 +225,6 @@ v1.0-1.8
 * PCIe BAR information and user callback (easier implementation of custom devices).
 * ARM64 memory dump (.dmp) and VMWare Fusion (.vmem/.vmsn) support.
 * Improved handling of PCIe TLP user callback.
+
+Latest:
+* I/O BAR support.

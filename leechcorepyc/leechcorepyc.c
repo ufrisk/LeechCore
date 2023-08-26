@@ -251,6 +251,7 @@ BOOL LcPy_BarInfoFetch(PyObj_LeechCore* self)
             PyDict_SetItemString_DECREF(pyDictEntry, "i_bar", PyLong_FromUnsignedLongLong(pBarInfo[i].iBar));
             PyDict_SetItemString_DECREF(pyDictEntry, "base", PyLong_FromUnsignedLongLong(pBarInfo[i].pa));
             PyDict_SetItemString_DECREF(pyDictEntry, "size", PyLong_FromUnsignedLongLong(pBarInfo[i].cb));
+            PyDict_SetItemString_DECREF(pyDictEntry, "is_io", PyBool_FromLong((long)pBarInfo[i].fIO));
             PyDict_SetItemString_DECREF(pyDictEntry, "is_64_bit", PyBool_FromLong((long)pBarInfo[i].f64Bit));
             PyDict_SetItemString_DECREF(pyDictEntry, "is_prefetchable", PyBool_FromLong((long)pBarInfo[i].fPrefetchable));
             PyList_Append(pyList, pyDictEntry);

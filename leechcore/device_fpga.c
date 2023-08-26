@@ -1855,6 +1855,19 @@ BOOL DeviceFPGA_Bar_Initialize(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA
         pBar = &ctx->tlp_callback.Bar[i];
         pBar->iBar = (DWORD)i;
         dwBarSize = *(PDWORD)(pbDRP + 14 + i * 4);
+        // IO BAR: IO BARs are not memory mapped and are treated differently here:
+        if(dwBarSize & 1) {
+            pBar->fIO = TRUE;
+            pBar->pa = *(PDWORD)(pbBAR + i * 4) - 1;
+            dwBarSize = ((dwBarSize & ~0x01) ^ 0xFFFFFFFF) + 1;
+            pBar->cb = dwBarSize;
+            if(!pBar->pa || !pBar->cb) { continue; }
+            if((pBar->pa >= 0x10000) || (pBar->cb >= 0x10000)) { return FALSE; }    // IO BARs must be < 64KB in size and address
+            pBar->fValid = TRUE;
+            fBAR = TRUE;
+            continue;
+        }
+        // Memory BAR:
         if(dwBarSize & 8) {
             if(i % 2) { return FALSE; }                     // 64-bit prefetchable BARs not allowed in odd BARs
             pBar->fPrefetchable = TRUE;
@@ -1867,7 +1880,7 @@ BOOL DeviceFPGA_Bar_Initialize(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA
             if(qwBarSize >= 0x8000000000000000) { return FALSE; }   // BAR too large.
             pBar->cb = qwBarSize;
         } else {
-            dwBarSize = *(PQWORD)(pbDRP + 14 + i * 4) & ~0xF;
+            dwBarSize = *(PDWORD)(pbDRP + 14 + i * 4) & ~0xF;
             dwBarSize = (dwBarSize ^ 0xFFFFFFFF) + 1;
             if(dwBarSize >= 0x80000000) { return FALSE; }           // BAR too large.
             pBar->cb = dwBarSize;
@@ -1959,7 +1972,7 @@ VOID DeviceFPGA_Bar_RxTlp(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx,
     PTLP_HDR_MRdWr32 hdrM32 = (PTLP_HDR_MRdWr32)hdrDwBuf;
     PTLP_HDR_MRdWr64 hdrM64 = (PTLP_HDR_MRdWr64)hdrDwBuf;
     // 1: initial checks and header parse:
-    if((cbTlp < 12) || (pbTlp[0] & 0x9e) || (cbTlp & 3)) { return; }   // TLP fast fail if not MRd/MWr
+    if((cbTlp < 12) || (pbTlp[0] & 0x9c) || (cbTlp & 3)) { return; }   // TLP fast fail if not MRd/MWr/IORd/IOWr
     hdrDwBuf[0] = _byteswap_ulong(*(PDWORD)(pbTlp + 0));
     hdrDwBuf[1] = _byteswap_ulong(*(PDWORD)(pbTlp + 4));
     hdrDwBuf[2] = _byteswap_ulong(*(PDWORD)(pbTlp + 8));
@@ -1972,12 +1985,13 @@ VOID DeviceFPGA_Bar_RxTlp(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx,
     rq.bTag = hdrM32->Tag;
     rq.bFirstBE = hdrM32->FirstBE;
     rq.bLastBE = hdrM32->LastBE;
-    rq.f64 = (hdr->TypeFmt == TLP_MRd64) || (hdr->TypeFmt == TLP_MWr64);
-    rq.fRead = (hdr->TypeFmt == TLP_MRd32) || (hdr->TypeFmt == TLP_MRd64);
+    rq.f64 = (hdr->TypeFmt == TLP_MRd64) || (hdr->TypeFmt == TLP_MWr64) || (hdr->TypeFmt == TLP_IOWr);
+    rq.fRead = (hdr->TypeFmt == TLP_MRd32) || (hdr->TypeFmt == TLP_MRd64) || (hdr->TypeFmt == TLP_IORd);
     rq.fReadReply = FALSE;
     rq.fWrite = !rq.fRead;
     // 3: specific TLP type handling:
     switch(hdr->TypeFmt) {
+        case TLP_IORd:
         case TLP_MRd32:
             qwTlpAddr = hdrM32->Address & ~3;
             qwTlpSize = hdr->Length ? (hdr->Length << 2) : 0x1000;
@@ -1987,6 +2001,7 @@ VOID DeviceFPGA_Bar_RxTlp(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx,
             qwTlpAddr = ((QWORD)hdrM64->AddressHigh << 32) + (hdrM64->AddressLow & ~3);
             qwTlpSize = hdr->Length ? (hdr->Length << 2) : 0x1000;
             break;
+        case TLP_IOWr:
         case TLP_MWr32:
             qwTlpAddr = hdrM32->Address & ~3;
             qwTlpSize = hdr->Length ? (hdr->Length << 2) : 0x1000;
@@ -2024,7 +2039,7 @@ VOID DeviceFPGA_Bar_RxTlp(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx,
         ctx->tlp_callback.pfnBarCB(&rq);
     }
     // 6: if read, send reply:
-    if((hdr->TypeFmt == TLP_MRd32) || (hdr->TypeFmt == TLP_MRd64)) {
+    if((hdr->TypeFmt == TLP_MRd32) || (hdr->TypeFmt == TLP_MRd64) || (hdr->TypeFmt == TLP_IORd)) {
         DeviceFPGA_Bar_TxTlp(ctxLC, ctx, hdrM32, &rq);
     }
 }
