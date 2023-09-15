@@ -53,7 +53,6 @@ Please find a summary of the supported hardware based memory acquisition methods
 | [NeTV2/UDP](https://github.com/ufrisk/LeechCore/wiki/Device_RawUDP)            | [FPGA](https://github.com/ufrisk/pcileech-fpga/tree/master/NeTV2)        | UDP   |   7MB/s | Yes | Yes | No  |    |
 | [USB3380-EVB](https://github.com/ufrisk/LeechCore/wiki/Device_USB3380)         | USB3380 | USB3 | 150MB/s | No  | No  | No  |    |
 | [PP3380](https://github.com/ufrisk/LeechCore/wiki/Device_USB3380)              | USB3380 | USB3 | 150MB/s | No  | No  | No  |    |
-| [SP605/TCP](https://github.com/ufrisk/LeechCore/wiki/Device_SP605TCP)          | FPGA    | TCP  | 100kB/s | Yes | Yes | Yes |    |
 | [DMA patched HP iLO](https://github.com/ufrisk/LeechCore/wiki/Device_RawTCP)   | BMC     | TCP  |   1MB/s | Yes | No  | Yes |    |
 
 
@@ -227,4 +226,5 @@ v1.0-1.8
 * Improved handling of PCIe TLP user callback.
 
 Latest:
+* Bug fixes.
 * I/O BAR support.

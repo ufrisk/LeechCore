@@ -2384,7 +2384,11 @@ VOID DeviceFPGA_Async2_Read_RxTlpSingle_MRdCpl(_In_ PLC_CONTEXT ctxLC, _In_ PDEV
         }
         // CplD:
         c = (hdr->Length << 2);
-        o = pTag->oMEM + (hdrC->LowerAddress - (pTag->pMEM->qwA & 0x7f));
+        if(pTag->oMEM) {
+            o = pTag->oMEM + hdrC->LowerAddress;
+        } else {
+            o = hdrC->LowerAddress - (pTag->pMEM->qwA & 0x7f);
+        }
         if(o > 0xfffc) {
             cbAdjust = 0x10000 - o;
             c -= cbAdjust;
@@ -2466,7 +2470,9 @@ DWORD DeviceFPGA_Async2_Read_RxTlpSingle(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CO
                 if(ctxLC->fPrintf[LC_PRINTF_VVV]) {
                     TLP_Print(ctxLC, pbTlp, cdwTlp << 2, FALSE);
                 }
-                ObByteQueue_Push(ctx->tlp_callback.pBqRx, 0, (SIZE_T)cdwTlp << 2, pbTlp);
+                if(ctx->tlp_callback.pBqRx) {
+                    ObByteQueue_Push(ctx->tlp_callback.pBqRx, 0, (SIZE_T)cdwTlp << 2, pbTlp);
+                }
                 DeviceFPGA_Async2_Read_RxTlpSingle_MRdCpl(ctxLC, ctx, pbTlp, cdwTlp << 2);
                 pdwData[iStartWord] = pdwData[iStartWord] | (0xffffffff >> (28 - (j << 2)));
                 return iStartWord;
@@ -2632,7 +2638,7 @@ PFPGA_NEWASYNC2_MEM_CONTEXT DeviceFPGA_Async2_Read_TxTlp(_In_ PLC_CONTEXT ctxLC,
         // Ensure enough tags and byte credits are available:
         if(fPrimary) {
             if(ctx->async2.cbAvailCredits < 0x1000) { break; }
-            if(ctx->fAlgorithmReadTiny) {
+            if(ctx->fAlgorithmReadTiny || (pMEM->cb != 0x1000)) {
                 if(ctx->async2.cAvailTags < 32) { break; }
             } else {
                 if(ctx->async2.cAvailTags == 0) { break; }
