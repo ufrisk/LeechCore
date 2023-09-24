@@ -113,7 +113,7 @@ PCILeech, MemProcFS and LeechCore are open source but not open contribution. PCI
 Links:
 ======
 * Twitter: [![Twitter](https://img.shields.io/twitter/follow/UlfFrisk?label=UlfFrisk&style=social)](https://twitter.com/intent/follow?screen_name=UlfFrisk)
-* Discord: [![Discord | Porchetta Industries](https://img.shields.io/discord/736724457258745996.svg?label=&logo=discord&logoColor=ffffff&color=7389D8&labelColor=6A7EC2)](https://discord.gg/sEkn3aa)
+* Discord: [![Discord | PCILeech/MemProcFS](https://img.shields.io/discord/1155439643395883128.svg?label=&logo=discord&logoColor=ffffff&color=7389D8&labelColor=6A7EC2)](https://discord.gg/BCmfBhDPXX)
 * PCILeech: https://github.com/ufrisk/pcileech
 * PCILeech FPGA: https://github.com/ufrisk/pcileech-fpga
 * LeechCore: https://github.com/ufrisk/LeechCore
