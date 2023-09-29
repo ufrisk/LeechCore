@@ -228,3 +228,4 @@ v1.0-1.8
 Latest:
 * Bug fixes.
 * I/O BAR support.
+* Linux PCIe FPGA performance improvements.
