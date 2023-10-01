@@ -229,3 +229,4 @@ Latest:
 * Bug fixes.
 * I/O BAR support.
 * Linux PCIe FPGA performance improvements.
+* Linux PCIe FPGA multiple devices (devindex) supported.
