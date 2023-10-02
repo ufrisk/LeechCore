@@ -39,7 +39,7 @@ leechcorepyc = Extension(
 
 setup(
     name='leechcorepyc',
-    version='2.16.4', # VERSION_END
+    version='2.16.5', # VERSION_END
     description='LeechCore for Python',
     long_description='LeechCore for Python : native extension for physical memory access',
     url='https://github.com/ufrisk/LeechCore',
@@ -76,6 +76,7 @@ EOF
 cat << 'EOF' > pkg_linux/MANIFEST.in
 
 include Makefile
+include leechcorepyc.h
 include oscompatibility.h
 include includes/*.h
 graft files
