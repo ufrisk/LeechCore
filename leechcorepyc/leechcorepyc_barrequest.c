@@ -161,7 +161,8 @@ static void
 LcPy_BarRequest_dealloc(PyObj_BarRequest *self)
 {
     self->fValid = FALSE;
-    Py_XDECREF(self->pyLC); self->pyLC = NULL;
+    Py_XDECREF(self->pyLC);
+    PyObject_Del(self);
 }
 
 _Success_(return)
