@@ -23,6 +23,9 @@
 
 #ifndef __LEECHCORE_DEVICE_H__
 #define __LEECHCORE_DEVICE_H__
+#ifdef __cplusplus
+extern "C" {
+#endif /* __cplusplus */
 #include <stdio.h>
 #include "leechcore.h"
 
@@ -171,4 +174,7 @@ EXPORTED_FUNCTION BOOL LcMemMap_AddRange(_In_ PLC_CONTEXT ctxLC, _In_ QWORD pa, 
 _Success_(return != 0)
 EXPORTED_FUNCTION QWORD LcMemMap_GetMaxAddress(_In_ PLC_CONTEXT ctxLC);
 
+#ifdef __cplusplus
+}
+#endif /* __cplusplus */
 #endif /* __LEECHCORE_DEVICE_H__ */

@@ -201,11 +201,47 @@ EXPORTED_FUNCTION QWORD LcDeviceParameterGetNumeric(_In_ PLC_CONTEXT ctxLC, _In_
 /*
 * Create helper function to fetch the correct device (and its create function).
 * -- ctxLC
+* -- cszDevice
+* -- szDeviceAlt
+* -- return
+*/
+_Success_(return)
+BOOL LcCreate_FetchDevice_FromExternalModule(_Inout_ PLC_CONTEXT ctx, _In_opt_ DWORD cszDevice, _In_opt_ LPSTR szDeviceAlt)
+{
+    CHAR szModule[2 * MAX_PATH] = { 0 };
+    Util_GetPathLib(szModule);
+    strcat_s(szModule, sizeof(szModule), "leechcore_device_");
+    if(szDeviceAlt) {
+        strcat_s(szModule, sizeof(szModule), szDeviceAlt);
+    } else {
+        strncat_s(szModule, sizeof(szModule), ctx->Config.szDevice, cszDevice);
+    }
+    strcat_s(szModule, sizeof(szModule), LC_LIBRARY_FILETYPE);
+    if((ctx->hDeviceModule = LoadLibraryA(szModule))) {
+        if((ctx->pfnCreate = (BOOL(*)(PLC_CONTEXT, PPLC_CONFIG_ERRORINFO))GetProcAddress(ctx->hDeviceModule, "LcPluginCreate"))) {
+            if(szDeviceAlt) {
+                strcpy_s(ctx->Config.szDeviceName, sizeof(ctx->Config.szDeviceName), szDeviceAlt);
+            } else {
+                strncpy_s(ctx->Config.szDeviceName, sizeof(ctx->Config.szDeviceName), ctx->Config.szDevice, cszDevice);
+            }
+            return TRUE;
+        } else {
+            FreeLibrary(ctx->hDeviceModule);
+            ctx->hDeviceModule = NULL;
+        }
+    }
+    return FALSE;
+}
+
+/*
+* Create helper function to fetch the correct device (and its create function).
+* -- ctxLC
 */
 VOID LcCreate_FetchDevice(_Inout_ PLC_CONTEXT ctx)
 {
-    CHAR c, szModule[2 * MAX_PATH] = { 0 };
-    DWORD cszDevice = 0;
+    CHAR c;
+    DWORD cch, cszDevice = 0;
+    LPSTR szDeviceSpecial = NULL;
     // 1: check against built-in devices:
     if(0 == _strnicmp("rpc://", ctx->Config.szRemote, 6)) {
         strncpy_s(ctx->Config.szDeviceName, sizeof(ctx->Config.szDeviceName), "rpc", _TRUNCATE);
@@ -248,7 +284,7 @@ VOID LcCreate_FetchDevice(_Inout_ PLC_CONTEXT ctx)
         ctx->pfnCreate = DeviceVMM_Open;
         return;
     }
-    if(0 == _strnicmp("vmware", ctx->Config.szDevice, 4)) {
+    if(0 == _strnicmp("vmware", ctx->Config.szDevice, 6)) {
         strncpy_s(ctx->Config.szDeviceName, sizeof(ctx->Config.szDeviceName), "vmware", _TRUNCATE);
         ctx->pfnCreate = DeviceVMWare_Open;
         return;
@@ -263,23 +299,19 @@ VOID LcCreate_FetchDevice(_Inout_ PLC_CONTEXT ctx)
             break;
         }
     }
-    // 2.2: try load module:
-    if(cszDevice && (cszDevice < 16)) {
-        Util_GetPathLib(szModule);
-        strcat_s(szModule, sizeof(szModule), "leechcore_device_");
-        strncat_s(szModule, sizeof(szModule), ctx->Config.szDevice, cszDevice);
-        strcat_s(szModule, sizeof(szModule), LC_LIBRARY_FILETYPE);
-        if((ctx->hDeviceModule = LoadLibraryA(szModule))) {
-            if((ctx->pfnCreate = (BOOL(*)(PLC_CONTEXT, PPLC_CONFIG_ERRORINFO))GetProcAddress(ctx->hDeviceModule, "LcPluginCreate"))) {
-                strncpy_s(ctx->Config.szDeviceName, sizeof(ctx->Config.szDeviceName), ctx->Config.szDevice, cszDevice);
-                return;
-            } else {
-                FreeLibrary(ctx->hDeviceModule);
-                ctx->hDeviceModule = NULL;
-            }
-        }
+    if(cszDevice && (cszDevice < 16) && LcCreate_FetchDevice_FromExternalModule(ctx, cszDevice, NULL)) {
+        return;
     }
-    // 3: assume file is to be opened if no match for device name is found:
+    // 2.2: try special case modules:
+    cch = (DWORD)strlen(ctx->Config.szDevice);
+    // hyper-v saved state (.vmrs) file:
+    if((cch > 5) && (0 == _strnicmp(".vmrs", ctx->Config.szDevice + cch - 5, 5))) {
+        szDeviceSpecial = "hvsavedstate";
+    }
+    if(szDeviceSpecial && LcCreate_FetchDevice_FromExternalModule(ctx, 0, szDeviceSpecial)) {
+        return;
+    }
+    // 2.3: assume file is to be opened if no match for device name is found:
     strncpy_s(ctx->Config.szDeviceName, sizeof(ctx->Config.szDeviceName), "file", _TRUNCATE);
     ctx->pfnCreate = DeviceFile_Open;
 }
@@ -338,16 +370,18 @@ VOID LcCreate_MemMapInitAddressDetect(_Inout_ PLC_CONTEXT ctxLC)
     fFPGA = (0 == _stricmp("fpga", ctxLC->Config.szDeviceName));
     while(cbChunk > 0x1000) {
         cbChunk = cbChunk >> 4;
-        if(fFPGA && (cbChunk == 0x1000)) {
-            // detect need for "tiny" PCIe algorithm of 128 bytes TLP.
-            ppMEMs[ADDRDETECT_MAX]->qwA = paCurrent;
-            fCheckTiny = TRUE;
-        }
         for(i = 0; i < ADDRDETECT_MAX; i++) {
             ppMEMs[i]->qwA = paCurrent + i * cbChunk;
             ppMEMs[i]->f = FALSE;
         }
-        LcReadScatter(ctxLC, ADDRDETECT_MAX + (fCheckTiny ? 0 : 1), ppMEMs);
+        if(fFPGA && (cbChunk == 0x1000)) {
+            // detect need for "tiny" PCIe algorithm of 128 bytes TLP.
+            ppMEMs[ADDRDETECT_MAX]->qwA = paCurrent;
+            fCheckTiny = TRUE;
+            LcReadScatter(ctxLC, ADDRDETECT_MAX + 1, ppMEMs);
+        } else {
+            LcReadScatter(ctxLC, ADDRDETECT_MAX, ppMEMs);
+        }
         for(i = 0; i < ADDRDETECT_MAX; i++) {
             if(ppMEMs[i]->f) {
                 paCurrent = ppMEMs[i]->qwA;
@@ -462,6 +496,7 @@ EXPORTED_FUNCTION VOID LcMemFree(_Frees_ptr_opt_ PVOID pv)
 /*
 * Allocate and pre-initialize empty MEMs including a 0x1000 buffer for each
 * pMEM. The result should be freed by LcFree when its no longer needed.
+* The 0x1000-sized per-MEM memory buffers are contigious between MEMs in order.
 * -- cMEMs
 * -- pppMEMs = pointer to receive ppMEMs
 * -- return

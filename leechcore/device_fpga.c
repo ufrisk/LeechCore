@@ -2433,7 +2433,7 @@ free_tag:
 * -- ctx
 * -- cdwData = number of DWORDs in FPGA data pdwData
 * -- pdwData = FPGA data
-* -- return = the number of DWORDs successfully consumed.
+* -- return = success: the number of DWORDs successfully consumed, fail: -1.
 */
 DWORD DeviceFPGA_Async2_Read_RxTlpSingle(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx, _In_ DWORD cdwData, _In_ PDWORD pdwData)
 {
@@ -2480,7 +2480,7 @@ DWORD DeviceFPGA_Async2_Read_RxTlpSingle(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CO
             dwStatus >>= 4;
         }
     }
-    return 0;
+    return (DWORD)-1;
 }
 
 BOOL DeviceFPGA_Async2_Read_RxTlpFromBuffer(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx)
@@ -2489,7 +2489,7 @@ BOOL DeviceFPGA_Async2_Read_RxTlpFromBuffer(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE
     DWORD cdwTlpDataConsumed;
     while(ctx->rxbuf.o + 32 <= ctx->rxbuf.cb) {
         cdwTlpDataConsumed = DeviceFPGA_Async2_Read_RxTlpSingle(ctxLC, ctx, (ctx->rxbuf.cb - ctx->rxbuf.o) >> 2, (PDWORD)(ctx->rxbuf.pb + ctx->rxbuf.o));
-        if(!cdwTlpDataConsumed) {
+        if(cdwTlpDataConsumed == (DWORD)-1) {
             break;
         }
         ctx->rxbuf.o += cdwTlpDataConsumed << 2;
