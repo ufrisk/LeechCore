@@ -6,7 +6,7 @@
 //     - RawUDP protocol - access FPGA over raw UDP packet stream (NeTV2 ETH)
 //     - FT2232H/FT245 protocol - access FPGA via FT2232H USB2 instead of FT601 USB3.
 //
-// (c) Ulf Frisk, 2017-2023
+// (c) Ulf Frisk, 2017-2024
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include "leechcore.h"
@@ -32,8 +32,10 @@
 
 #ifdef _WIN32
 #define DEVICE_FPGA_FT601_LIBRARY          "FTD3XX.dll"
+#define DEVICE_FPGA_DRIVER_LIBRARY         "leechcore_driver.dll"
 #else
 #define DEVICE_FPGA_FT601_LIBRARY          "leechcore_ft601_driver_linux.so"
+#define DEVICE_FPGA_DRIVER_LIBRARY         "leechcore_driver.so"
 #endif /* _WIN32 */
 
 #define ENDIAN_SWAP_DWORD(x)    (x = (x << 24) | ((x >> 8) & 0xff00) | ((x << 8) & 0xff0000) | (x >> 24))
@@ -70,7 +72,9 @@ typedef struct tdDEV_CFG_PHY {
     } rd;
 } DEV_CFG_PHY, *PDEV_CFG_PHY;
 
+#define DEVICE_PERFORMANCE_VERSION          1
 typedef struct tdDEVICE_PERFORMANCE {
+    DWORD VERSION;
     LPSTR SZ_DEVICE_NAME;
     DWORD PROBE_MAXPAGES;     // 0x400
     DWORD RX_FLUSH_LIMIT;
@@ -82,6 +86,9 @@ typedef struct tdDEVICE_PERFORMANCE {
     DWORD DELAY_READ;
     DWORD RETRY_ON_ERROR;
     DWORD F_TINY;
+    DWORD ASYNC_MAX_READSIZE;
+    DWORD ASYNC_DELAY_1;
+    DWORD ASYNC_DELAY_2;
 } DEVICE_PERFORMANCE, *PDEVICE_PERFORMANCE;
 
 typedef union tdFPGA_HANDLESOCKET {
@@ -106,27 +113,43 @@ typedef union tdFPGA_HANDLESOCKET {
 #define DEVICE_ID_DEVICE14T                     0x0E
 #define DEVICE_ID_DEVICE15N                     0x0F
 #define DEVICE_ID_DEVICE16T                     0x10
-#define DEVICE_ID_MAX                           0x10
+#define DEVICE_ID_DRIVER_SUPPLIED_0             0x11
+#define DEVICE_ID_DRIVER_SUPPLIED_1             0x12
+#define DEVICE_ID_DRIVER_SUPPLIED_2             0x13
+#define DEVICE_ID_DRIVER_SUPPLIED_3             0x14
+#define DEVICE_ID_DRIVER_SUPPLIED_4             0x15
+#define DEVICE_ID_DRIVER_SUPPLIED_5             0x16
+#define DEVICE_ID_DRIVER_SUPPLIED_6             0x17
+#define DEVICE_ID_DRIVER_SUPPLIED_7             0x18
+#define DEVICE_ID_MAX                           0x18
 
 const DEVICE_PERFORMANCE PERFORMANCE_PROFILES[DEVICE_ID_MAX + 1] = {
-    { .SZ_DEVICE_NAME = "SP605 / FT601",         .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0x8000, .MAX_SIZE_RX = 0x1f000, .MAX_SIZE_TX = 0x2000, .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 175, .DELAY_READ = 400, .RETRY_ON_ERROR = 0, .F_TINY = 0 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "SP605 / FT601",         .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0x8000, .MAX_SIZE_RX = 0x1f000, .MAX_SIZE_TX = 0x2000, .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 175, .DELAY_READ = 400, .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5 },
     // The PCIeScreamer R1 have a problem with the PCIe link stability which results on lost or delayed TLPS - workarounds are in place to retry after a delay.
-    { .SZ_DEVICE_NAME = "PCIeScreamer R1",       .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x1c000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 1000, .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 0,   .DELAY_READ = 500, .RETRY_ON_ERROR = 1, .F_TINY = 0 },
-    { .SZ_DEVICE_NAME = "AC701 / FT601",         .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x1c000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0,   .DELAY_READ = 300, .RETRY_ON_ERROR = 1, .F_TINY = 0 },
-    { .SZ_DEVICE_NAME = "PCIeScreamer R2",       .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x1c000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 750,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 0,   .DELAY_READ = 400, .RETRY_ON_ERROR = 1, .F_TINY = 0 },
-    { .SZ_DEVICE_NAME = "ScreamerM2",            .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x1c000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 25,  .DELAY_READ = 300, .RETRY_ON_ERROR = 1, .F_TINY = 0 },
-    { .SZ_DEVICE_NAME = "NeTV2 RawUDP",          .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x1c000, .MAX_SIZE_TX = 0x400,  .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0,   .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0 },
-    { .SZ_DEVICE_NAME = "Unsupported",           .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x14000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 35,  .DELAY_READ = 350, .RETRY_ON_ERROR = 1, .F_TINY = 0 },
-    { .SZ_DEVICE_NAME = "Unsupported",           .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x14000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 35,  .DELAY_READ = 350, .RETRY_ON_ERROR = 1, .F_TINY = 0 },
-    { .SZ_DEVICE_NAME = "FT2232H #1",            .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x30000, .MAX_SIZE_TX = 0x8000, .DELAY_PROBE_READ = 1000, .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 0,   .DELAY_READ = 0,   .RETRY_ON_ERROR = 1, .F_TINY = 0 },
-    { .SZ_DEVICE_NAME = "Enigma X1",             .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x3c000, .MAX_SIZE_TX = 0x13f0, .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 10,  .DELAY_READ = 250, .RETRY_ON_ERROR = 1, .F_TINY = 0 },
-    { .SZ_DEVICE_NAME = "Enigma X1 (FutureUse)", .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x30000, .MAX_SIZE_TX = 0x13f0, .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 10,  .DELAY_READ = 250, .RETRY_ON_ERROR = 1, .F_TINY = 0 },
-    { .SZ_DEVICE_NAME = "ScreamerM2x4",          .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x14000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 25,  .DELAY_READ = 300, .RETRY_ON_ERROR = 1, .F_TINY = 0 },
-    { .SZ_DEVICE_NAME = "PCIeSquirrel",          .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x1c000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 25,  .DELAY_READ = 300, .RETRY_ON_ERROR = 1, .F_TINY = 0 },
-    { .SZ_DEVICE_NAME = "Device #13N",           .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x14000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 35,  .DELAY_READ = 350, .RETRY_ON_ERROR = 1, .F_TINY = 0 },
-    { .SZ_DEVICE_NAME = "Device #14T",           .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x14000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 35,  .DELAY_READ = 350, .RETRY_ON_ERROR = 1, .F_TINY = 1 },
-    { .SZ_DEVICE_NAME = "Device #15N",           .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x30000, .MAX_SIZE_TX = 0x13f0, .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 15,  .DELAY_READ = 300, .RETRY_ON_ERROR = 1, .F_TINY = 0 },
-    { .SZ_DEVICE_NAME = "Device #16T",           .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x30000, .MAX_SIZE_TX = 0x13f0, .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 15,  .DELAY_READ = 300, .RETRY_ON_ERROR = 1, .F_TINY = 1 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "PCIeScreamer R1",       .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x1c000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 1000, .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 0,   .DELAY_READ = 500, .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "AC701 / FT601",         .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x1c000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0,   .DELAY_READ = 300, .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "PCIeScreamer R2",       .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x1c000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 750,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 0,   .DELAY_READ = 400, .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "ScreamerM2",            .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x1c000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 25,  .DELAY_READ = 300, .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "NeTV2 RawUDP",          .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x1c000, .MAX_SIZE_TX = 0x400,  .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0,   .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "Unsupported",           .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x14000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 35,  .DELAY_READ = 350, .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "Unsupported",           .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x14000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 35,  .DELAY_READ = 350, .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "FT2232H #1",            .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x30000, .MAX_SIZE_TX = 0x8000, .DELAY_PROBE_READ = 1000, .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 0,   .DELAY_READ = 0,   .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "Enigma X1",             .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x3c000, .MAX_SIZE_TX = 0x13f0, .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 10,  .DELAY_READ = 250, .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "Enigma X1 (FutureUse)", .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x30000, .MAX_SIZE_TX = 0x13f0, .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 10,  .DELAY_READ = 250, .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "ScreamerM2x4",          .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x14000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 25,  .DELAY_READ = 300, .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "PCIeSquirrel",          .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x1c000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 25,  .DELAY_READ = 300, .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "Device #13N",           .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x14000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 35,  .DELAY_READ = 350, .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "Device #14T",           .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x14000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 35,  .DELAY_READ = 350, .RETRY_ON_ERROR = 1, .F_TINY = 1, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "Device #15N",           .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x30000, .MAX_SIZE_TX = 0x13f0, .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 15,  .DELAY_READ = 300, .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "Device #16T",           .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x30000, .MAX_SIZE_TX = 0x13f0, .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 15,  .DELAY_READ = 300, .RETRY_ON_ERROR = 1, .F_TINY = 1, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "DRIVER_SUPPLIED",       .PROBE_MAXPAGES = 0,     .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0,       .MAX_SIZE_TX = 0,      .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0 ,  .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0,       .ASYNC_DELAY_1 = 0, .ASYNC_DELAY_2 = 0 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "DRIVER_SUPPLIED",       .PROBE_MAXPAGES = 0,     .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0,       .MAX_SIZE_TX = 0,      .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0 ,  .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0,       .ASYNC_DELAY_1 = 0, .ASYNC_DELAY_2 = 0 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "DRIVER_SUPPLIED",       .PROBE_MAXPAGES = 0,     .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0,       .MAX_SIZE_TX = 0,      .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0 ,  .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0,       .ASYNC_DELAY_1 = 0, .ASYNC_DELAY_2 = 0 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "DRIVER_SUPPLIED",       .PROBE_MAXPAGES = 0,     .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0,       .MAX_SIZE_TX = 0,      .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0 ,  .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0,       .ASYNC_DELAY_1 = 0, .ASYNC_DELAY_2 = 0 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "DRIVER_SUPPLIED",       .PROBE_MAXPAGES = 0,     .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0,       .MAX_SIZE_TX = 0,      .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0 ,  .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0,       .ASYNC_DELAY_1 = 0, .ASYNC_DELAY_2 = 0 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "DRIVER_SUPPLIED",       .PROBE_MAXPAGES = 0,     .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0,       .MAX_SIZE_TX = 0,      .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0 ,  .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0,       .ASYNC_DELAY_1 = 0, .ASYNC_DELAY_2 = 0 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "DRIVER_SUPPLIED",       .PROBE_MAXPAGES = 0,     .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0,       .MAX_SIZE_TX = 0,      .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0 ,  .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0,       .ASYNC_DELAY_1 = 0, .ASYNC_DELAY_2 = 0 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "DRIVER_SUPPLIED",       .PROBE_MAXPAGES = 0,     .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0,       .MAX_SIZE_TX = 0,      .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0 ,  .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0,       .ASYNC_DELAY_1 = 0, .ASYNC_DELAY_2 = 0 },
 };
 
 /*
@@ -176,6 +199,16 @@ typedef struct tdFPGA_NEWASYNC2_CONTEXT {
     FPGA_NEWASYNC2_TAG_ENTRY Tags[0x100];
 } FPGA_NEWASYNC2_CONTEXT, *PFPGA_NEWASYNC2_CONTEXT;
 
+typedef ULONG(WINAPI *PFN_LcSetPerformanceProfile)(PDEVICE_PERFORMANCE pDP, ULONG version, ULONG dwDeviceId);
+typedef ULONG(WINAPI *PFN_FT_Create)(PVOID pvArg, DWORD dwFlags, HANDLE *pftHandle);
+typedef ULONG(WINAPI *PFN_FT_Close)(HANDLE ftHandle);
+typedef ULONG(WINAPI *PFN_FT_WritePipe)(HANDLE ftHandle, UCHAR ucPipeID, PUCHAR pucBuffer, ULONG ulBufferLength, PULONG pulBytesTransferred, LPOVERLAPPED pOverlapped);
+typedef ULONG(WINAPI *PFN_FT_ReadPipe)(HANDLE ftHandle, UCHAR ucPipeID, PUCHAR pucBuffer, ULONG ulBufferLength, PULONG pulBytesTransferred, LPOVERLAPPED pOverlapped);
+typedef ULONG(WINAPI *PFN_FT_AbortPipe)(HANDLE ftHandle, UCHAR ucPipeID);
+typedef ULONG(WINAPI *PFN_FT_GetOverlappedResult)(HANDLE ftHandle, LPOVERLAPPED pOverlapped, PULONG pulLengthTransferred, BOOL bWait);
+typedef ULONG(WINAPI *PFN_FT_InitializeOverlapped)(HANDLE ftHandle, LPOVERLAPPED pOverlapped);
+typedef ULONG(WINAPI *PFN_FT_ReleaseOverlapped)(HANDLE ftHandle, LPOVERLAPPED pOverlapped);
+
 typedef struct tdDEVICE_CONTEXT_FPGA {
     CRITICAL_SECTION Lock;
     WORD wDeviceId;
@@ -207,48 +240,15 @@ typedef struct tdDEVICE_CONTEXT_FPGA {
             HANDLE hFTDI;
             SOCKET SocketUDP;
         };
-        ULONG(WINAPI *pfnFT_Create)(
-            PVOID pvArg,
-            DWORD dwFlags,
-            HANDLE *pftHandle
-            );
-        ULONG(WINAPI *pfnFT_Close)(
-            HANDLE ftHandle
-            );
-        ULONG(WINAPI *pfnFT_WritePipe)(
-            HANDLE ftHandle,
-            UCHAR ucPipeID,
-            PUCHAR pucBuffer,
-            ULONG ulBufferLength,
-            PULONG pulBytesTransferred,
-            LPOVERLAPPED pOverlapped
-            );
-        ULONG(WINAPI *pfnFT_ReadPipe)(
-            HANDLE ftHandle,
-            UCHAR ucPipeID,
-            PUCHAR pucBuffer,
-            ULONG ulBufferLength,
-            PULONG pulBytesTransferred,
-            LPOVERLAPPED pOverlapped
-            );
-        ULONG(WINAPI *pfnFT_AbortPipe)(
-            HANDLE ftHandle,
-            UCHAR ucPipeID
-            );
-        ULONG(WINAPI *pfnFT_GetOverlappedResult)(
-            HANDLE ftHandle,
-            LPOVERLAPPED pOverlapped,
-            PULONG pulLengthTransferred,
-            BOOL bWait
-            );
-        ULONG(WINAPI *pfnFT_InitializeOverlapped)(
-            HANDLE ftHandle,
-            LPOVERLAPPED pOverlapped
-            );
-        ULONG(WINAPI *pfnFT_ReleaseOverlapped)(
-            HANDLE ftHandle,
-            LPOVERLAPPED pOverlapped
-        );
+        PFN_LcSetPerformanceProfile pfnLcSetPerformanceProfile;
+        PFN_FT_Create pfnFT_Create;
+        PFN_FT_Close pfnFT_Close;
+        PFN_FT_WritePipe pfnFT_WritePipe;
+        PFN_FT_ReadPipe pfnFT_ReadPipe;
+        PFN_FT_AbortPipe pfnFT_AbortPipe;
+        PFN_FT_GetOverlappedResult pfnFT_GetOverlappedResult;
+        PFN_FT_InitializeOverlapped pfnFT_InitializeOverlapped;
+        PFN_FT_ReleaseOverlapped pfnFT_ReleaseOverlapped;
     } dev;
     FPGA_NEWASYNC2_CONTEXT async2;
     PVOID pMRdBufferX; // NULL || PTLP_CALLBACK_BUF_MRd || PTLP_CALLBACK_BUF_MRd_2
@@ -268,6 +268,8 @@ typedef struct tdDEVICE_CONTEXT_FPGA {
         BOOL fBarInit;
         LC_BAR Bar[6];
     } tlp_callback;
+    BOOL fFT601;
+    BOOL fCustomDriver;
 } DEVICE_CONTEXT_FPGA, *PDEVICE_CONTEXT_FPGA;
 
 // STRUCT FROM FTD3XX.h
@@ -781,7 +783,7 @@ VOID DeviceFPGA_Initialize_LinuxMultiHandle_LockRelease(_In_ QWORD qwDeviceIndex
 }
 
 
-LPSTR DeviceFPGA_InitializeFT601(_In_ PDEVICE_CONTEXT_FPGA ctx)
+LPSTR DeviceFPGA_InitializeFT601(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ BOOL fFT601, _In_ BOOL fCustomDriver)
 {
     LPSTR szErrorReason;
     CHAR c, szModuleFTDI[MAX_PATH + 1] = { 0 };
@@ -794,96 +796,113 @@ LPSTR DeviceFPGA_InitializeFT601(_In_ PDEVICE_CONTEXT_FPGA ctx)
         szErrorReason = "FPGA linux handle already open";
         goto fail;
     }
-    // Load FTDI Library
-    ctx->dev.hModule = LoadLibraryA(DEVICE_FPGA_FT601_LIBRARY);
-    if(!ctx->dev.hModule) {
-        Util_GetPathLib(szModuleFTDI);
-        strcat_s(szModuleFTDI, sizeof(szModuleFTDI) - 1, DEVICE_FPGA_FT601_LIBRARY);
-        ctx->dev.hModule = LoadLibraryA(szModuleFTDI);
+    // Load CUSTOM DRIVER LIBRARY & Try Initialize:
+    if(fCustomDriver) {
+        if(!ctx->dev.hModule) { ctx->dev.hModule = LoadLibraryA(DEVICE_FPGA_DRIVER_LIBRARY); }
+        if(!ctx->dev.hModule) {
+            Util_GetPathLib(szModuleFTDI);
+            strcat_s(szModuleFTDI, sizeof(szModuleFTDI) - 1, DEVICE_FPGA_DRIVER_LIBRARY);
+            ctx->dev.hModule = LoadLibraryA(szModuleFTDI);
+        }
+        if(ctx->dev.hModule) {
+            ctx->dev.pfnFT_Close = (PFN_FT_Close)GetProcAddress(ctx->dev.hModule, "FT_Close");
+            ctx->dev.pfnFT_Create = (PFN_FT_Create)GetProcAddress(ctx->dev.hModule, "FT_Create");
+            ctx->dev.pfnLcSetPerformanceProfile = (PFN_LcSetPerformanceProfile)GetProcAddress(ctx->dev.hModule, "LcSetPerformanceProfile");
+            if(ctx->dev.pfnFT_Create && ctx->dev.pfnFT_Close && (0 == ctx->dev.pfnFT_Create((PVOID)ctx->qwDeviceIndex, 0x10, &ctx->dev.hFTDI))) {
+                ctx->fCustomDriver = TRUE;
+                fFT601 = FALSE;
+            } else {
+                FreeLibrary(ctx->dev.hModule);
+                ctx->dev.hModule = NULL;
+                fCustomDriver = FALSE;
+            }
+        }
+    }
+    // Load FTDI Library:
+    if(fFT601) {
+        if(!ctx->dev.hModule) { ctx->dev.hModule = LoadLibraryA(DEVICE_FPGA_FT601_LIBRARY); }
+        if(!ctx->dev.hModule) {
+            Util_GetPathLib(szModuleFTDI);
+            strcat_s(szModuleFTDI, sizeof(szModuleFTDI) - 1, DEVICE_FPGA_FT601_LIBRARY);
+            ctx->dev.hModule = LoadLibraryA(szModuleFTDI);
+        }
+        ctx->fFT601 = ctx->dev.hModule ? TRUE : FALSE;
     }
     if(!ctx->dev.hModule) {
-        szErrorReason = "Unable to load "DEVICE_FPGA_FT601_LIBRARY;
+        szErrorReason = "Unable to load '"DEVICE_FPGA_FT601_LIBRARY"' or '"DEVICE_FPGA_DRIVER_LIBRARY"'";
         goto fail;
     }
-    ctx->dev.pfnFT_AbortPipe = (ULONG(WINAPI*)(HANDLE, UCHAR))
-        GetProcAddress(ctx->dev.hModule, "FT_AbortPipe");
-    ctx->dev.pfnFT_Create = (ULONG(WINAPI*)(PVOID, DWORD, HANDLE*))
-        GetProcAddress(ctx->dev.hModule, "FT_Create");
-    ctx->dev.pfnFT_Close = (ULONG(WINAPI*)(HANDLE))
-        GetProcAddress(ctx->dev.hModule, "FT_Close");
-    ctx->dev.pfnFT_ReadPipe = (ULONG(WINAPI*)(HANDLE, UCHAR, PUCHAR, ULONG, PULONG, LPOVERLAPPED))
-        GetProcAddress(ctx->dev.hModule, "FT_ReadPipeEx");
+    ctx->dev.pfnFT_AbortPipe = (PFN_FT_AbortPipe)GetProcAddress(ctx->dev.hModule, "FT_AbortPipe");
+    ctx->dev.pfnFT_Create = (PFN_FT_Create)GetProcAddress(ctx->dev.hModule, "FT_Create");
+    ctx->dev.pfnFT_Close = (PFN_FT_Close)GetProcAddress(ctx->dev.hModule, "FT_Close");
+    ctx->dev.pfnFT_ReadPipe = (PFN_FT_ReadPipe)GetProcAddress(ctx->dev.hModule, "FT_ReadPipeEx");
     if(!ctx->dev.pfnFT_ReadPipe) {
-        ctx->dev.pfnFT_ReadPipe = (ULONG(WINAPI*)(HANDLE, UCHAR, PUCHAR, ULONG, PULONG, LPOVERLAPPED))
-            GetProcAddress(ctx->dev.hModule, "FT_ReadPipe");
+        ctx->dev.pfnFT_ReadPipe = (PFN_FT_ReadPipe)GetProcAddress(ctx->dev.hModule, "FT_ReadPipe");
     }
-    ctx->dev.pfnFT_WritePipe = (ULONG(WINAPI*)(HANDLE, UCHAR, PUCHAR, ULONG, PULONG, LPOVERLAPPED))
-        GetProcAddress(ctx->dev.hModule, "FT_WritePipeEx");
+    ctx->dev.pfnFT_WritePipe = (PFN_FT_WritePipe)GetProcAddress(ctx->dev.hModule, "FT_WritePipeEx");
     if(!ctx->dev.pfnFT_WritePipe) {
-        ctx->dev.pfnFT_WritePipe = (ULONG(WINAPI*)(HANDLE, UCHAR, PUCHAR, ULONG, PULONG, LPOVERLAPPED))
-            GetProcAddress(ctx->dev.hModule, "FT_WritePipe");
+        ctx->dev.pfnFT_WritePipe = (PFN_FT_WritePipe)GetProcAddress(ctx->dev.hModule, "FT_WritePipe");
     }
-    ctx->dev.pfnFT_GetOverlappedResult = (ULONG(WINAPI*)(HANDLE, LPOVERLAPPED, PULONG, BOOL))
-        GetProcAddress(ctx->dev.hModule, "FT_GetOverlappedResult");
-    ctx->dev.pfnFT_InitializeOverlapped = (ULONG(WINAPI*)(HANDLE, LPOVERLAPPED))
-        GetProcAddress(ctx->dev.hModule, "FT_InitializeOverlapped");
-    ctx->dev.pfnFT_ReleaseOverlapped = (ULONG(WINAPI*)(HANDLE, LPOVERLAPPED))
-        GetProcAddress(ctx->dev.hModule, "FT_ReleaseOverlapped");
+    ctx->dev.pfnFT_GetOverlappedResult = (PFN_FT_GetOverlappedResult)GetProcAddress(ctx->dev.hModule, "FT_GetOverlappedResult");
+    ctx->dev.pfnFT_InitializeOverlapped = (PFN_FT_InitializeOverlapped)GetProcAddress(ctx->dev.hModule, "FT_InitializeOverlapped");
+    ctx->dev.pfnFT_ReleaseOverlapped = (PFN_FT_ReleaseOverlapped)GetProcAddress(ctx->dev.hModule, "FT_ReleaseOverlapped");
     pfnFT_GetChipConfiguration = (ULONG(WINAPI*)(HANDLE, PVOID))GetProcAddress(ctx->dev.hModule, "FT_GetChipConfiguration");
     pfnFT_SetChipConfiguration = (ULONG(WINAPI*)(HANDLE, PVOID))GetProcAddress(ctx->dev.hModule, "FT_SetChipConfiguration");
     pfnFT_SetSuspendTimeout = (ULONG(WINAPI*)(HANDLE, ULONG))GetProcAddress(ctx->dev.hModule, "FT_SetSuspendTimeout");
     if(!ctx->dev.pfnFT_Create || !ctx->dev.pfnFT_ReadPipe || !ctx->dev.pfnFT_WritePipe) {
         szErrorReason = ctx->dev.pfnFT_ReadPipe ?
-            "Unable to retrieve required functions from FTD3XX.dll" :
+            "Unable to retrieve required functions from device driver dll/so." :
             "Unable to retrieve required functions from FTD3XX.dll v1.3.0.4 or later";
         goto fail;
     }
     // Open FTDI
-    status = ctx->dev.pfnFT_Create((PVOID)ctx->qwDeviceIndex, 0x10 /*FT_OPEN_BY_INDEX*/, &ctx->dev.hFTDI);
-    if(status || !ctx->dev.hFTDI) {
-        szErrorReason = "Unable to connect to USB/FT601 device";
-        goto fail;
-    }
-    ctx->dev.pfnFT_AbortPipe(ctx->dev.hFTDI, 0x02);
-    ctx->dev.pfnFT_AbortPipe(ctx->dev.hFTDI, 0x82);
-    pfnFT_SetSuspendTimeout(ctx->dev.hFTDI, 0);
-    // Check FTDI chip configuration and update if required
-    status = pfnFT_GetChipConfiguration(ctx->dev.hFTDI, &oCfgOld);
-    if(status) {
-        szErrorReason = "Unable to retrieve device configuration";
-        goto fail;
-    }
-    memcpy(&oCfgNew, &oCfgOld, sizeof(FT_60XCONFIGURATION));
-    oCfgNew.FIFOMode = 0; // FIFO MODE FT245
-    oCfgNew.ChannelConfig = 2; // 1 CHANNEL ONLY
-    oCfgNew.OptionalFeatureSupport = 0;
-    if(memcmp(&oCfgNew, &oCfgOld, sizeof(FT_60XCONFIGURATION))) {
-        printf(
-            "IMPORTANT NOTE! FTDI FT601 USB CONFIGURATION DIFFERS FROM RECOMMENDED\n" \
-            "PLEASE ENSURE THAT ONLY PCILEECH FPGA FTDI FT601 DEVICE IS CONNECED  \n" \
-            "BEFORE UPDATING CONFIGURATION. DO YOU WISH TO CONTINUE Y/N?          \n"
-        );
-        while(TRUE) {
-            c = (CHAR)getchar();
-            if(c == 'Y' || c == 'y') { break; }
-            if(c == 'N' || c == 'n') {
-                szErrorReason = "User abort required device configuration";
-                goto fail;
-            }
-
-        }
-        status = pfnFT_SetChipConfiguration(ctx->dev.hFTDI, &oCfgNew);
-        if(status) {
-            szErrorReason = "Unable to set required device configuration";
+    if(fFT601) {
+        status = ctx->dev.pfnFT_Create((PVOID)ctx->qwDeviceIndex, 0x10 /*FT_OPEN_BY_INDEX*/, &ctx->dev.hFTDI);
+        if(status || !ctx->dev.hFTDI) {
+            szErrorReason = "Unable to connect to FPGA device";
             goto fail;
         }
-        printf("FTDI USB CONFIGURATION UPDATED - RESETTING AND CONTINUING ...\n");
-        ctx->dev.pfnFT_Close(ctx->dev.hFTDI);
-        FreeLibrary(ctx->dev.hModule);
-        ctx->dev.hModule = NULL;
-        ctx->dev.hFTDI = NULL;
-        Sleep(3000);
-        return DeviceFPGA_InitializeFT601(ctx);
+        ctx->dev.pfnFT_AbortPipe(ctx->dev.hFTDI, 0x02);
+        ctx->dev.pfnFT_AbortPipe(ctx->dev.hFTDI, 0x82);
+        pfnFT_SetSuspendTimeout(ctx->dev.hFTDI, 0);
+        // Check FTDI chip configuration and update if required
+        status = pfnFT_GetChipConfiguration(ctx->dev.hFTDI, &oCfgOld);
+        if(status) {
+            szErrorReason = "Unable to retrieve device configuration";
+            goto fail;
+        }
+        memcpy(&oCfgNew, &oCfgOld, sizeof(FT_60XCONFIGURATION));
+        oCfgNew.FIFOMode = 0; // FIFO MODE FT245
+        oCfgNew.ChannelConfig = 2; // 1 CHANNEL ONLY
+        oCfgNew.OptionalFeatureSupport = 0;
+        if(memcmp(&oCfgNew, &oCfgOld, sizeof(FT_60XCONFIGURATION))) {
+            printf(
+                "IMPORTANT NOTE! FTDI FT601 USB CONFIGURATION DIFFERS FROM RECOMMENDED\n" \
+                "PLEASE ENSURE THAT ONLY PCILEECH FPGA FTDI FT601 DEVICE IS CONNECED  \n" \
+                "BEFORE UPDATING CONFIGURATION. DO YOU WISH TO CONTINUE Y/N?          \n"
+            );
+            while(TRUE) {
+                c = (CHAR)getchar();
+                if(c == 'Y' || c == 'y') { break; }
+                if(c == 'N' || c == 'n') {
+                    szErrorReason = "User abort required device configuration";
+                    goto fail;
+                }
+
+            }
+            status = pfnFT_SetChipConfiguration(ctx->dev.hFTDI, &oCfgNew);
+            if(status) {
+                szErrorReason = "Unable to set required device configuration";
+                goto fail;
+            }
+            printf("FTDI USB CONFIGURATION UPDATED - RESETTING AND CONTINUING ...\n");
+            ctx->dev.pfnFT_Close(ctx->dev.hFTDI);
+            FreeLibrary(ctx->dev.hModule);
+            ctx->dev.hModule = NULL;
+            ctx->dev.hFTDI = NULL;
+            Sleep(3000);
+            return DeviceFPGA_InitializeFT601(ctx, TRUE, FALSE);
+        }
     }
     ctx->async2.fEnabled =
         ctx->dev.pfnFT_GetOverlappedResult && ctx->dev.pfnFT_InitializeOverlapped && ctx->dev.pfnFT_ReleaseOverlapped &&
@@ -1702,7 +1721,7 @@ VOID DeviceFPGA_GetDeviceId_FpgaVersion_ClearPipe(_In_ PDEVICE_CONTEXT_FPGA ctx)
     if(status) { goto fail; }
     if(cbRX >= 0x1000) {
         status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, pbRX, 0x00100000, &cbRX, NULL);
-        if(!status && cbRX == 0x00100000) {
+        if(!status && (cbRX == 0x00100000) && !ctx->fCustomDriver) {
             // Sometimes the PCIe core locks up at unclean exits from PCILeech
             // causing things to stop work - including spamming output FIFOs
             // with trash data. Solution is to issue a "Global System Reset" of
@@ -1817,6 +1836,11 @@ VOID DeviceFPGA_GetDeviceID_FpgaVersion(_In_ PDEVICE_CONTEXT_FPGA ctx)
 
 VOID DeviceFPGA_SetPerformanceProfile(_Inout_ PDEVICE_CONTEXT_FPGA ctx)
 {
+    if((ctx->wFpgaID >= DEVICE_ID_DRIVER_SUPPLIED_0) && (ctx->wFpgaID <= DEVICE_ID_DRIVER_SUPPLIED_7)) {
+        if(ctx->dev.pfnLcSetPerformanceProfile && (0 == ctx->dev.pfnLcSetPerformanceProfile(&ctx->perf, DEVICE_PERFORMANCE_VERSION, ctx->wFpgaID))) {
+            return;
+        }
+    }
     memcpy(&ctx->perf, &PERFORMANCE_PROFILES[(ctx->wFpgaID <= DEVICE_ID_MAX) ? ctx->wFpgaID : 0], sizeof(DEVICE_PERFORMANCE));
 }
 
@@ -2156,6 +2180,9 @@ VOID DeviceFPGA_Synch_RxTlpSynchronous(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONT
             dwStatus = *(PDWORD)(ctx->rxbuf.pb + i);
             pdwData = (PDWORD)(ctx->rxbuf.pb + i + 4);
             if((dwStatus & 0xf0000000) != 0xe0000000) {
+                if(ctx->fCustomDriver && (*(PDWORD)(ctx->rxbuf.pb + i) == 0x66665555)) {  // break on workaround dummy fillers
+                    break;
+                }
                 lcprintfvv(ctxLC, "Device Info: FPGA: Bad no-header data received! Should not happen!\n");
                 i += 4;
                 continue;
@@ -2329,8 +2356,6 @@ VOID DeviceFPGA_Synch_ReadScatter(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _Ino
 // TLP ASYNC2 handling functionality below:
 //-------------------------------------------------------------------------------
 
-#define DEVICE_FPGA_ASYNC2_MAXREADSIZE       0x10000
-
 /*
 * Generic callback function that may be used by TLP capable devices to aid the
 * collection of memory read completions. Receives single TLP packet.
@@ -2433,7 +2458,7 @@ free_tag:
 * -- ctx
 * -- cdwData = number of DWORDs in FPGA data pdwData
 * -- pdwData = FPGA data
-* -- return = success: the number of DWORDs successfully consumed, fail: -1.
+* -- return = The number of DWORDs consumed. bit[31] = 1 TLP was found and processed.
 */
 DWORD DeviceFPGA_Async2_Read_RxTlpSingle(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx, _In_ DWORD cdwData, _In_ PDWORD pdwData)
 {
@@ -2441,10 +2466,15 @@ DWORD DeviceFPGA_Async2_Read_RxTlpSingle(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CO
     PDWORD pdwTlp = (PDWORD)pbTlp;
     DWORD i = 0, j, dwStatus, cdwTlp = 0, iStartWord;
     // skip over initial ftdi workaround dummy fillers / non valid octa-dwords
-    while((i < cdwData) && ((pdwData[i] == 0x55556666) || ((pdwData[i] & 0xf0000000) != 0xe0000000))) {
+    while((i < cdwData) && ((pdwData[i] & 0xf0000000) != 0xe0000000)) {
         i++;
     }
     if(i) { return i; }
+    // skip over initial non-TLP octa-dwords
+    dwStatus = pdwData[0];
+    if(((dwStatus | dwStatus >> 1) & 0x01111111) == 0x01111111) {
+        return 8;
+    }
     // fetch and process next complete and valid tlp (if possible)
     while(i <= cdwData - 8) {
         iStartWord = i;
@@ -2457,7 +2487,7 @@ DWORD DeviceFPGA_Async2_Read_RxTlpSingle(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CO
                 if(cdwTlp >= TLP_RX_MAX_SIZE / sizeof(DWORD)) {
                     // TODO: malformed TLP
                     pdwData[iStartWord] = pdwData[iStartWord] | (0xffffffff >> (28 - (j << 2)));
-                    return iStartWord;
+                    return iStartWord | 0x80000000;
                 }
                 pdwTlp[cdwTlp++] = pdwData[i];
             }
@@ -2465,7 +2495,7 @@ DWORD DeviceFPGA_Async2_Read_RxTlpSingle(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CO
                 if((cdwTlp < 3) || (cdwTlp > TLP_RX_MAX_SIZE_IN_DWORDS)) {
                     printf("Device Info: FPGA: Bad PCIe TLP received! Should not happen!\n");
                     pdwData[iStartWord] = pdwData[iStartWord] | (0xffffffff >> (28 - (j << 2)));
-                    return iStartWord;
+                    return iStartWord | 0x80000000;
                 }
                 if(ctxLC->fPrintf[LC_PRINTF_VVV]) {
                     TLP_Print(ctxLC, pbTlp, cdwTlp << 2, FALSE);
@@ -2475,25 +2505,27 @@ DWORD DeviceFPGA_Async2_Read_RxTlpSingle(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CO
                 }
                 DeviceFPGA_Async2_Read_RxTlpSingle_MRdCpl(ctxLC, ctx, pbTlp, cdwTlp << 2);
                 pdwData[iStartWord] = pdwData[iStartWord] | (0xffffffff >> (28 - (j << 2)));
-                return iStartWord;
+                return iStartWord | 0x80000000;
             }
             dwStatus >>= 4;
         }
     }
-    return (DWORD)-1;
+    return 0;
 }
 
+/*
+* -- ctxLC
+* -- ctx
+* -- return = TRUE if any TLPs were read, FALSE otherwise.
+*/
 BOOL DeviceFPGA_Async2_Read_RxTlpFromBuffer(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx)
 {
     BOOL fReadTlp = FALSE;
-    DWORD cdwTlpDataConsumed;
-    while(ctx->rxbuf.o + 32 <= ctx->rxbuf.cb) {
+    DWORD cdwTlpDataConsumed = 1;
+    while((ctx->rxbuf.o + 32 <= ctx->rxbuf.cb) && cdwTlpDataConsumed) {
         cdwTlpDataConsumed = DeviceFPGA_Async2_Read_RxTlpSingle(ctxLC, ctx, (ctx->rxbuf.cb - ctx->rxbuf.o) >> 2, (PDWORD)(ctx->rxbuf.pb + ctx->rxbuf.o));
-        if(cdwTlpDataConsumed == (DWORD)-1) {
-            break;
-        }
+        fReadTlp = fReadTlp || (cdwTlpDataConsumed & 0x80000000);
         ctx->rxbuf.o += cdwTlpDataConsumed << 2;
-        fReadTlp = TRUE;
     }
     return fReadTlp;
 }
@@ -2667,15 +2699,15 @@ PFPGA_NEWASYNC2_MEM_CONTEXT DeviceFPGA_Async2_Read_TxTlp(_In_ PLC_CONTEXT ctxLC,
 VOID DeviceFPGA_Async2_ReadScatter_DoWork(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx, _In_ PFPGA_NEWASYNC2_MEM_CONTEXT pMemCtxPrimary)
 {
     BOOL fAsync;
-    DWORD i, status, cEmptyRead = 0, cbRead = 0, cbReadInitialMax;
+    DWORD i, status, cEmptyRead = 0, cbRead = 0, cbReadInitialMax, cbMAX_READSIZE = ctx->perf.ASYNC_MAX_READSIZE;
     PFPGA_NEWASYNC2_MEM_CONTEXT pMemCtxTX = pMemCtxPrimary;
     PFPGA_NEWASYNC2_TAG_ENTRY pTag;
     fAsync = !ctx->dev.f2232h;
     // TX PRIMARY and start OVERLAPPED read:
     pMemCtxTX = DeviceFPGA_Async2_Read_TxTlp(ctxLC, ctx, pMemCtxPrimary, TRUE);
     // RX INITIAL / (LATENCY OPTIMIZED FOR SMALLER READS):
-    usleep(5);
-    cbReadInitialMax = min(DEVICE_FPGA_ASYNC2_MAXREADSIZE, pMemCtxPrimary->cMEM * 0x1800);
+    usleep(ctx->perf.ASYNC_DELAY_1);
+    cbReadInitialMax = min(cbMAX_READSIZE, pMemCtxPrimary->cMEM * 0x1800);
     status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, ctx->rxbuf.pb + ctx->rxbuf.cb, cbReadInitialMax, &cbRead, NULL);
     if(status && (status != FT_IO_PENDING)) {
         return;
@@ -2685,7 +2717,7 @@ VOID DeviceFPGA_Async2_ReadScatter_DoWork(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_C
     // MAIN READ LOOP:
     while(TRUE) {
         // REALIGN 16MB BUFFER IF REQUIRED:
-        if(ctx->rxbuf.cb + DEVICE_FPGA_ASYNC2_MAXREADSIZE > ctx->rxbuf.cbMax) {
+        if(ctx->rxbuf.cb + cbMAX_READSIZE > ctx->rxbuf.cbMax) {
             memcpy(ctx->rxbuf.pb, ctx->rxbuf.pb + ctx->rxbuf.o, ctx->rxbuf.cb - ctx->rxbuf.o);
             ctx->rxbuf.cb -= ctx->rxbuf.o;
             ctx->rxbuf.o = 0;
@@ -2695,24 +2727,21 @@ VOID DeviceFPGA_Async2_ReadScatter_DoWork(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_C
             return;
         }
         // SLEEP(EXIT) ON EMPTY OVERLAPPED READ:
-        if((cbRead == 0) || (cbRead == 0x14)) {
-            usleep(5);
-            cEmptyRead++;
+        if(cEmptyRead > 1) {
             if(cEmptyRead >= 0x30) {
                 goto fail_timeout;
             }
+            usleep(ctx->perf.ASYNC_DELAY_2);
         }
         // START OVERLAPPED READ:
         if(fAsync) {
-            status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, ctx->rxbuf.pb + ctx->rxbuf.cb, DEVICE_FPGA_ASYNC2_MAXREADSIZE, &cbRead, &ctx->async2.oOverlapped);
+            status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, ctx->rxbuf.pb + ctx->rxbuf.cb, cbMAX_READSIZE, &cbRead, &ctx->async2.oOverlapped);
             if(status && (status != FT_IO_PENDING)) {
                 goto fail_overlapped;
             }
         }
         // PROCESS RESULT:
-        if(DeviceFPGA_Async2_Read_RxTlpFromBuffer(ctxLC, ctx)) {
-            cEmptyRead = 0;
-        }
+        cEmptyRead = DeviceFPGA_Async2_Read_RxTlpFromBuffer(ctxLC, ctx) ? 0 : cEmptyRead + 1;
         // TX:
         pMemCtxTX = DeviceFPGA_Async2_Read_TxTlp(ctxLC, ctx, pMemCtxTX, (pMemCtxTX == pMemCtxPrimary));
         // READ OVERLAPPED RESULT:
@@ -2721,7 +2750,9 @@ VOID DeviceFPGA_Async2_ReadScatter_DoWork(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_C
         } else {
             status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, ctx->rxbuf.pb + ctx->rxbuf.cb, cbReadInitialMax, &cbRead, NULL);
         }
-        if(status) { goto fail_overlapped; }
+        if(status) {
+            goto fail_overlapped;
+        }
         ctx->rxbuf.cb += cbRead;
     }
 fail_timeout:
@@ -2755,7 +2786,7 @@ VOID DeviceFPGA_Async2_ReadOnlyFast_DoWork(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_
     BOOL fAsync = !ctx->dev.f2232h;
     DWORD status, cbRead = 0;
     // RX INITIAL / (LATENCY OPTIMIZED FOR SMALLER READS):
-    status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, ctx->rxbuf.pb + ctx->rxbuf.cb, DEVICE_FPGA_ASYNC2_MAXREADSIZE, &cbRead, NULL);
+    status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, ctx->rxbuf.pb + ctx->rxbuf.cb, ctx->perf.ASYNC_MAX_READSIZE, &cbRead, NULL);
     if(status && (status != FT_IO_PENDING)) {
         return;
     }
@@ -2766,7 +2797,7 @@ VOID DeviceFPGA_Async2_ReadOnlyFast_DoWork(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_
     // MAIN READ LOOP:
     while(TRUE) {
         // REALIGN 16MB BUFFER IF REQUIRED:
-        if(ctx->rxbuf.cb + DEVICE_FPGA_ASYNC2_MAXREADSIZE > ctx->rxbuf.cbMax) {
+        if(ctx->rxbuf.cb + ctx->perf.ASYNC_MAX_READSIZE > ctx->rxbuf.cbMax) {
             memcpy(ctx->rxbuf.pb, ctx->rxbuf.pb + ctx->rxbuf.o, ctx->rxbuf.cb - ctx->rxbuf.o);
             ctx->rxbuf.cb -= ctx->rxbuf.o;
             ctx->rxbuf.o = 0;
@@ -2777,7 +2808,7 @@ VOID DeviceFPGA_Async2_ReadOnlyFast_DoWork(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_
         }
         // START OVERLAPPED READ:
         if(fAsync) {
-            status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, ctx->rxbuf.pb + ctx->rxbuf.cb, DEVICE_FPGA_ASYNC2_MAXREADSIZE, &cbRead, &ctx->async2.oOverlapped);
+            status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, ctx->rxbuf.pb + ctx->rxbuf.cb, ctx->perf.ASYNC_MAX_READSIZE, &cbRead, &ctx->async2.oOverlapped);
             if(status && (status != FT_IO_PENDING)) {
                 return;
             }
@@ -2788,7 +2819,7 @@ VOID DeviceFPGA_Async2_ReadOnlyFast_DoWork(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_
         if(fAsync) {
             status = ctx->dev.pfnFT_GetOverlappedResult(ctx->dev.hFTDI, &ctx->async2.oOverlapped, &cbRead, TRUE);
         } else {
-            status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, ctx->rxbuf.pb + ctx->rxbuf.cb, DEVICE_FPGA_ASYNC2_MAXREADSIZE, &cbRead, NULL);
+            status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, ctx->rxbuf.pb + ctx->rxbuf.cb, ctx->perf.ASYNC_MAX_READSIZE, &cbRead, NULL);
         }
         if(status) { return; }
         ctx->rxbuf.cb += cbRead;
@@ -3501,6 +3532,8 @@ BOOL DeviceFPGA_SetOption_DoLock(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _In
 #define FPGA_PARAMETER_READ_RETRY      "readretry"
 #define FPGA_PARAMETER_DEVICE_INDEX    "devindex"
 #define FPGA_PARAMETER_DEVICE_ID       "bdf"
+#define FPGA_PARAMETER_DRIVER          "driver"
+#define FPGA_PARAMETER_FT601           "ft601"
 
 #define FPGA_PARAMETER_ALGO_TINY                0x01
 #define FPGA_PARAMETER_ALGO_SYNCHRONOUS         0x02
@@ -3510,25 +3543,28 @@ BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
 {
     DWORD dwIpAddr;
     QWORD v;
-    LPSTR szDeviceError;
+    LPSTR szDeviceError = NULL;
     PDEVICE_CONTEXT_FPGA ctx;
     PLC_DEVICE_PARAMETER_ENTRY pParam;
+    BOOL fFT601 = FALSE, fCustomDriver = FALSE;
     if(ppLcCreateErrorInfo) { *ppLcCreateErrorInfo = NULL; }
     ctx = LocalAlloc(LMEM_ZEROINIT, sizeof(DEVICE_CONTEXT_FPGA));
     if(!ctx) { return FALSE; }
     InitializeCriticalSection(&ctx->Lock);
     ctxLC->hDevice = (HANDLE)ctx;
+    ctx->qwDeviceIndex = LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_DEVICE_INDEX);
     if((pParam = LcDeviceParameterGet(ctxLC, FPGA_PARAMETER_UDP_ADDRESS)) && pParam->szValue) {
         dwIpAddr = inet_addr(pParam->szValue);
         szDeviceError = ((dwIpAddr == 0) || (dwIpAddr == (DWORD)-1)) ?
             "Bad IPv4 address" :
             DeviceFPGA_InitializeUDP(ctx, dwIpAddr);
     } else if((pParam = LcDeviceParameterGet(ctxLC, FPGA_PARAMETER_FT2232H)) && pParam->szValue) {
-        ctx->qwDeviceIndex = LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_DEVICE_INDEX);
         szDeviceError = DeviceFPGA_InitializeFT2232(ctx);
     } else {
-        ctx->qwDeviceIndex = LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_DEVICE_INDEX);
-        szDeviceError = DeviceFPGA_InitializeFT601(ctx);
+        fCustomDriver = LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_DRIVER) ? TRUE : FALSE;
+        fFT601 = LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_FT601) ? TRUE : FALSE;
+        if(!fCustomDriver && !fFT601) { fCustomDriver = TRUE; fFT601 = TRUE; }
+        szDeviceError = DeviceFPGA_InitializeFT601(ctx, fFT601, fCustomDriver);
     }
     if(szDeviceError) { goto fail; }
     ctx->fRestartDevice = (1 == LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_RESTART_DEVICE));
