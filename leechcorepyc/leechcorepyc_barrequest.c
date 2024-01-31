@@ -1,6 +1,6 @@
 // leechcorepyc_barrequest.c : implementation of LeechCore PCIe BAR request.
 //
-// (c) Ulf Frisk, 2023
+// (c) Ulf Frisk, 2024
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 

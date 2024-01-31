@@ -1,6 +1,6 @@
 // leechrpcclient.c : implementation of the remote procedure call (RPC) client.
 //
-// (c) Ulf Frisk, 2018-2023
+// (c) Ulf Frisk, 2018-2024
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include "leechcore.h"

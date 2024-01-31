@@ -1,6 +1,6 @@
 // leechrpcclient.h : definitions related to the leech rpc service.
 //
-// (c) Ulf Frisk, 2018-2023
+// (c) Ulf Frisk, 2018-2024
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #ifndef __LEECHRPC_H__

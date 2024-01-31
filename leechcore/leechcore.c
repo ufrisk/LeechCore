@@ -1,6 +1,6 @@
 // leechcore.c : core implementation of the the LeechCore physical memory acquisition library.
 //
-// (c) Ulf Frisk, 2020-2023
+// (c) Ulf Frisk, 2020-2024
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 
@@ -259,7 +259,7 @@ VOID LcCreate_FetchDevice(_Inout_ PLC_CONTEXT ctx)
         ctx->pfnCreate = DeviceFile_Open;
         return;
     }
-    if((0 == _strnicmp("fpga", ctx->Config.szDevice, 4)) || (0 == _strnicmp("rawudp://", ctx->Config.szDevice, 9))) {
+    if((0 == _strnicmp("fpga", ctx->Config.szDevice, 4)) || (0 == _strnicmp("rawudp://", ctx->Config.szDevice, 9)) || (0 == _strnicmp("xdma", ctx->Config.szDevice, 4))) {
         strncpy_s(ctx->Config.szDeviceName, sizeof(ctx->Config.szDeviceName), "fpga", _TRUNCATE);
         ctx->pfnCreate = DeviceFPGA_Open;
         return;

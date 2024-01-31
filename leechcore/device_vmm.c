@@ -3,7 +3,7 @@
 // 
 // Syntax: vmm://hvmm=0x<VMM_HANDLE>,hvm=0x<VMMVM_HANDLE>,max=<MAX_ADDRESS>
 // 
-// (c) Ulf Frisk, 2022-2023
+// (c) Ulf Frisk, 2022-2024
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include "leechcore.h"
@@ -75,7 +75,7 @@ BOOL DeviceVMM_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO p
     ctx->pfnFN_VMMDLL_ConfigGet = (FN_VMMDLL_ConfigGet)GetProcAddress(ctx->hModuleVMM, "VMMDLL_ConfigGet");
     ctx->pfnVMMDLL_VmMemReadScatter = (FN_VMMDLL_VmMemReadScatter)GetProcAddress(ctx->hModuleVMM, "VMMDLL_VmMemReadScatter");
     ctx->pfnVMMDLL_VmMemWriteScatter = (FN_VMMDLL_VmMemWriteScatter)GetProcAddress(ctx->hModuleVMM, "VMMDLL_VmMemWriteScatter");
-    if(!ctx->pfnFN_VMMDLL_ConfigGet || !ctx->pfnVMMDLL_VmMemReadScatter || !ctx->pfnVMMDLL_VmMemReadScatter) {
+    if(!ctx->pfnFN_VMMDLL_ConfigGet || !ctx->pfnVMMDLL_VmMemReadScatter || !ctx->pfnVMMDLL_VmMemWriteScatter) {
         lcprintfv(ctxLC, "DEVICE: VMM: Unable to open loopback device #2.\n");
         goto fail;
     }

@@ -3547,6 +3547,8 @@ BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
     PDEVICE_CONTEXT_FPGA ctx;
     PLC_DEVICE_PARAMETER_ENTRY pParam;
     BOOL fFT601 = FALSE, fCustomDriver = FALSE;
+    BYTE pb200[0x200];
+    WORD wDeviceVendorId, wDeviceDeviceId;
     if(ppLcCreateErrorInfo) { *ppLcCreateErrorInfo = NULL; }
     ctx = LocalAlloc(LMEM_ZEROINIT, sizeof(DEVICE_CONTEXT_FPGA));
     if(!ctx) { return FALSE; }
@@ -3612,20 +3614,28 @@ BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
         ctx->rxbuf.cbMax = 0x01000000;
     }
     // return
-    lcprintfv(ctxLC, 
-        "DEVICE: FPGA: %s PCIe gen%i x%i [%i,%i,%i] [v%i.%i,%04x] [%s,%s]\n",
-        ctx->perf.SZ_DEVICE_NAME,
-        DeviceFPGA_PHY_GetPCIeGen(ctx),
-        DeviceFPGA_PHY_GetLinkWidth(ctx),
-        ctx->perf.DELAY_READ,
-        ctx->perf.DELAY_WRITE,
-        ctx->perf.DELAY_PROBE_READ,
-        ctx->wFpgaVersionMajor,
-        ctx->wFpgaVersionMinor,
-        ctx->wDeviceId,
-        (ctx->async2.fEnabled ? "ASYNC" : "SYNC"),
-        (ctx->fAlgorithmReadTiny ? "TINY" : "NORM")
+    if(ctxLC->fPrintf[LC_PRINTF_V]) {
+        *(PDWORD)pb200 = 0;
+        DeviceFPGA_PCIeCfgSpaceCoreRead(ctx, pb200, 0x80000000 | 0);
+        wDeviceVendorId = *(PWORD)pb200;
+        wDeviceDeviceId = *(PWORD)(pb200 + 2);
+        lcprintfv(ctxLC,
+            "DEVICE: FPGA: %s PCIe gen%i x%i [%i,%i,%i] [v%i.%i,%04x] [%s,%s] [%04x:%04x]\n",
+            ctx->perf.SZ_DEVICE_NAME,
+            DeviceFPGA_PHY_GetPCIeGen(ctx),
+            DeviceFPGA_PHY_GetLinkWidth(ctx),
+            ctx->perf.DELAY_READ,
+            ctx->perf.DELAY_WRITE,
+            ctx->perf.DELAY_PROBE_READ,
+            ctx->wFpgaVersionMajor,
+            ctx->wFpgaVersionMinor,
+            ctx->wDeviceId,
+            (ctx->async2.fEnabled ? "ASYNC" : "SYNC"),
+            (ctx->fAlgorithmReadTiny ? "TINY" : "NORM"),
+            wDeviceVendorId,
+            wDeviceDeviceId
         );
+    }
     if(ctxLC->fPrintf[LC_PRINTF_VV]) {
         DeviceFPGA_ConfigPrint(ctxLC, ctx);
     }

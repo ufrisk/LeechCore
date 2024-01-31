@@ -1,6 +1,6 @@
 // leechagent_svc.h : definitions related to leechagent service functionality
 //
-// (c) Ulf Frisk, 2023
+// (c) Ulf Frisk, 2024
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #ifndef __LEECHAGENT_SVC_H__

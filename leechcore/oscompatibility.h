@@ -1,6 +1,6 @@
 // oscompatibility.h : LeechCore Windows/Linux compatibility layer.
 //
-// (c) Ulf Frisk, 2017-2023
+// (c) Ulf Frisk, 2017-2024
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #ifndef __OSCOMPATIBILITY_H__
@@ -52,10 +52,10 @@ typedef uint32_t                            BOOL, *PBOOL;
 typedef uint8_t                             BYTE, *PBYTE;
 typedef uint8_t                             UCHAR, *PUCHAR;
 typedef char                                CHAR, *PCHAR, *PSTR, *LPSTR;
-typedef int32_t                             UINT, LONG;
+typedef int32_t                             LONG;
 typedef uint16_t                            WORD, *PWORD, USHORT, *PUSHORT;
 typedef uint16_t                            WCHAR, *PWCHAR, *LPWSTR, *LPCWSTR;
-typedef uint32_t                            DWORD, *PDWORD, ULONG, *PULONG;
+typedef uint32_t                            UINT, DWORD, *PDWORD, ULONG, *PULONG;
 typedef long long unsigned int              QWORD, *PQWORD, ULONG64, *PULONG64;
 typedef uint64_t                            LARGE_INTEGER, *PLARGE_INTEGER, FILETIME;
 typedef size_t                              SIZE_T, *PSIZE_T;

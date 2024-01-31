@@ -1,6 +1,6 @@
 // device_file.c : implementation related to file backed memory acquisition device.
 //
-// (c) Ulf Frisk, 2018-2023
+// (c) Ulf Frisk, 2018-2024
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include "leechcore.h"
@@ -69,8 +69,6 @@ typedef struct tdDUMP_HEADER_BITMAP_FULL64 {
 #define ELF_EI_CLASSDATA_64     0x0102
 #define ELF_ET_CORE             0x04
 #define ELF_ET_VERSION          0x01
-#define ELF_PHDR_OFFSET_32      0x34
-#define ELF_PHDR_OFFSET_64      0x40
 #define ELF_PT_LOAD             0x00000001
 
 typedef struct tdElf32_Phdr {
@@ -110,7 +108,6 @@ typedef struct tdElf32_Ehdr {
     WORD e_shentsize;
     WORD e_shnum;
     WORD e_shstrndx;
-    Elf32_Phdr Phdr[];
 } Elf32_Ehdr, *PElf32_Ehdr;
 
 typedef struct tdElf64_Ehdr {
@@ -128,7 +125,6 @@ typedef struct tdElf64_Ehdr {
     WORD e_shentsize;
     WORD e_shnum;
     WORD e_shstrndx;
-    Elf64_Phdr Phdr[];
 } Elf64_Ehdr, *PElf64_Ehdr;
 
 //-----------------------------------------------------------------------------
@@ -599,6 +595,8 @@ BOOL DeviceFile_DumpInitialize(_In_ PLC_CONTEXT ctxLC)
     QWORD i, cbFileOffset;
     PElf64_Ehdr pElf64 = &ctx->CrashOrCoreDump.Elf64;
     PElf32_Ehdr pElf32 = &ctx->CrashOrCoreDump.Elf32;
+    PElf64_Phdr pElf64Phdr;
+    PElf32_Phdr pElf32Phdr;
     _PPHYSICAL_MEMORY_DESCRIPTOR32 pM32 = (_PPHYSICAL_MEMORY_DESCRIPTOR32)(ctx->CrashOrCoreDump.pbHdr + 0x064);
     _PPHYSICAL_MEMORY_DESCRIPTOR64 pM64 = (_PPHYSICAL_MEMORY_DESCRIPTOR64)(ctx->CrashOrCoreDump.pbHdr + 0x088);
     _fseeki64(ctx->File[0].h, 0, SEEK_SET);
@@ -656,21 +654,22 @@ BOOL DeviceFile_DumpInitialize(_In_ PLC_CONTEXT ctxLC)
     if((*(PDWORD)pElf64->e_ident == ELF_EI_MAGIC) && (*(PWORD)(pElf64->e_ident + 4) == ELF_EI_CLASSDATA_64)) {
         // ELF CORE DUMP - 64-bit full dump
         lcprintfvv_fn(ctxLC, "64-bit ELF Core Dump identified.\n");
-        if((pElf64->e_type != ELF_ET_CORE) || (pElf64->e_version != ELF_ET_VERSION) || (pElf64->e_phoff != ELF_PHDR_OFFSET_64) || (pElf64->e_phentsize != sizeof(Elf64_Phdr)) || !pElf64->e_phnum || (pElf64->e_phnum > 0x200)) {
+        if((pElf64->e_type != ELF_ET_CORE) || (pElf64->e_version != ELF_ET_VERSION) || (pElf64->e_phoff < sizeof(Elf64_Ehdr)) || (pElf64->e_phentsize != sizeof(Elf64_Phdr)) || !pElf64->e_phnum || (pElf64->e_phoff + pElf64->e_phnum * sizeof(Elf64_Phdr) > 0x2000)) {
             lcprintf(ctxLC, "DEVICE: FAIL: unable to parse elf header\n");
             return FALSE;
         }
+        pElf64Phdr = (PElf64_Phdr)(ctx->CrashOrCoreDump.pbHdr + pElf64->e_phoff);
         for(i = 0; i < pElf64->e_phnum; i++) {
-            f = (pElf64->Phdr[i].p_type == ELF_PT_LOAD) &&
-                pElf64->Phdr[i].p_offset && (pElf64->Phdr[i].p_offset < ctx->cbFile) &&
-                pElf64->Phdr[i].p_filesz && (pElf64->Phdr[i].p_filesz < ctx->cbFile) &&
-                (pElf64->Phdr[i].p_filesz == pElf64->Phdr[i].p_memsz) &&
-                (pElf64->Phdr[i].p_offset + pElf64->Phdr[i].p_filesz <= ctx->cbFile) &&
-                !(pElf64->Phdr[i].p_paddr & 0xfff) && !(pElf64->Phdr[i].p_filesz & 0xfff);
+            f = (pElf64Phdr[i].p_type == ELF_PT_LOAD) &&
+                pElf64Phdr[i].p_offset && (pElf64Phdr[i].p_offset < ctx->cbFile) &&
+                pElf64Phdr[i].p_filesz && (pElf64Phdr[i].p_filesz < ctx->cbFile) &&
+                (pElf64Phdr[i].p_filesz == pElf64Phdr[i].p_memsz) &&
+                (pElf64Phdr[i].p_offset + pElf64Phdr[i].p_filesz <= ctx->cbFile) &&
+                !(pElf64Phdr[i].p_paddr & 0xfff) && !(pElf64Phdr[i].p_filesz & 0xfff);
             if(f) {
                 fElfLoadSegment = TRUE;
-                if(!LcMemMap_AddRange(ctxLC, pElf64->Phdr[i].p_paddr, pElf64->Phdr[i].p_filesz, pElf64->Phdr[i].p_offset)) {
-                    lcprintf(ctxLC, "DEVICE: FAIL: unable to add range to memory map. (%016llx %016llx %016llx)\n", pElf64->Phdr[i].p_paddr, pElf64->Phdr[i].p_filesz, pElf64->Phdr[i].p_offset);
+                if(!LcMemMap_AddRange(ctxLC, pElf64Phdr[i].p_paddr, pElf64Phdr[i].p_filesz, pElf64Phdr[i].p_offset)) {
+                    lcprintf(ctxLC, "DEVICE: FAIL: unable to add range to memory map. (%016llx %016llx %016llx)\n", pElf64Phdr[i].p_paddr, pElf64Phdr[i].p_filesz, pElf64Phdr[i].p_offset);
                     return FALSE;
                 }
             }
@@ -681,21 +680,22 @@ BOOL DeviceFile_DumpInitialize(_In_ PLC_CONTEXT ctxLC)
     if((*(PDWORD)pElf32->e_ident == ELF_EI_MAGIC) && (*(PWORD)(pElf32->e_ident + 4) == ELF_EI_CLASSDATA_32)) {
         // ELF CORE DUMP - 32-bit full dump
         lcprintfvv_fn(ctxLC, "32-bit ELF Core Dump identified.\n");
-        if((pElf32->e_type != ELF_ET_CORE) || (pElf32->e_version != ELF_ET_VERSION) || (pElf32->e_phoff != ELF_PHDR_OFFSET_64) || (pElf32->e_phentsize != sizeof(Elf32_Phdr)) || !pElf32->e_phnum || (pElf32->e_phnum > 0x200)) {
+        if((pElf32->e_type != ELF_ET_CORE) || (pElf32->e_version != ELF_ET_VERSION) || (pElf32->e_phoff < sizeof(Elf32_Ehdr)) || (pElf32->e_phentsize != sizeof(Elf32_Phdr)) || !pElf32->e_phnum || (pElf32->e_phoff + pElf32->e_phnum * sizeof(Elf32_Phdr) > 0x2000)) {
             lcprintf(ctxLC, "DEVICE: FAIL: unable to parse elf header\n");
             return FALSE;
         }
+        pElf32Phdr = (PElf32_Phdr)(ctx->CrashOrCoreDump.pbHdr + pElf32->e_phoff);
         for(i = 0; i < pElf32->e_phnum; i++) {
-            f = (pElf32->Phdr[i].p_type == ELF_PT_LOAD) &&
-                pElf32->Phdr[i].p_offset && (pElf32->Phdr[i].p_offset < ctx->cbFile) &&
-                pElf32->Phdr[i].p_filesz && (pElf32->Phdr[i].p_filesz < ctx->cbFile) &&
-                (pElf32->Phdr[i].p_filesz == pElf32->Phdr[i].p_memsz) &&
-                ((QWORD)pElf32->Phdr[i].p_offset + pElf32->Phdr[i].p_filesz <= ctx->cbFile) &&
-                !(pElf32->Phdr[i].p_paddr & 0xfff) && !(pElf32->Phdr[i].p_filesz & 0xfff);
+            f = (pElf32Phdr[i].p_type == ELF_PT_LOAD) &&
+                pElf32Phdr[i].p_offset && (pElf32Phdr[i].p_offset < ctx->cbFile) &&
+                pElf32Phdr[i].p_filesz && (pElf32Phdr[i].p_filesz < ctx->cbFile) &&
+                (pElf32Phdr[i].p_filesz == pElf32Phdr[i].p_memsz) &&
+                ((QWORD)pElf32Phdr[i].p_offset + pElf32Phdr[i].p_filesz <= ctx->cbFile) &&
+                !(pElf32Phdr[i].p_paddr & 0xfff) && !(pElf32Phdr[i].p_filesz & 0xfff);
             if(f) {
                 fElfLoadSegment = TRUE;
-                if(!LcMemMap_AddRange(ctxLC, pElf32->Phdr[i].p_paddr, pElf32->Phdr[i].p_filesz, pElf32->Phdr[i].p_offset)) {
-                    lcprintf(ctxLC, "DEVICE: FAIL: unable to add range to memory map. (%08x %08x %08x)\n", pElf32->Phdr[i].p_paddr, pElf32->Phdr[i].p_filesz, pElf32->Phdr[i].p_offset);
+                if(!LcMemMap_AddRange(ctxLC, pElf32Phdr[i].p_paddr, pElf32Phdr[i].p_filesz, pElf32Phdr[i].p_offset)) {
+                    lcprintf(ctxLC, "DEVICE: FAIL: unable to add range to memory map. (%08x %08x %08x)\n", pElf32Phdr[i].p_paddr, pElf32Phdr[i].p_filesz, pElf32Phdr[i].p_offset);
                     return FALSE;
                 }
             }

@@ -38,7 +38,7 @@ Please find a summary of the supported software based memory acquisition methods
 
 ### Hardware based memory aqusition methods:
 
-Please find a summary of the supported hardware based memory acquisition methods listed below. All hardware based memory acquisition methods are supported on both Windows and Linux. The FPGA based methods however have a performance penalty on Linux and will max out at approx: 90MB/s compared to 150MB/s on Windows due to less optimized drivers.
+Please find a summary of the supported hardware based memory acquisition methods listed below. All hardware based memory acquisition methods are supported on both Windows and Linux.
 | Device                                                                         | Type | Interface | Speed | 64-bit memory access | PCIe TLP access | Plugin | Project<br>Sponsor |
 | -------------------------------------------------------------------------------| ---- | --------- | ----- | -------------------- | --------------- | ------ | ------------------ |
 | [Screamer PCIe Squirrel](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA) | [FPGA](https://github.com/ufrisk/pcileech-fpga/tree/master/PCIeSquirrel) | USB-C | 190MB/s | Yes | Yes | No  | 💖 |
