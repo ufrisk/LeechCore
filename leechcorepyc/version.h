@@ -3,8 +3,8 @@
 
 #define VERSION_MAJOR               2
 #define VERSION_MINOR               16
-#define VERSION_REVISION            10
-#define VERSION_BUILD               61
+#define VERSION_REVISION            11
+#define VERSION_BUILD               62
 
 #define VER_FILE_DESCRIPTION_STR    "LeechCore Memory Acquisition Library : Python API"
 #define VER_FILE_VERSION            VERSION_MAJOR, VERSION_MINOR, VERSION_REVISION, VERSION_BUILD
