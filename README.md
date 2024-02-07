@@ -39,21 +39,22 @@ Please find a summary of the supported software based memory acquisition methods
 ### Hardware based memory aqusition methods:
 
 Please find a summary of the supported hardware based memory acquisition methods listed below. All hardware based memory acquisition methods are supported on both Windows and Linux.
-| Device                                                                         | Type | Interface | Speed | 64-bit memory access | PCIe TLP access | Plugin | Project<br>Sponsor |
-| -------------------------------------------------------------------------------| ---- | --------- | ----- | -------------------- | --------------- | ------ | ------------------ |
-| [Screamer PCIe Squirrel](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA) | [FPGA](https://github.com/ufrisk/pcileech-fpga/tree/master/PCIeSquirrel) | USB-C | 190MB/s | Yes | Yes | No  | 💖 |
-| [LeetDMA](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)                | [FPGA](https://github.com/ufrisk/pcileech-fpga)                          | USB-C | 190MB/s | Yes | Yes | No  | 💖 |
-| [Enigma X1](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)              | [FPGA](https://github.com/ufrisk/pcileech-fpga/tree/master/EnigmaX1)     | USB-C | 200MB/s | Yes | Yes | No  | 💖 |
-| [PCIeScreamerR04](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)        | [FPGA](https://github.com/ufrisk/pcileech-fpga/tree/master/ScreamerM2)   | USB-C | 190MB/s | Yes | Yes | No  | 💖 |
-| [ScreamerM2](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)             | [FPGA](https://github.com/ufrisk/pcileech-fpga/tree/master/ScreamerM2)   | USB3  | 190MB/s | Yes | Yes | No  | 💖 |
-| [AC701/FT601](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)            | [FPGA](https://github.com/ufrisk/pcileech-fpga/tree/master/ac701_ft601)  | USB3  | 190MB/s | Yes | Yes | No  |    |
-| [PCIeScreamer](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)           | [FPGA](https://github.com/ufrisk/pcileech-fpga/tree/master/pciescreamer) | USB3  | 100MB/s | Yes | Yes | No  |    |
-| [SP605/FT601](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)            | [FPGA](https://github.com/ufrisk/pcileech-fpga/tree/master/sp605_ft601)  | USB3  |  75MB/s | Yes | Yes | No  |    |
-| [Acorn/FT2232H](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)          | [FPGA](https://github.com/ufrisk/pcileech-fpga/tree/master/acorn_ft2232h)| USB2  |  25MB/s | Yes | Yes | No  |    |
-| [NeTV2/UDP](https://github.com/ufrisk/LeechCore/wiki/Device_RawUDP)            | [FPGA](https://github.com/ufrisk/pcileech-fpga/tree/master/NeTV2)        | UDP   |   7MB/s | Yes | Yes | No  |    |
-| [USB3380-EVB](https://github.com/ufrisk/LeechCore/wiki/Device_USB3380)         | USB3380 | USB3 | 150MB/s | No  | No  | No  |    |
-| [PP3380](https://github.com/ufrisk/LeechCore/wiki/Device_USB3380)              | USB3380 | USB3 | 150MB/s | No  | No  | No  |    |
-| [DMA patched HP iLO](https://github.com/ufrisk/LeechCore/wiki/Device_RawTCP)   | BMC     | TCP  |   1MB/s | Yes | No  | Yes |    |
+| Device                                                                         | Type | Interface | Speed | 64-bit memory access | PCIe TLP access | Project<br>Sponsor |
+| -------------------------------------------------------------------------------| ---- | --------- | ----- | -------------------- | --------------- | ------------------ |
+| [Screamer PCIe Squirrel](https://github.com/ufrisk/pcileech-fpga/tree/master/PCIeSquirrel) | [FPGA](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA) | USB-C | 190MB/s | Yes | Yes | 💖 |
+| [ZDMA](https://github.com/ufrisk/pcileech-fpga-dev/blob/master/ZDMA)              | [FPGA](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)   | Thunderbolt3 | 800MB/s | Yes | Yes | 💖 |
+| [LeetDMA](https://github.com/ufrisk/pcileech-fpga)                                | [FPGA](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)          | USB-C | 190MB/s | Yes | Yes | 💖 |
+| [Enigma X1](https://github.com/ufrisk/pcileech-fpga/tree/master/EnigmaX1)         | [FPGA](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)          | USB-C | 200MB/s | Yes | Yes | 💖 |
+| [PCIeScreamerR04](https://github.com/ufrisk/pcileech-fpga/tree/master/ScreamerM2) | [FPGA](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)          | USB-C | 190MB/s | Yes | Yes | 💖 |
+| [ScreamerM2](https://github.com/ufrisk/pcileech-fpga/tree/master/ScreamerM2)      | [FPGA](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)          | USB3  | 190MB/s | Yes | Yes | 💖 |
+| [AC701/FT601](https://github.com/ufrisk/pcileech-fpga/tree/master/ac701_ft601)    | [FPGA](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)          | USB3  | 190MB/s | Yes | Yes |    |
+| [PCIeScreamer](https://github.com/ufrisk/pcileech-fpga/tree/master/pciescreamer)  | [FPGA](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)          | USB3  | 100MB/s | Yes | Yes |    |
+| [SP605/FT601](https://github.com/ufrisk/pcileech-fpga/tree/master/sp605_ft601)    | [FPGA](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)          | USB3  |  75MB/s | Yes | Yes |    |
+| [Acorn/FT2232H](https://github.com/ufrisk/pcileech-fpga/tree/master/acorn_ft2232h)| [FPGA](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)          | USB2  |  25MB/s | Yes | Yes |    |
+| [NeTV2/UDP](https://github.com/ufrisk/pcileech-fpga/tree/master/NeTV2)            | [FPGA](https://github.com/ufrisk/LeechCore/wiki/Device_RawUDP)        | UDP   |   7MB/s | Yes | Yes |    |
+| USB3380-EVB                                                                       | [USB3380](https://github.com/ufrisk/LeechCore/wiki/Device_USB3380)    | USB3  | 150MB/s | No  | No  |    |
+| PP3380                                                                            | [USB3380](https://github.com/ufrisk/LeechCore/wiki/Device_USB3380)    | USB3  | 150MB/s | No  | No  |    |
+| DMA patched HP iLO                                                                | [BMC](https://github.com/ufrisk/LeechCore/wiki/Device_RawTCP)         | TCP   |  1MB/s  | Yes | No  |    |
 
 
 The LeechAgent Memory Acquisition and Analysis Agent:
