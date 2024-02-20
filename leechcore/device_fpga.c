@@ -3616,7 +3616,9 @@ BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
     // return
     if(ctxLC->fPrintf[LC_PRINTF_V]) {
         *(PDWORD)pb200 = 0;
-        DeviceFPGA_PCIeCfgSpaceCoreRead(ctx, pb200, 0x80000000 | 0);
+        if(ctx->dev.fInitialized && ctx->wFpgaVersionMajor) {
+            DeviceFPGA_PCIeCfgSpaceCoreRead(ctx, pb200, 0x80000000 | 0);
+        }
         dwVIDPID = *(PDWORD)pb200;
         lcprintfv(ctxLC,
             "DEVICE: FPGA: %s PCIe gen%i x%i [%i,%i,%i] [v%i.%i,%04x] [%s,%s%s]\n",
@@ -3634,7 +3636,7 @@ BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
             ((!dwVIDPID || (dwVIDPID == 0x066610ee)) ? "" : ",FWCUST")
         );
     }
-    if(ctxLC->fPrintf[LC_PRINTF_VV]) {
+    if(ctxLC->fPrintf[LC_PRINTF_VV] && ctx->dev.fInitialized) {
         DeviceFPGA_ConfigPrint(ctxLC, ctx);
     }
     return TRUE;
@@ -3644,7 +3646,9 @@ fail:
     }
     if(szDeviceError && ctxLC->fPrintf[LC_PRINTF_V]) {
         *(PDWORD)pb200 = 0;
-        DeviceFPGA_PCIeCfgSpaceCoreRead(ctx, pb200, 0x80000000 | 0);
+        if(ctx->dev.fInitialized && ctx->wFpgaVersionMajor) {
+            DeviceFPGA_PCIeCfgSpaceCoreRead(ctx, pb200, 0x80000000 | 0);
+        }
         dwVIDPID = *(PDWORD)pb200;
         lcprintfv(ctxLC,
             "DEVICE: FPGA: ERROR: %s [%i,v%i.%i,%04x%s]\n",
