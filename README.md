@@ -226,8 +226,9 @@ v1.0-1.8
 * ARM64 memory dump (.dmp) and VMWare Fusion (.vmem/.vmsn) support.
 * Improved handling of PCIe TLP user callback.
 
-Latest:
+[v2.17](https://github.com/ufrisk/LeechCore/releases/tag/v2.17)
 * Bug fixes.
 * I/O BAR support.
+* Support for plugin device drivers.
 * Linux PCIe FPGA performance improvements.
 * Linux PCIe FPGA multiple devices (devindex) supported.

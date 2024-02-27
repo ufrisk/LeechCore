@@ -5,6 +5,7 @@
 //     - ScreamerM2 board flashed with PCILeech bitstream.
 //     - RawUDP protocol - access FPGA over raw UDP packet stream (NeTV2 ETH)
 //     - FT2232H/FT245 protocol - access FPGA via FT2232H USB2 instead of FT601 USB3.
+//     - Other devices with plugin driver - ZDMA etc.
 //
 // (c) Ulf Frisk, 2017-2024
 // Author: Ulf Frisk, pcileech@frizk.net
@@ -679,7 +680,7 @@ ULONG WINAPI DeviceFPGA_UDP_FT60x_FT_ReadPipe(HANDLE ftHandle, UCHAR ucPipeID, P
                     if(cSleep < 5) {
                         SwitchToThread();
                     } else {
-                        usleep(100);
+                        BusySleep(100);
                     }
                     continue;
                 }
@@ -964,7 +965,7 @@ ULONG WINAPI DeviceFPGA_FT2232_FT60x_FT_ReadPipe(HANDLE ftHandleEx, UCHAR ucPipe
         if(cbRx) {
             return hFT2232H->pfnFT_Read(hFT2232H->ftHandle, pucBuffer, min(cbRx, ulBufferLength), pulBytesTransferred);
         }
-        usleep(125);
+        BusySleep(125);
         return 0;
     }
     // "NORMAL" MODE:
@@ -976,7 +977,7 @@ ULONG WINAPI DeviceFPGA_FT2232_FT60x_FT_ReadPipe(HANDLE ftHandleEx, UCHAR ucPipe
             if(cbRx) { break; }
             if(status || iRetry > 15) { break; }
             iRetry++;
-            usleep(120);
+            BusySleep(120);
         }
         status = hFT2232H->pfnFT_Read(hFT2232H->ftHandle, pucBuffer + cbReadTotal, min(cbRx, ulBufferLength - cbReadTotal), &cbRead);
         if(status || !cbRead) { break; }
@@ -1862,7 +1863,7 @@ BOOL DeviceFPGA_Bar_Initialize(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA
     DWORD dwBarSize;
     PWORD pwDrpBar;
     SIZE_T i;
-    BYTE pbDRP[0x100], pbBAR[24];
+    BYTE pbDRP[0x100], pbBAR[24] = { 0 };
     PLC_BAR pBar;
     ctx->tlp_callback.fBarInit = FALSE;
     ZeroMemory(&ctx->tlp_callback.Bar, sizeof(ctx->tlp_callback.Bar));
@@ -2117,7 +2118,7 @@ BOOL DeviceFPGA_TxTlp(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx, _In
             status = ctx->dev.pfnFT_WritePipe(ctx->dev.hFTDI, 0x02, ctx->txbuf.pb, ctx->txbuf.cb, &cbTxed, NULL);
         }
         ctx->txbuf.cb = 0;
-        usleep(ctx->perf.DELAY_WRITE);
+        BusySleep(ctx->perf.DELAY_WRITE);
         return (0 == status);
     }
     return TRUE;
@@ -2219,7 +2220,7 @@ VOID DeviceFPGA_Synch_RxTlpSynchronous(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONT
         // read retry should be attempted (in case of partial tlp received at the end)
         lcprintfvv(ctxLC, "Device Info: FPGA: Partial read - read retry attempted!\n");
         cbReadRxBuf = min(ctx->rxbuf.cbMax, cbReadRxBuf + 0x1000);
-        usleep(min(20, ctx->perf.DELAY_READ));
+        BusySleep(min(20, ctx->perf.DELAY_READ));
         fRetry = TRUE;
     }
 }
@@ -2298,7 +2299,7 @@ VOID DeviceFPGA_Synch_ReadScatter_Impl(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs,
                 if(ctx->perf.RX_FLUSH_LIMIT && (cbFlush >= (ctx->fAlgorithmReadTiny ? 0x1000 : ctx->perf.RX_FLUSH_LIMIT))) {
                     // flush is only used by the SP605.
                     DeviceFPGA_TxTlp(ctxLC, ctx, (PBYTE)tx, is32 ? 12 : 16, FALSE, TRUE);
-                    usleep(ctx->perf.DELAY_WRITE);
+                    BusySleep(ctx->perf.DELAY_WRITE);
                     cbFlush = 0;
                 } else {
                     DeviceFPGA_TxTlp(ctxLC, ctx, (PBYTE)tx, is32 ? 12 : 16, FALSE, FALSE);
@@ -2317,7 +2318,7 @@ VOID DeviceFPGA_Synch_ReadScatter_Impl(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs,
         // Receive TLPs
         if(cbTotalInCycle) {
             DeviceFPGA_TxTlp(ctxLC, ctx, NULL, 0, TRUE, TRUE);
-            usleep(ctx->perf.DELAY_READ);
+            BusySleep(ctx->perf.DELAY_READ);
             DeviceFPGA_Synch_RxTlpSynchronous(ctxLC, ctx, cbTotalInCycle);
         }
     }
@@ -2706,7 +2707,7 @@ VOID DeviceFPGA_Async2_ReadScatter_DoWork(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_C
     // TX PRIMARY and start OVERLAPPED read:
     pMemCtxTX = DeviceFPGA_Async2_Read_TxTlp(ctxLC, ctx, pMemCtxPrimary, TRUE);
     // RX INITIAL / (LATENCY OPTIMIZED FOR SMALLER READS):
-    usleep(ctx->perf.ASYNC_DELAY_1);
+    BusySleep(ctx->perf.ASYNC_DELAY_1);
     cbReadInitialMax = min(cbMAX_READSIZE, pMemCtxPrimary->cMEM * 0x1800);
     status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, ctx->rxbuf.pb + ctx->rxbuf.cb, cbReadInitialMax, &cbRead, NULL);
     if(status && (status != FT_IO_PENDING)) {
@@ -2731,7 +2732,7 @@ VOID DeviceFPGA_Async2_ReadScatter_DoWork(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_C
             if(cEmptyRead >= 0x30) {
                 goto fail_timeout;
             }
-            usleep(ctx->perf.ASYNC_DELAY_2);
+            BusySleep(ctx->perf.ASYNC_DELAY_2);
         }
         // START OVERLAPPED READ:
         if(fAsync) {
@@ -3051,13 +3052,13 @@ VOID DeviceFPGA_ProbeMEM_Impl(_In_ PLC_CONTEXT ctxLC, _In_ QWORD qwAddr, _In_ DW
         isFlush = (++cTxTlp % 24 == 0);
         if(isFlush) {
             DeviceFPGA_TxTlp(ctxLC, ctx, (PBYTE)tx, is32 ? 12 : 16, FALSE, TRUE);
-            usleep(ctx->perf.DELAY_PROBE_WRITE);
+            BusySleep(ctx->perf.DELAY_PROBE_WRITE);
         } else {
             DeviceFPGA_TxTlp(ctxLC, ctx, (PBYTE)tx, is32 ? 12 : 16, FALSE, FALSE);
         }
     }
     DeviceFPGA_TxTlp(ctxLC, ctx, NULL, 0, TRUE, TRUE);
-    usleep(ctx->perf.DELAY_PROBE_READ);
+    BusySleep(ctx->perf.DELAY_PROBE_READ);
     DeviceFPGA_Synch_RxTlpSynchronous(ctxLC, ctx, 0);
     ctx->hRxTlpCallbackFn = NULL;
     ctx->pMRdBufferX = NULL;
@@ -3200,6 +3201,7 @@ BOOL DeviceFPGA_Command(
     PLC_TLP pTLP;
     PBYTE pb;
     HANDLE hThread;
+    WORD wBarEnableValue, wBarEnableMask;
     qwOptionLo = fOption & 0x00000000ffffffff;
     qwOptionHi = fOption & 0xffffffff00000000;
     if(ppbDataOut) { *ppbDataOut = NULL; }
@@ -3223,6 +3225,9 @@ BOOL DeviceFPGA_Command(
             ctx->tlp_callback.ctxTlpUser = (PVOID)pbDataIn;
             return TRUE;
         case LC_CMD_FPGA_TLP_FUNCTION_CALLBACK:
+            wBarEnableValue = 0x00;
+            wBarEnableMask = 0x90;
+            DeviceFPGA_ConfigWriteEx(ctx, 0x19, (PBYTE)&wBarEnableValue, (PBYTE)&wBarEnableMask, FPGA_REG_CORE | FPGA_REG_READWRITE);   // Disable: [CFGTLP FILTER TLP FROM USER], Disable: [TLP FILTER FROM USER].
             ctx->tlp_callback.pfnTlpCB = (PLC_TLP_FUNCTION_CALLBACK)pbDataIn;
             if(!ctx->tlp_callback.fThread && ctx->tlp_callback.pfnTlpCB) {
                 if((hThread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)DeviceFPGA_Tlp_Callback_ThreadProc, ctxLC, 0, NULL))) {
@@ -3235,6 +3240,9 @@ BOOL DeviceFPGA_Command(
             ctx->tlp_callback.ctxBarUser = (PVOID)pbDataIn;
             return TRUE;
         case LC_CMD_FPGA_BAR_FUNCTION_CALLBACK:
+            wBarEnableValue = 0x00;
+            wBarEnableMask  = 0xb0;
+            DeviceFPGA_ConfigWriteEx(ctx, 0x19, (PBYTE)&wBarEnableValue, (PBYTE)&wBarEnableMask, FPGA_REG_CORE | FPGA_REG_READWRITE);   // Disable: [CFGTLP FILTER TLP FROM USER], Disable: [PCIE BAR PIO ON-BOARD PROCESSING ENABLE], Disable: [TLP FILTER FROM USER].
             if(!ctx->tlp_callback.pfnBarCB && pbDataIn) {
                 if(!ctx->tlp_callback.fBarInit && !DeviceFPGA_Bar_Initialize(ctxLC, ctx)) {
                     return FALSE;

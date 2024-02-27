@@ -21,7 +21,8 @@
 
 #define LC_LIBRARY_FILETYPE                 ".dll"
 #define LINUX_NO_OPTIMIZE
-VOID usleep(_In_ DWORD us);
+
+VOID BusySleep(_In_ DWORD us);
 
 #endif /* _WIN32 */
 #ifdef LINUX
@@ -175,6 +176,8 @@ VOID DeleteCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
 VOID EnterCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
 BOOL TryEnterCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
 VOID LeaveCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
+
+VOID BusySleep(_In_ DWORD us);
 
 typedef struct _SYSTEMTIME {
     WORD wYear;
