@@ -64,6 +64,7 @@ typedef void                                *OVERLAPPED, *LPOVERLAPPED;
 typedef struct tdEXCEPTION_RECORD32         { CHAR sz[80]; } EXCEPTION_RECORD32;
 typedef struct tdEXCEPTION_RECORD64         { CHAR sz[152]; } EXCEPTION_RECORD64;
 typedef int(*_CoreCrtNonSecureSearchSortCompareFunction)(void const *, void const *);
+#define __forceinline                       inline __attribute__((always_inline))
 #define TRUE                                1
 #define FALSE                               0
 #define MAX_PATH                            260
