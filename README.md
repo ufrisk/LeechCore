@@ -13,6 +13,7 @@ The LeechCore library is supported on 32/64-bit **Windows** (`.dll`) and 64-bit 
 For detailed information about individual memory acquisition methods, the API and related examples please check out the [LeechCore wiki](https://github.com/ufrisk/LeechCore/wiki).
 
 
+
 Memory Acquisition Methods:
 ===========================
 ### Software based memory aqusition methods:
@@ -55,6 +56,7 @@ Please find a summary of the supported hardware based memory acquisition methods
 | USB3380-EVB                                                                       | [USB3380](https://github.com/ufrisk/LeechCore/wiki/Device_USB3380)    | USB3  | 150MB/s | No  | No  |    |
 | PP3380                                                                            | [USB3380](https://github.com/ufrisk/LeechCore/wiki/Device_USB3380)    | USB3  | 150MB/s | No  | No  |    |
 | DMA patched HP iLO                                                                | [BMC](https://github.com/ufrisk/LeechCore/wiki/Device_RawTCP)         | TCP   |  1MB/s  | Yes | No  |    |
+
 
 
 The LeechAgent Memory Acquisition and Analysis Agent:
@@ -101,14 +103,24 @@ Start the LeechAgent in interactive mode with DumpIt LIVEKD to allow connecting 
 * `DumpIt.exe /LIVEKD /A LeechAgent.exe /C "-interactive -insecure"`
 
 
+PCILeech and MemProcFS community:
+=========
+Find all this a bit overwhelming? Or just want to ask a quick question? Join the PCILeech and MemProcFS DMA community server at Discord!
+
+<a href="https://discord.gg/BCmfBhDPXX"><img src="https://discord.com/api/guilds/1155439643395883128/widget.png?style=banner3"/></a>
+
+
+
 Building:
 =========
 <b>Pre-built [binaries, modules and configuration files](https://github.com/ufrisk/LeechCore/releases/latest) are found in the latest release.</b> Build instructions are found in the [Wiki](https://github.com/ufrisk/LeechCore/wiki) in the [Building](https://github.com/ufrisk/LeechCore/wiki/Dev_Building) section.
 
 
+
 Contributing:
 =============
 PCILeech, MemProcFS and LeechCore are open source but not open contribution. PCILeech, MemProcFS and LeechCore offers a highly flexible plugin architecture that will allow for contributions in the form of plugins. If you wish to make a contribution, other than a plugin, to the core projects please contact me before starting to develop.
+
 
 
 Links:
@@ -123,6 +135,7 @@ Links:
 * Blog: http://blog.frizk.net
 
 
+
 Support PCILeech/MemProcFS development:
 =======================================
 PCILeech and MemProcFS is free and open source!
@@ -134,6 +147,7 @@ If you like what I've created with PCIleech and MemProcFS with regards to DMA, M
 To all my sponsors, Thank You 💖 
 
 All sponsorships are welcome, no matter how large or small. I especially wish to thank my **bronze sponsors**: [grandprixgp](https://github.com/grandprixgp).
+
 
 
 Changelog:
@@ -201,7 +215,6 @@ v1.0-1.8
 * Bug fixes.
 * Visual Studio 2022 Support.
 * New write fpga algorithm.
-</details>
 
 [v2.12](https://github.com/ufrisk/LeechCore/releases/tag/v2.12)
 * Support for MemProcFS v5.
@@ -220,6 +233,7 @@ v1.0-1.8
 * Improved FPGA performance for smaller reads.
 * QEMU support on Linux (VM live memory introspection).
 * Improved [MemProcFS remoting](https://github.com/ufrisk/MemProcFS/wiki/_Remoting) via a remote [LeechAgent](https://github.com/ufrisk/LeechCore/wiki/LeechAgent). Full MemProcFS remote support over SMB - tcp/445. Perfect for memory forensics Incident Response (IR)!
+</details>
 
 [v2.16](https://github.com/ufrisk/LeechCore/releases/tag/v2.16)
 * PCIe BAR information and user callback (easier implementation of custom devices).
