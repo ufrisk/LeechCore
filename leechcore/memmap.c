@@ -160,7 +160,7 @@ BOOL LcMemMap_GetRangesAsText(_In_ PLC_CONTEXT ctxLC, _Out_ PBYTE *ppbDataOut, _
             ctxLC->pMemMap[i].paRemap
         );
     }
-    pb[cb - 1] = '\n';
+    pb[cb - 1] = 0;
     *ppbDataOut = pb;
     if(pcbDataOut) { *pcbDataOut = cb; }
     return TRUE;
