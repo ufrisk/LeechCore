@@ -190,7 +190,9 @@ typedef struct tdFPGA_NEWASYNC2_TAG_ENTRY {
 */
 typedef struct tdFPGA_NEWASYNC2_CONTEXT {
     BOOL fEnabled;
+    BOOL fOldAsync;
     OVERLAPPED oOverlapped;
+    // below are only used for the new async (algo=0,1) mode:
     POB_MAP pmQueue;
     BYTE iTag;
     DWORD cAvailTags;
@@ -2079,6 +2081,8 @@ VOID DeviceFPGA_Bar_RxTlp(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx,
 #define TLP_RX_MAX_SIZE             (16+1024)
 #define TLP_RX_MAX_SIZE_IN_DWORDS   (TLP_RX_MAX_SIZE/sizeof(DWORD))
 
+VOID DeviceFPGA_SynchOldAsync_RxTlpAsynchronous(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx, _In_opt_ DWORD cbBytesToRead);
+
 _Success_(return)
 BOOL DeviceFPGA_TxTlp(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx, _In_reads_(cbTlp) PBYTE pbTlp, _In_ DWORD cbTlp, _In_ BOOL fRdKeepalive, _In_ BOOL fFlush)
 {
@@ -2318,8 +2322,12 @@ VOID DeviceFPGA_Synch_ReadScatter_Impl(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs,
         // Receive TLPs
         if(cbTotalInCycle) {
             DeviceFPGA_TxTlp(ctxLC, ctx, NULL, 0, TRUE, TRUE);
-            BusySleep(ctx->perf.DELAY_READ);
-            DeviceFPGA_Synch_RxTlpSynchronous(ctxLC, ctx, cbTotalInCycle);
+            if(ctx->async2.fOldAsync) {
+                DeviceFPGA_SynchOldAsync_RxTlpAsynchronous(ctxLC, ctx, cbTotalInCycle);
+            } else {
+                BusySleep(ctx->perf.DELAY_READ);
+                DeviceFPGA_Synch_RxTlpSynchronous(ctxLC, ctx, cbTotalInCycle);
+            }
         }
     }
     ctx->hRxTlpCallbackFn = NULL;
@@ -2903,6 +2911,144 @@ VOID DeviceFPGA_Async2_WriteScatter(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cpMEMs, _
 
 
 //-------------------------------------------------------------------------------
+// TLP OLD ASYNC (algo=4) handling functionality below :
+//-------------------------------------------------------------------------------
+
+/*
+* Extract the first TLP out of a byte buffer received from the FPGA and forward
+* the TLP for processing.
+* -- ctxLC
+* -- ctx
+* -- cdwData = number of DWORDs in FPGA data pdwData
+* -- pdwData = FPGA data
+* -- return = the number of DWORDs successfully consumed.
+*/
+DWORD DeviceFPGA_SynchOldAsync_Tlp(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx, _In_ DWORD cdwData, _In_ PDWORD pdwData)
+{
+    BYTE pbTlp[TLP_RX_MAX_SIZE];
+    PDWORD pdwTlp = (PDWORD)pbTlp;
+    DWORD i = 0, j, dwStatus, cdwTlp = 0, iStartWord;
+    // skip over initial ftdi workaround dummy fillers / non valid octa-dwords
+    while((i < cdwData) && ((pdwData[i] == 0x55556666) || ((pdwData[i] & 0xf0000000) != 0xe0000000))) {
+        i++;
+    }
+    if(i) { return i; }
+    // fetch and process next complete and valid tlp (if possible)
+    while(i <= cdwData - 8) {
+        iStartWord = i;
+        dwStatus = pdwData[i++];
+        if((dwStatus & 0xf0000000) != 0xe0000000) {
+            continue;
+        }
+        for(j = 0; j < 7; j++, i++) {
+            if((dwStatus & 0x03) == 0x00) { // PCIe TLP
+                if(cdwTlp >= TLP_RX_MAX_SIZE / sizeof(DWORD)) {
+                    // TODO: malformed TLP
+                    pdwData[iStartWord] = pdwData[iStartWord] | (0xffffffff >> (28 - (j << 2)));
+                    return iStartWord;
+                }
+                pdwTlp[cdwTlp++] = pdwData[i];
+            }
+            if((dwStatus & 0x07) == 0x04) { // PCIe TLP and LAST
+                if(cdwTlp < 3) {
+                    printf("Device Info: FPGA: Bad PCIe TLP received! Should not happen!\n");
+                    pdwData[iStartWord] = pdwData[iStartWord] | (0xffffffff >> (28 - (j << 2)));
+                    return iStartWord;
+                }
+                if(ctxLC->fPrintf[LC_PRINTF_VVV]) {
+                    TLP_Print(ctxLC, pbTlp, cdwTlp << 2, FALSE);
+                }
+                if(ctx->tlp_callback.pBqRx) {
+                    ObByteQueue_Push(ctx->tlp_callback.pBqRx, 0, (SIZE_T)cdwTlp << 2, pbTlp);
+                }
+                if(ctx->hRxTlpCallbackFn) {
+                    ctx->hRxTlpCallbackFn(ctx->pMRdBufferX, pbTlp, cdwTlp << 2);
+                }
+                pdwData[iStartWord] = pdwData[iStartWord] | (0xffffffff >> (28 - (j << 2)));
+                return iStartWord;
+            }
+            dwStatus >>= 4;
+        }
+    }
+    return -1;
+}
+
+/*
+* Read memory using an asynchronous approach. In most aspects it should work
+* better than the synchronous approach. Async is however not supported on the
+* Linux drivers and may also have other advantages - so keep old function too.
+* -- ctxLC
+* -- ctx
+* -- cbBytesToRead
+*/
+VOID DeviceFPGA_SynchOldAsync_RxTlpAsynchronous(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx, _In_opt_ DWORD cbBytesToRead)
+{
+    DWORD status, cbRead, cdwTlpDataConsumed, cbReadMax = 0x10000;
+    DWORD cbBuffer = 0, oBuffer = 0, cEmptyRead = 0;
+    PBYTE pbBuffer = NULL;
+    BOOL fAsyncInProgress = FALSE, fAsync = cbBytesToRead > 0x4000;
+    PTLP_CALLBACK_BUF_MRd_SCATTER prxbuf = ctx->pMRdBufferX;
+    pbBuffer = ctx->rxbuf.pb;
+    if(prxbuf) {
+        cbReadMax = min(0x10000, max(0x1000, (cbBytesToRead - prxbuf->cbReadTotal) << 1));
+    }
+    if(ctx->dev.f2232h) {
+        cbReadMax = 0x00103000; // "fake" async buffer magic value in FT2232H mode
+        fAsync = FALSE;
+    }
+    BusySleep(25);
+    status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, pbBuffer, cbReadMax, &cbRead, NULL);
+    if(status && (status != FT_IO_PENDING)) { return; }
+    while(TRUE) {
+        cEmptyRead = ((cbRead == 0) || (cbRead == 0x14)) ? cEmptyRead + 1 : 0;
+        if(cEmptyRead >= 0x30) { break; }
+        cbBuffer += cbRead;
+        // 1: submit async read (if target read is large enough to gain from it)
+        if(fAsync) {
+            status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, pbBuffer + cbBuffer, cbReadMax, &cbRead, &ctx->async2.oOverlapped);
+            if(status && (status != FT_IO_PENDING)) {
+                break;
+            }
+            fAsyncInProgress = TRUE;
+        }
+        // 2: process (partial) tlp result
+        while(oBuffer + 32 <= cbBuffer) {
+            cdwTlpDataConsumed = DeviceFPGA_SynchOldAsync_Tlp(ctxLC, ctx, (cbBuffer - oBuffer) >> 2, (PDWORD)(pbBuffer + oBuffer));
+            if(cdwTlpDataConsumed == (DWORD)-1) { break; }
+            oBuffer += cdwTlpDataConsumed << 2;
+        }
+        if(prxbuf) {
+            cbReadMax = min(0x10000, max(0x1000, (cbBytesToRead - prxbuf->cbReadTotal) << 1));
+        }
+        // 3: check exit criteria
+        if(cbBuffer > 0x00f00000) { break; }
+        if(prxbuf && (cbBytesToRead <= prxbuf->cbReadTotal)) { break; }
+        // 3: read overlapped
+        if(fAsync) {
+            status = ctx->dev.pfnFT_GetOverlappedResult(ctx->dev.hFTDI, &ctx->async2.oOverlapped, &cbRead, TRUE);
+            fAsyncInProgress = TRUE;
+        } else {
+            status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, pbBuffer + cbBuffer, cbReadMax, &cbRead, NULL);
+        }
+        if(status) {
+            break;
+        }
+    }
+    if(fAsyncInProgress) {
+        // dummy clear overlapped result
+        ctx->dev.pfnFT_GetOverlappedResult(ctx->dev.hFTDI, &ctx->async2.oOverlapped, &cbRead, TRUE);
+    }
+}
+
+
+
+
+
+
+
+
+
+//-------------------------------------------------------------------------------
 // BAR AND USER TLP CALLBACK THREAD BELOW:
 //-------------------------------------------------------------------------------
 
@@ -2940,7 +3086,11 @@ DWORD DeviceFPGA_Tlp_Callback_ThreadProc(_In_ PLC_CONTEXT ctxLC)
                 DeviceFPGA_TxTlp(ctxLC, ctx, NULL, 0, TRUE, TRUE);
             }
             if(ctx->async2.fEnabled) {
-                DeviceFPGA_Async2_ReadOnlyFast_DoWork(ctxLC, ctx);
+                if(ctx->async2.fOldAsync) {
+                    DeviceFPGA_SynchOldAsync_RxTlpAsynchronous(ctxLC, ctx, ctx->perf.MAX_SIZE_RX);
+                } else {
+                    DeviceFPGA_Async2_ReadOnlyFast_DoWork(ctxLC, ctx);
+                }
             } else {
                 DeviceFPGA_Synch_RxTlpSynchronous(ctxLC, ctx, 0x00100000);
             }
@@ -3545,6 +3695,7 @@ BOOL DeviceFPGA_SetOption_DoLock(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _In
 
 #define FPGA_PARAMETER_ALGO_TINY                0x01
 #define FPGA_PARAMETER_ALGO_SYNCHRONOUS         0x02
+#define FPGA_PARAMETER_ALGO_OLDASYNCHRONOUS     0x04
 
 _Success_(return)
 BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo)
@@ -3615,11 +3766,17 @@ BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
     ctx->fAlgorithmReadTiny = ((v & FPGA_PARAMETER_ALGO_TINY) ? TRUE : FALSE) || ctx->perf.F_TINY;
     ctx->async2.fEnabled = ctx->async2.fEnabled && !(v & FPGA_PARAMETER_ALGO_SYNCHRONOUS) && !ctx->perf.RX_FLUSH_LIMIT;
     if(ctx->async2.fEnabled) {
-        // try new async2
-        if(!(ctx->async2.pmQueue = ObMap_New(NULL, OB_MAP_FLAGS_NOKEY))) { goto fail; }
-        ctx->async2.cbAvailCredits = ctx->perf.MAX_SIZE_RX;
-        ctx->async2.cAvailTags = 0xe0;
-        ctx->rxbuf.cbMax = 0x01000000;
+        if(v & FPGA_PARAMETER_ALGO_OLDASYNCHRONOUS) {
+            // old async (algo=4):
+            ctx->async2.fOldAsync = TRUE;
+            ctx->async2.fEnabled = FALSE;
+        } else {
+            // new async (algo=0, 1):
+            if(!(ctx->async2.pmQueue = ObMap_New(NULL, OB_MAP_FLAGS_NOKEY))) { goto fail; }
+            ctx->async2.cbAvailCredits = ctx->perf.MAX_SIZE_RX;
+            ctx->async2.cAvailTags = 0xe0;
+            ctx->rxbuf.cbMax = 0x01000000;
+        }
     }
     // return
     if(ctxLC->fPrintf[LC_PRINTF_V]) {
@@ -3639,7 +3796,7 @@ BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
             ctx->wFpgaVersionMajor,
             ctx->wFpgaVersionMinor,
             ctx->wDeviceId,
-            (ctx->async2.fEnabled ? "ASYNC" : "SYNC"),
+            (ctx->async2.fEnabled ? "ASYNC" : (ctx->async2.fOldAsync ? "OLDASYNC" : "SYNC")),
             (ctx->fAlgorithmReadTiny ? "TINY" : "NORM"),
             ((!dwVIDPID || (dwVIDPID == 0x066610ee)) ? "" : ",FWCUST")
         );
