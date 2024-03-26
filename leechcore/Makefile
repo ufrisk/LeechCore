@@ -10,7 +10,7 @@ CFLAGS  += -fPIE -fPIC -pie -fstack-protector-strong -D_FORTIFY_SOURCE=2 -O1 -Wl
 CFLAGS  += -Wall -Wno-multichar -Wno-unused-result -Wno-unused-variable -Wno-unused-value -Wno-pointer-to-int-cast -Wno-int-to-pointer-cast
 LDFLAGS += -g -ldl -shared
 DEPS = leechcore.h
-OBJ = oscompatibility.o leechcore.o util.o memmap.o device_file.o device_fpga.o device_pmem.o device_tmd.o device_usb3380.o device_vmm.o device_vmware.o leechrpcclient.o ob/ob_core.o ob/ob_map.o ob/ob_set.o ob/ob_bytequeue.o
+OBJ = oscompatibility.o leechcore.o util.o memmap.o device_file.o device_fpga.o device_hibr.o device_pmem.o device_tmd.o device_usb3380.o device_vmm.o device_vmware.o leechrpcclient.o ob/ob_core.o ob/ob_map.o ob/ob_set.o ob/ob_bytequeue.o
 
 %.o: %.c $(DEPS)
 	$(CC) -c -o $@ $< $(CFLAGS)

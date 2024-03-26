@@ -25,6 +25,7 @@ LC_MAIN_CONTEXT g_ctx = { 0 };
 _Success_(return) BOOL Device3380_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo);
 _Success_(return) BOOL DeviceFile_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo);
 _Success_(return) BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo);
+_Success_(return) BOOL DeviceHIBR_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo);
 _Success_(return) BOOL DevicePMEM_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo);
 _Success_(return) BOOL DeviceVMM_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo);
 _Success_(return) BOOL DeviceVMWare_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo);
@@ -259,9 +260,14 @@ VOID LcCreate_FetchDevice(_Inout_ PLC_CONTEXT ctx)
         ctx->pfnCreate = DeviceFile_Open;
         return;
     }
-    if((0 == _strnicmp("fpga", ctx->Config.szDevice, 4)) || (0 == _strnicmp("rawudp://", ctx->Config.szDevice, 9)) || (0 == _strnicmp("xdma", ctx->Config.szDevice, 4))) {
+    if((0 == _strnicmp("fpga", ctx->Config.szDevice, 4)) || (0 == _strnicmp("rawudp://", ctx->Config.szDevice, 9))) {
         strncpy_s(ctx->Config.szDeviceName, sizeof(ctx->Config.szDeviceName), "fpga", _TRUNCATE);
         ctx->pfnCreate = DeviceFPGA_Open;
+        return;
+    }
+    if(0 == _strnicmp("hibr", ctx->Config.szDevice, 4)) {
+        strncpy_s(ctx->Config.szDeviceName, sizeof(ctx->Config.szDeviceName), "hibr", _TRUNCATE);
+        ctx->pfnCreate = DeviceHIBR_Open;
         return;
     }
     if(0 == _strnicmp("usb3380", ctx->Config.szDevice, 7)) {

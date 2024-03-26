@@ -62,4 +62,12 @@ BOOL LcMemMap_SetRangesFromStruct(_In_ PLC_CONTEXT ctxLC, _In_ PLC_MEMMAP_ENTRY 
 _Success_(return)
 BOOL LcMemMap_SetRangesFromText(_In_ PLC_CONTEXT ctxLC, _In_ PBYTE pb, _In_ DWORD cb);
 
+/*
+* Create helper function to parse optional device configuration parameters.
+* Outside of the main function context this should be avoided unless forwarding
+* a create function call to another device type.
+* -- ctxLC
+*/
+VOID LcCreate_FetchDeviceParameter(_Inout_ PLC_CONTEXT ctxLC);
+
 #endif /* __LEECHCORE_INTERNAL_H__ */

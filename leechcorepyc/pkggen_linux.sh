@@ -10,6 +10,10 @@ cp -r ../leechcore pkg_linux/
 cp -r ../../LeechCore-plugins*/leechcore_device_qemu pkg_linux/
 cp -r ../../LeechCore-plugins*/leechcore_device_rawtcp pkg_linux/
 cp -r ../../LeechCore-plugins*/leechcore_ft601_driver_linux pkg_linux/
+mkdir pkg_linux/ms-compress
+cp    ../../ms-compress/Makefile pkg_linux/ms-compress/
+cp -r ../../ms-compress/include pkg_linux/ms-compress/
+cp -r ../../ms-compress/src pkg_linux/ms-compress/
 cp    ../leechcore/leechcore_device.h pkg_linux/includes/leechcore_device.h
 cp    ../LICENSE pkg_linux/
 cp    *.h pkg_linux/
@@ -39,7 +43,7 @@ leechcorepyc = Extension(
 
 setup(
     name='leechcorepyc',
-    version='2.17.4', # VERSION_END
+    version='2.18.0', # VERSION_END
     description='LeechCore for Python',
     long_description='LeechCore for Python : native extension for physical memory access',
     url='https://github.com/ufrisk/LeechCore',
@@ -55,7 +59,7 @@ setup(
         "Operating System :: POSIX :: Linux",
     ],
 	packages=['leechcorepyc'],
-	package_data={'leechcorepyc': ['leechcore.so', 'leechcore_ft601_driver_linux.so', 'leechcore_device_qemu.so', 'leechcore_device_rawtcp.so']},
+	package_data={'leechcorepyc': ['leechcore.so', 'leechcore_ft601_driver_linux.so', 'leechcore_device_qemu.so', 'leechcore_device_rawtcp.so', 'libMSCompression.so']},
     ext_modules = [leechcorepyc],
     )
 
@@ -82,8 +86,9 @@ include includes/*.h
 graft files
 graft leechcore
 graft leechcore_device_rawtcp
-graft leechcore_device_sp605tcp
+graft leechcore_device_qemu
 graft leechcore_ft601_driver_linux
+graft ms-compress
 global-exclude *vcxproj*
 global-exclude *.so
 
@@ -110,6 +115,8 @@ all:
 	$(MAKE) -C leechcore_ft601_driver_linux || true
 	$(MAKE) -C leechcore_device_qemu || true
 	$(MAKE) -C leechcore_device_rawtcp || true
+	$(MAKE) -C ms-compress || true
+	cp ms-compress/libMSCompression.so files/ || true
 	cp files/leechcore.so .
 	cp files/*.so leechcorepyc/
 
@@ -118,6 +125,7 @@ clean:
 	$(MAKE) clean -C leechcore_ft601_driver_linux || true
 	$(MAKE) clean -C leechcore_device_qemu || true
 	$(MAKE) clean -C leechcore_device_rawtcp || true
+	$(MAKE) clean -C ms-compress || true
 	rm files/*.so || true
 	rm leechcore.so || true
 	rm leechcorepyc/*.so || true

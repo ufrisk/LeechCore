@@ -233,12 +233,12 @@ v1.0-1.8
 * Improved FPGA performance for smaller reads.
 * QEMU support on Linux (VM live memory introspection).
 * Improved [MemProcFS remoting](https://github.com/ufrisk/MemProcFS/wiki/_Remoting) via a remote [LeechAgent](https://github.com/ufrisk/LeechCore/wiki/LeechAgent). Full MemProcFS remote support over SMB - tcp/445. Perfect for memory forensics Incident Response (IR)!
-</details>
 
 [v2.16](https://github.com/ufrisk/LeechCore/releases/tag/v2.16)
 * PCIe BAR information and user callback (easier implementation of custom devices).
 * ARM64 memory dump (.dmp) and VMWare Fusion (.vmem/.vmsn) support.
 * Improved handling of PCIe TLP user callback.
+</details>
 
 [v2.17](https://github.com/ufrisk/LeechCore/releases/tag/v2.17)
 * Bug fixes.
@@ -246,3 +246,7 @@ v1.0-1.8
 * Support for plugin device drivers.
 * Linux PCIe FPGA performance improvements.
 * Linux PCIe FPGA multiple devices (devindex) supported.
+
+[v2.18](https://github.com/ufrisk/LeechCore/releases/tag/v2.18)
+* Bug fixes.
+* Hibernation file support.

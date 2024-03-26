@@ -343,6 +343,7 @@ copy "$(ProjectDir)\leechcore.h" "$(SolutionDir)\includes\" /y
   <ItemGroup>
     <ClCompile Include="device_file.c" />
     <ClCompile Include="device_fpga.c" />
+    <ClCompile Include="device_hibr.c" />
     <ClCompile Include="device_pmem.c" />
     <ClCompile Include="device_tmd.c" />
     <ClCompile Include="device_usb3380.c" />

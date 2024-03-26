@@ -9,6 +9,13 @@
 #include "util.h"
 
 //-----------------------------------------------------------------------------
+// DEFINES: HIBERNATION 'HIBR' FILE DEVICE
+//-----------------------------------------------------------------------------
+
+_Success_(return)
+BOOL DeviceHIBR_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo);
+
+//-----------------------------------------------------------------------------
 // DEFINES: MICROSOFT CRASH DUMP DEFINES
 //-----------------------------------------------------------------------------
 
@@ -844,7 +851,7 @@ VOID DeviceFile_Close(_Inout_ PLC_CONTEXT ctxLC)
 _Success_(return)
 BOOL DeviceFile_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo)
 {
-    DWORD i;
+    DWORD i, dwFileMagic = 0;
     LPSTR szType;
     PDEVICE_CONTEXT_FILE ctx;
     PLC_DEVICE_PARAMETER_ENTRY pParam;
@@ -872,6 +879,19 @@ BOOL DeviceFile_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
     }
     // open backing file:
     if(fopen_s(&ctx->File[0].h, ctx->szFileName, (ctxLC->Config.fWritable ? "r+b" : "rb")) || !ctx->File[0].h) { goto fail; }
+    {
+        // check if file is hibernation file, in which case delegate open to hibr device:
+        _fseeki64(ctx->File[0].h, 0, SEEK_SET);
+        fread(&dwFileMagic, 1, sizeof(DWORD), ctx->File[0].h);
+        if(dwFileMagic == 0x52424948) {     // 'HIBR'
+            strncpy_s(ctxLC->Config.szDevice, _countof(ctxLC->Config.szDevice), "hibr://file=", _TRUNCATE);
+            strncpy_s(ctxLC->Config.szDevice + 12, _countof(ctxLC->Config.szDevice) - 12, ctx->szFileName, _TRUNCATE);
+            strncpy_s(ctxLC->Config.szDeviceName, _countof(ctxLC->Config.szDeviceName), "hibr", _TRUNCATE);
+            LocalFree(ctx);
+            LcCreate_FetchDeviceParameter(ctxLC);
+            return DeviceHIBR_Open(ctxLC, ppLcCreateErrorInfo);
+        }
+    }
     InitializeCriticalSection(&ctx->File[0].Lock);
     if(_fseeki64(ctx->File[0].h, 0, SEEK_END)) { goto fail; }   // seek to end of file
     ctx->cbFile = _ftelli64(ctx->File[0].h);                    // get current file pointer
