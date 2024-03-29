@@ -168,6 +168,7 @@ NTSTATUS OSCOMPAT_RtlDecompressBufferEx(USHORT CompressionFormat, PUCHAR Uncompr
     static BOOL fFirst = TRUE;
     static SRWLOCK LockSRW = SRWLOCK_INIT;
     static int(*pfn_xpress_decompress)(PBYTE pbIn, SIZE_T cbIn, PBYTE pbOut, SIZE_T *pcbOut) = NULL;
+    static int(*pfn_xpress_decompress_huff)(PBYTE pbIn, SIZE_T cbIn, PBYTE pbOut, SIZE_T * pcbOut) = NULL;
     CHAR szPathLib[MAX_PATH] = { 0 };
     Util_GetPathLib(szPathLib);
     strncat_s(szPathLib, sizeof(szPathLib), "libMSCompression.so", _TRUNCATE);
@@ -178,20 +179,18 @@ NTSTATUS OSCOMPAT_RtlDecompressBufferEx(USHORT CompressionFormat, PUCHAR Uncompr
             fFirst = FALSE;
             lib_mscompress = dlopen(szPathLib, RTLD_NOW);
             if(lib_mscompress) {
-                if(CompressionFormat == 3) {    // COMPRESS_ALGORITHM_XPRESS
-                    pfn_xpress_decompress = (int(*)(PBYTE, SIZE_T, PBYTE, SIZE_T *))dlsym(lib_mscompress, "xpress_decompress");
-                }
-                if(CompressionFormat == 4) {    // COMPRESS_ALGORITHM_XPRESS_HUFF
-                    pfn_xpress_decompress = (int(*)(PBYTE, SIZE_T, PBYTE, SIZE_T *))dlsym(lib_mscompress, "xpress_huff_decompress");
-                }
+                pfn_xpress_decompress = (int(*)(PBYTE, SIZE_T, PBYTE, SIZE_T *))dlsym(lib_mscompress, "xpress_decompress");
+                pfn_xpress_decompress_huff = (int(*)(PBYTE, SIZE_T, PBYTE, SIZE_T *))dlsym(lib_mscompress, "xpress_huff_decompress");
             }
         }
         ReleaseSRWLockExclusive(&LockSRW);
     }
     *FinalUncompressedSize = 0;
-    if(pfn_xpress_decompress) {
+    if(pfn_xpress_decompress && pfn_xpress_decompress_huff) {
         cbOut = UncompressedBufferSize;
-        rc = pfn_xpress_decompress(CompressedBuffer, CompressedBufferSize, UncompressedBuffer, &cbOut);
+        rc = (CompressionFormat == 4) ?
+            pfn_xpress_decompress_huff(CompressedBuffer, CompressedBufferSize, UncompressedBuffer, &cbOut) :
+            pfn_xpress_decompress(CompressedBuffer, CompressedBufferSize, UncompressedBuffer, &cbOut);
         if(rc == 0) {
             *FinalUncompressedSize = cbOut;
             return HIBR_STATUS_SUCCESS;
