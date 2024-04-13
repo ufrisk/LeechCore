@@ -883,7 +883,7 @@ BOOL DeviceFile_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
         // check if file is hibernation file, in which case delegate open to hibr device:
         _fseeki64(ctx->File[0].h, 0, SEEK_SET);
         fread(&dwFileMagic, 1, sizeof(DWORD), ctx->File[0].h);
-        if(dwFileMagic == 0x52424948) {     // 'HIBR'
+        if((dwFileMagic == 0x52424948) || (dwFileMagic == 0x454b4157)) {     // 'HIBR' or 'WAKE'
             strncpy_s(ctxLC->Config.szDevice, _countof(ctxLC->Config.szDevice), "hibr://file=", _TRUNCATE);
             strncpy_s(ctxLC->Config.szDevice + 12, _countof(ctxLC->Config.szDevice) - 12, ctx->szFileName, _TRUNCATE);
             strncpy_s(ctxLC->Config.szDeviceName, _countof(ctxLC->Config.szDeviceName), "hibr", _TRUNCATE);

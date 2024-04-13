@@ -70,6 +70,7 @@ const HIBR_OFFSET HIBR_OFFSET_PROFILES[] = {
 #define VMM_PTR_OFFSET(f32, pb, o)              ((f32) ? *(PDWORD)((o) + (PBYTE)(pb)) : *(PQWORD)((o) + (PBYTE)(pb)))
 
 #define HIBR_MAGIC                              0x52424948
+#define WAKE_MAGIC                              0x454b4157
 
 #define COMPRESS_ALGORITHM_NONE                 0
 #define COMPRESS_ALGORITHM_XPRESS               3
@@ -409,7 +410,7 @@ BOOL DeviceHibr_HibrInitialize(_In_ PLC_CONTEXT ctxLC)
     // 1: fetch header:
     if(_fseeki64(ctx->hFile, 0, SEEK_SET)) { goto fail; }
     if(fread(pb, 1, sizeof(pb), ctx->hFile) != sizeof(pb)) { goto fail; }
-    if(*(PDWORD)(pb + 0x000) != HIBR_MAGIC) { goto fail; }
+    if((*(PDWORD)(pb + 0x000) != HIBR_MAGIC) && (*(PDWORD)(pb + 0x000) != WAKE_MAGIC)) { goto fail; }
     // 2: fetch offsets to use by looking at struct length:
     cbPO_MEMORY_IMAGE = *(PDWORD)(pb + 0x00c);
     for(i = 0; i < _countof(HIBR_OFFSET_PROFILES); i++) {
