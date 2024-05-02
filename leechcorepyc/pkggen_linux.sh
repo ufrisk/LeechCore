@@ -43,7 +43,7 @@ leechcorepyc = Extension(
 
 setup(
     name='leechcorepyc',
-    version='2.18.2', # VERSION_END
+    version='2.18.3', # VERSION_END
     description='LeechCore for Python',
     long_description='LeechCore for Python : native extension for physical memory access',
     url='https://github.com/ufrisk/LeechCore',

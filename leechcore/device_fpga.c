@@ -2273,7 +2273,7 @@ VOID DeviceFPGA_Synch_ReadScatter_Impl(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs,
                 continue;
             }
             if(cbTotalInCycle >= ctx->perf.MAX_SIZE_RX) { break; }  // over max size -> break loop and read result
-            cbTotalInCycle += pDMA->cb;
+            cbTotalInCycle += (pDMA->cb == 0x1000) ? 0x1000 : (pDMA->cb + 48);
             o = 0;
             while(o < pDMA->cb) {
                 cb = fTiny ? min(0x80, pDMA->cb - o) : pDMA->cb;
