@@ -69,6 +69,7 @@ BOOL DeviceVMM_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO p
         goto fail;
     }
     // 4: set callback functions and fix up config
+    ctxLC->hDevice = (HANDLE)ctx;
     ctxLC->fMultiThread = TRUE;
     ctxLC->Config.fVolatile = qwVolatile ? TRUE : FALSE;
     ctxLC->pfnClose = DeviceVMM_Close;
