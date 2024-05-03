@@ -240,9 +240,6 @@ HMODULE LoadLibraryA(LPSTR lpFileName)
     if(lpFileName && (0 == memcmp(lpFileName, "FTD2XX.dll", 10))) {
         lpFileName = "libftd2xx.so";
     }
-    if(lpFileName && (0 == memcmp(lpFileName, "vmm.dll", 7))) {
-        lpFileName = "vmm.so";
-    }
     strncat(szFileName, lpFileName, MAX_PATH);
     return dlopen(szFileName, RTLD_NOW);
 }
