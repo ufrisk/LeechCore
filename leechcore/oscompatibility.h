@@ -26,6 +26,7 @@ VOID BusySleep(_In_ DWORD us);
 
 #endif /* _WIN32 */
 #ifdef LINUX
+#define _FILE_OFFSET_BITS 64
 #include <libusb.h>
 #include <byteswap.h>
 #include <ctype.h>
@@ -150,13 +151,13 @@ typedef int(*_CoreCrtNonSecureSearchSortCompareFunction)(void const *, void cons
 #define ExitThread(dwExitCode)              (pthread_exit(dwExitCode))
 #define ExitProcess(c)                      (exit(c ? EXIT_SUCCESS : EXIT_FAILURE))
 #define Sleep(dwMilliseconds)               (usleep(1000*dwMilliseconds))
-#define fopen_s(ppFile, szFile, szAttr)     ((*ppFile = fopen64(szFile, szAttr)) ? 0 : 1)
+#define fopen_s(ppFile, szFile, szAttr)     ((*ppFile = fopen(szFile, szAttr)) ? 0 : 1)
 #define GetModuleFileNameA(m, f, l)         (readlink("/proc/self/exe", f, l))
 #define ZeroMemory(pb, cb)                  (memset(pb, 0, cb))
 #define WinUsb_SetPipePolicy(h, p, t, cb, pb)   // TODO: implement this for better USB2 performance.
 #define WSAGetLastError()                   (WSAEWOULDBLOCK)    // TODO: remove this dummy when possible.
-#define _ftelli64(f)                        (ftello64(f))
-#define _fseeki64(f, o, w)                  (fseeko64(f, o, w))
+#define _ftelli64(f)                        (ftello(f))
+#define _fseeki64(f, o, w)                  (fseeko(f, o, w))
 #define _chsize_s(fd, cb)                   (ftruncate64(fd, cb))
 #define _fileno(f)                          (fileno(f))
 #define InterlockedAdd64(p, v)              (__sync_add_and_fetch_8(p, v))

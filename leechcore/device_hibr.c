@@ -499,7 +499,7 @@ BOOL DeviceHIBR_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
     if(!(ctx->CS_Directory[0] = (PHIBR_COMPRESSION_SET_TABLE)LocalAlloc(LMEM_ZEROINIT, sizeof(HIBR_COMPRESSION_SET_TABLE)))) { goto fail; }
     ctx->cCS = 1;   // 0 = reserved for invalid/not set compression set.
     if(0 == _strnicmp("hibr://", ctxLC->Config.szDevice, 7)) {
-        if((pParam = LcDeviceParameterGet(ctxLC, DEVICE_FILE_PARAMETER_FILE)) && pParam->szValue) {
+        if((pParam = LcDeviceParameterGet(ctxLC, DEVICE_FILE_PARAMETER_FILE)) && pParam->szValue[0]) {
             strncpy_s(ctx->szFileName, _countof(ctx->szFileName), pParam->szValue, _TRUNCATE);
         }
     }

@@ -861,7 +861,7 @@ BOOL DeviceFile_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
     ctxLC->Config.fWritable = FALSE;                    // Files are assumed to be read-only.
     ctxLC->Config.fVolatile = FALSE;                    // Files are assumed to be static non-volatile.
     if(0 == _strnicmp("file://", ctxLC->Config.szDevice, 7)) {
-        if((pParam = LcDeviceParameterGet(ctxLC, DEVICE_FILE_PARAMETER_FILE)) && pParam->szValue) {
+        if((pParam = LcDeviceParameterGet(ctxLC, DEVICE_FILE_PARAMETER_FILE)) && pParam->szValue[0]) {
             // we have a file name on the new format, i.e. fpga://file=<filename> - use the new format.
             strncpy_s(ctx->szFileName, _countof(ctx->szFileName), pParam->szValue, _TRUNCATE);
             ctxLC->Config.fVolatile = LcDeviceParameterGetNumeric(ctxLC, DEVICE_FILE_PARAMETER_VOLATILE) ? TRUE : FALSE;

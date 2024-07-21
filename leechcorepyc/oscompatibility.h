@@ -25,6 +25,7 @@ VOID usleep(_In_ DWORD us);
 
 #endif /* _WIN32 */
 #ifdef LINUX
+#define _FILE_OFFSET_BITS 64
 #include <byteswap.h>
 #include <ctype.h>
 #include <dirent.h>

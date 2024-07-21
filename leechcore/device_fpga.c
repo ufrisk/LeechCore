@@ -3714,12 +3714,12 @@ BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
     InitializeCriticalSection(&ctx->Lock);
     ctxLC->hDevice = (HANDLE)ctx;
     ctx->qwDeviceIndex = LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_DEVICE_INDEX);
-    if((pParam = LcDeviceParameterGet(ctxLC, FPGA_PARAMETER_UDP_ADDRESS)) && pParam->szValue) {
+    if((pParam = LcDeviceParameterGet(ctxLC, FPGA_PARAMETER_UDP_ADDRESS)) && pParam->szValue[0]) {
         dwIpAddr = inet_addr(pParam->szValue);
         szDeviceError = ((dwIpAddr == 0) || (dwIpAddr == (DWORD)-1)) ?
             "Bad IPv4 address" :
             DeviceFPGA_InitializeUDP(ctx, dwIpAddr);
-    } else if((pParam = LcDeviceParameterGet(ctxLC, FPGA_PARAMETER_FT2232H)) && pParam->szValue) {
+    } else if((pParam = LcDeviceParameterGet(ctxLC, FPGA_PARAMETER_FT2232H)) && pParam->szValue[0]) {
         szDeviceError = DeviceFPGA_InitializeFT2232(ctx);
     } else {
         fCustomDriver = LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_DRIVER) ? TRUE : FALSE;

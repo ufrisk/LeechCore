@@ -243,3 +243,6 @@ v1.0-1.8
 [v2.18](https://github.com/ufrisk/LeechCore/releases/tag/v2.18)
 * Bug fixes.
 * Hibernation file support.
+
+Latest:
+* Bug fixes.
