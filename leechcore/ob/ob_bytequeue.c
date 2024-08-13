@@ -136,6 +136,7 @@ BOOL _ObByteQueue_Push(_In_ POB_BYTEQUEUE pq, _In_opt_ QWORD qwTag, _In_ SIZE_T 
     p->cboNext = 0;
     memcpy(p->pb, pb, cb);
     pq->cPackets++;
+    pq->cboTail = (DWORD)((SIZE_T)p - (SIZE_T)pq->pb);
     return TRUE;
 }
 
