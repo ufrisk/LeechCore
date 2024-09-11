@@ -32,6 +32,7 @@ typedef struct tdHIBR_OFFSET {
 } HIBR_OFFSET, *PHIBR_OFFSET;
 
 const HIBR_OFFSET HIBR_OFFSET_PROFILES[] = {
+    {.LengthSelf = 0x4d8, .f32 = FALSE, .PageSize = 0x18, .SystemTime = 0x20, .NumPagesForLoader = 0x58, .FirstBootRestorePage = 0x68, .FirstKernelRestorePage = 0x70, .KernelPagesProcessed = 0x230, .HighestPhysicalPage = 0x498},  // 64-bit build 26100
     {.LengthSelf = 0x448, .f32 = FALSE, .PageSize = 0x18, .SystemTime = 0x20, .NumPagesForLoader = 0x58, .FirstBootRestorePage = 0x68, .FirstKernelRestorePage = 0x70, .KernelPagesProcessed = 0x230, .HighestPhysicalPage = 0x400},  // 64-bit build 22621
     {.LengthSelf = 0x448, .f32 = FALSE, .PageSize = 0x18, .SystemTime = 0x20, .NumPagesForLoader = 0x58, .FirstBootRestorePage = 0x68, .FirstKernelRestorePage = 0x70, .KernelPagesProcessed = 0x230, .HighestPhysicalPage = 0x400},  // 64-bit build 22000
     {.LengthSelf = 0x448, .f32 = FALSE, .PageSize = 0x18, .SystemTime = 0x20, .NumPagesForLoader = 0x58, .FirstBootRestorePage = 0x68, .FirstKernelRestorePage = 0x70, .KernelPagesProcessed = 0x230, .HighestPhysicalPage = 0x400},  // 64-bit build 20348
