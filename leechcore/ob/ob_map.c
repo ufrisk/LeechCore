@@ -277,9 +277,9 @@ PVOID _ObMap_GetNextByKey(_In_ POB_MAP pm, _In_ QWORD qwKey, _In_opt_ PVOID pvOb
 PVOID _ObMap_GetNextByIndex(_In_ POB_MAP pm, _Inout_ PDWORD pdwIndex, _In_opt_ PVOID pvObject)
 {
     if(pvObject) {
-        *pdwIndex = pm->c - 1;
-    } else {
         *pdwIndex = *pdwIndex - 1;
+    } else {
+        *pdwIndex = pm->c - 1;
     }
     if(pm->fObjectsOb) { Ob_DECREF(pvObject); }
     return _ObMap_GetByEntryIndex(pm, *pdwIndex);
@@ -725,7 +725,7 @@ BOOL ObMap_Clear(_In_opt_ POB_MAP pm)
 //-----------------------------------------------------------------------------
 
 _Success_(return)
-BOOL _ObMap_SortEntryIndex(_In_ POB_MAP pm, _In_ _CoreCrtNonSecureSearchSortCompareFunction pfnSort)
+BOOL _ObMap_SortEntryIndex(_In_ POB_MAP pm, _In_ OB_MAP_SORT_COMPARE_FUNCTION pfnSort)
 {
     DWORD iEntry;
     POB_MAP_ENTRY pSort;
@@ -734,7 +734,7 @@ BOOL _ObMap_SortEntryIndex(_In_ POB_MAP pm, _In_ _CoreCrtNonSecureSearchSortComp
     for(iEntry = 1; iEntry < pm->c; iEntry++) {
         memcpy(pSort + iEntry, &pm->Directory[OB_MAP_INDEX_DIRECTORY(iEntry)][OB_MAP_INDEX_TABLE(iEntry)][OB_MAP_INDEX_STORE(iEntry)], sizeof(OB_MAP_ENTRY));
     }
-    qsort(pSort + 1, pm->c - 1, sizeof(OB_MAP_ENTRY), pfnSort);
+    qsort(pSort + 1, pm->c - 1, sizeof(OB_MAP_ENTRY), (_CoreCrtNonSecureSearchSortCompareFunction)pfnSort);
     for(iEntry = 1; iEntry < pm->c; iEntry++) {
         memcpy(&pm->Directory[OB_MAP_INDEX_DIRECTORY(iEntry)][OB_MAP_INDEX_TABLE(iEntry)][OB_MAP_INDEX_STORE(iEntry)], pSort + iEntry, sizeof(OB_MAP_ENTRY));
     }
@@ -754,11 +754,11 @@ BOOL _ObMap_SortEntryIndex(_In_ POB_MAP pm, _In_ _CoreCrtNonSecureSearchSortComp
     return TRUE;
 }
 
-int _ObMap_SortEntryIndexByKey_CmpSort(_In_ POB_MAP_ENTRY p1, _In_ POB_MAP_ENTRY p2)
+int _ObMap_SortEntryIndexByKey_CmpSort(_In_ POB_MAP_ENTRY e1, _In_ POB_MAP_ENTRY e2)
 {
     return
-        (p1->k < p2->k) ? -1 :
-        (p1->k > p2->k) ? 1 : 0;
+        (e1->k < e2->k) ? -1 :
+        (e1->k > e2->k) ? 1 : 0;
 }
 
 /*
@@ -770,7 +770,7 @@ int _ObMap_SortEntryIndexByKey_CmpSort(_In_ POB_MAP_ENTRY p1, _In_ POB_MAP_ENTRY
 * -- return
 */
 _Success_(return)
-BOOL ObMap_SortEntryIndex(_In_opt_ POB_MAP pm, _In_ _CoreCrtNonSecureSearchSortCompareFunction pfnSort)
+BOOL ObMap_SortEntryIndex(_In_opt_ POB_MAP pm, _In_ OB_MAP_SORT_COMPARE_FUNCTION pfnSort)
 {
     OB_MAP_CALL_SYNCHRONIZED_IMPLEMENTATION_WRITE(pm, BOOL, FALSE, _ObMap_SortEntryIndex(pm, pfnSort))
 }
@@ -785,7 +785,7 @@ BOOL ObMap_SortEntryIndex(_In_opt_ POB_MAP pm, _In_ _CoreCrtNonSecureSearchSortC
 _Success_(return)
 BOOL ObMap_SortEntryIndexByKey(_In_opt_ POB_MAP pm)
 {
-    return ObMap_SortEntryIndex(pm, (_CoreCrtNonSecureSearchSortCompareFunction)_ObMap_SortEntryIndexByKey_CmpSort);
+    return ObMap_SortEntryIndex(pm, _ObMap_SortEntryIndexByKey_CmpSort);
 }
 
 //-----------------------------------------------------------------------------
@@ -844,16 +844,20 @@ BOOL _ObMap_Push(_In_ POB_MAP pm, _In_ QWORD qwKey, _In_ PVOID pvObject)
     if(!pm->Directory[OB_MAP_INDEX_DIRECTORY(iEntry)][OB_MAP_INDEX_TABLE(iEntry)]) {    // allocate "store" if required
         if(!(pm->Directory[OB_MAP_INDEX_DIRECTORY(iEntry)][OB_MAP_INDEX_TABLE(iEntry)] = LocalAlloc(LMEM_ZEROINIT, sizeof(OB_MAP_ENTRY) * OB_MAP_ENTRIES_STORE))) { return FALSE; }
     }
-    if(pm->fObjectsOb) {
-        Ob_INCREF(pvObject);
-    }
     pm->c++;
-    pe = _ObMap_GetFromIndex(pm, iEntry);
-    pe->k = qwKey;
-    pe->v = pvObject;
-    _ObMap_InsertHash(pm, TRUE, iEntry);
-    _ObMap_InsertHash(pm, FALSE, iEntry);
-    return TRUE;
+    if((pe = _ObMap_GetFromIndex(pm, iEntry))) {
+        if(pm->fObjectsOb) {
+            Ob_INCREF(pvObject);
+        }
+        pe->k = qwKey;
+        pe->v = pvObject;
+        _ObMap_InsertHash(pm, TRUE, iEntry);
+        _ObMap_InsertHash(pm, FALSE, iEntry);
+        return TRUE;
+    } else {
+        pm->c--;
+        return FALSE;
+    }
 }
 
 _Success_(return)

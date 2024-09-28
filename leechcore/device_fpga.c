@@ -73,7 +73,9 @@ typedef struct tdDEV_CFG_PHY {
     } rd;
 } DEV_CFG_PHY, *PDEV_CFG_PHY;
 
-#define DEVICE_PERFORMANCE_VERSION          1
+#define DEVICE_PERFORMANCE_FLAG_FASTWRITE   0x1
+
+#define DEVICE_PERFORMANCE_VERSION          2
 typedef struct tdDEVICE_PERFORMANCE {
     DWORD VERSION;
     LPSTR SZ_DEVICE_NAME;
@@ -90,6 +92,7 @@ typedef struct tdDEVICE_PERFORMANCE {
     DWORD ASYNC_MAX_READSIZE;
     DWORD ASYNC_DELAY_1;
     DWORD ASYNC_DELAY_2;
+    DWORD FLAGS;
 } DEVICE_PERFORMANCE, *PDEVICE_PERFORMANCE;
 
 typedef union tdFPGA_HANDLESOCKET {
@@ -125,32 +128,32 @@ typedef union tdFPGA_HANDLESOCKET {
 #define DEVICE_ID_MAX                           0x18
 
 const DEVICE_PERFORMANCE PERFORMANCE_PROFILES[DEVICE_ID_MAX + 1] = {
-    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "SP605 / FT601",         .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0x8000, .MAX_SIZE_RX = 0x1f000, .MAX_SIZE_TX = 0x2000, .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 175, .DELAY_READ = 400, .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "SP605 / FT601",         .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0x8000, .MAX_SIZE_RX = 0x1f000, .MAX_SIZE_TX = 0x2000, .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 175, .DELAY_READ = 400, .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5, .FLAGS = 0 },
     // The PCIeScreamer R1 have a problem with the PCIe link stability which results on lost or delayed TLPS - workarounds are in place to retry after a delay.
-    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "PCIeScreamer R1",       .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x1c000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 1000, .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 0,   .DELAY_READ = 500, .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5 },
-    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "AC701 / FT601",         .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x1c000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0,   .DELAY_READ = 300, .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5 },
-    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "PCIeScreamer R2",       .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x1c000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 750,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 0,   .DELAY_READ = 400, .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5 },
-    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "ScreamerM2",            .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x1c000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 25,  .DELAY_READ = 300, .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5 },
-    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "NeTV2 RawUDP",          .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x1c000, .MAX_SIZE_TX = 0x400,  .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0,   .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5 },
-    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "Unsupported",           .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x14000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 35,  .DELAY_READ = 350, .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5 },
-    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "Unsupported",           .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x14000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 35,  .DELAY_READ = 350, .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5 },
-    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "FT2232H #1",            .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x30000, .MAX_SIZE_TX = 0x8000, .DELAY_PROBE_READ = 1000, .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 0,   .DELAY_READ = 0,   .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5 },
-    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "Enigma X1",             .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x1c000, .MAX_SIZE_TX = 0x13f0, .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 10,  .DELAY_READ = 250, .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5 },
-    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "Enigma X1 (FutureUse)", .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x30000, .MAX_SIZE_TX = 0x13f0, .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 10,  .DELAY_READ = 250, .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5 },
-    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "ScreamerM2x4",          .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x14000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 25,  .DELAY_READ = 300, .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5 },
-    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "PCIeSquirrel",          .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x1c000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 25,  .DELAY_READ = 300, .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5 },
-    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "Device #13N",           .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x14000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 35,  .DELAY_READ = 350, .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5 },
-    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "Device #14T",           .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x14000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 35,  .DELAY_READ = 350, .RETRY_ON_ERROR = 1, .F_TINY = 1, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5 },
-    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "Device #15N",           .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x30000, .MAX_SIZE_TX = 0x13f0, .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 15,  .DELAY_READ = 300, .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5 },
-    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "Device #16T",           .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x30000, .MAX_SIZE_TX = 0x13f0, .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 15,  .DELAY_READ = 300, .RETRY_ON_ERROR = 1, .F_TINY = 1, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5 },
-    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "DRIVER_SUPPLIED",       .PROBE_MAXPAGES = 0,     .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0,       .MAX_SIZE_TX = 0,      .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0 ,  .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0,       .ASYNC_DELAY_1 = 0, .ASYNC_DELAY_2 = 0 },
-    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "DRIVER_SUPPLIED",       .PROBE_MAXPAGES = 0,     .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0,       .MAX_SIZE_TX = 0,      .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0 ,  .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0,       .ASYNC_DELAY_1 = 0, .ASYNC_DELAY_2 = 0 },
-    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "DRIVER_SUPPLIED",       .PROBE_MAXPAGES = 0,     .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0,       .MAX_SIZE_TX = 0,      .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0 ,  .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0,       .ASYNC_DELAY_1 = 0, .ASYNC_DELAY_2 = 0 },
-    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "DRIVER_SUPPLIED",       .PROBE_MAXPAGES = 0,     .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0,       .MAX_SIZE_TX = 0,      .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0 ,  .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0,       .ASYNC_DELAY_1 = 0, .ASYNC_DELAY_2 = 0 },
-    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "DRIVER_SUPPLIED",       .PROBE_MAXPAGES = 0,     .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0,       .MAX_SIZE_TX = 0,      .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0 ,  .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0,       .ASYNC_DELAY_1 = 0, .ASYNC_DELAY_2 = 0 },
-    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "DRIVER_SUPPLIED",       .PROBE_MAXPAGES = 0,     .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0,       .MAX_SIZE_TX = 0,      .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0 ,  .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0,       .ASYNC_DELAY_1 = 0, .ASYNC_DELAY_2 = 0 },
-    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "DRIVER_SUPPLIED",       .PROBE_MAXPAGES = 0,     .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0,       .MAX_SIZE_TX = 0,      .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0 ,  .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0,       .ASYNC_DELAY_1 = 0, .ASYNC_DELAY_2 = 0 },
-    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "DRIVER_SUPPLIED",       .PROBE_MAXPAGES = 0,     .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0,       .MAX_SIZE_TX = 0,      .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0 ,  .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0,       .ASYNC_DELAY_1 = 0, .ASYNC_DELAY_2 = 0 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "PCIeScreamer R1",       .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x1c000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 1000, .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 0,   .DELAY_READ = 500, .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5, .FLAGS = 0 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "AC701 / FT601",         .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x1c000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0,   .DELAY_READ = 300, .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5, .FLAGS = 0 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "PCIeScreamer R2",       .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x1c000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 750,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 0,   .DELAY_READ = 400, .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5, .FLAGS = 0 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "ScreamerM2",            .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x1c000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 25,  .DELAY_READ = 300, .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5, .FLAGS = 0 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "NeTV2 RawUDP",          .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x1c000, .MAX_SIZE_TX = 0x400,  .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0,   .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5, .FLAGS = 0 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "Unsupported",           .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x14000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 35,  .DELAY_READ = 350, .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5, .FLAGS = 0 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "Unsupported",           .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x14000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 35,  .DELAY_READ = 350, .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5, .FLAGS = 0 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "FT2232H #1",            .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x30000, .MAX_SIZE_TX = 0x8000, .DELAY_PROBE_READ = 1000, .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 0,   .DELAY_READ = 0,   .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5, .FLAGS = 0 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "Enigma X1",             .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x1c000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 25,  .DELAY_READ = 300, .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5, .FLAGS = 0 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "Enigma X1 (FutureUse)", .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x30000, .MAX_SIZE_TX = 0x13f0, .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 10,  .DELAY_READ = 250, .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5, .FLAGS = 0 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "ScreamerM2x4",          .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x14000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 25,  .DELAY_READ = 300, .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5, .FLAGS = 0 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "PCIeSquirrel",          .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x1c000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 25,  .DELAY_READ = 300, .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5, .FLAGS = 0 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "Device #13N",           .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x14000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 35,  .DELAY_READ = 350, .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5, .FLAGS = 0 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "Device #14T",           .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x14000, .MAX_SIZE_TX = 0x3f0,  .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 35,  .DELAY_READ = 350, .RETRY_ON_ERROR = 1, .F_TINY = 1, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5, .FLAGS = 0 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "Device #15N",           .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x30000, .MAX_SIZE_TX = 0x13f0, .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 15,  .DELAY_READ = 300, .RETRY_ON_ERROR = 1, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5, .FLAGS = 0 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "Device #16T",           .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x30000, .MAX_SIZE_TX = 0x13f0, .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 150, .DELAY_WRITE = 15,  .DELAY_READ = 300, .RETRY_ON_ERROR = 1, .F_TINY = 1, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5, .FLAGS = 0 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "DRIVER_SUPPLIED",       .PROBE_MAXPAGES = 0,     .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0,       .MAX_SIZE_TX = 0,      .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0 ,  .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0,       .ASYNC_DELAY_1 = 0, .ASYNC_DELAY_2 = 0, .FLAGS = 0 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "DRIVER_SUPPLIED",       .PROBE_MAXPAGES = 0,     .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0,       .MAX_SIZE_TX = 0,      .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0 ,  .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0,       .ASYNC_DELAY_1 = 0, .ASYNC_DELAY_2 = 0, .FLAGS = 0 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "DRIVER_SUPPLIED",       .PROBE_MAXPAGES = 0,     .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0,       .MAX_SIZE_TX = 0,      .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0 ,  .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0,       .ASYNC_DELAY_1 = 0, .ASYNC_DELAY_2 = 0, .FLAGS = 0 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "DRIVER_SUPPLIED",       .PROBE_MAXPAGES = 0,     .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0,       .MAX_SIZE_TX = 0,      .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0 ,  .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0,       .ASYNC_DELAY_1 = 0, .ASYNC_DELAY_2 = 0, .FLAGS = 0 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "DRIVER_SUPPLIED",       .PROBE_MAXPAGES = 0,     .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0,       .MAX_SIZE_TX = 0,      .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0 ,  .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0,       .ASYNC_DELAY_1 = 0, .ASYNC_DELAY_2 = 0, .FLAGS = 0 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "DRIVER_SUPPLIED",       .PROBE_MAXPAGES = 0,     .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0,       .MAX_SIZE_TX = 0,      .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0 ,  .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0,       .ASYNC_DELAY_1 = 0, .ASYNC_DELAY_2 = 0, .FLAGS = 0 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "DRIVER_SUPPLIED",       .PROBE_MAXPAGES = 0,     .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0,       .MAX_SIZE_TX = 0,      .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0 ,  .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0,       .ASYNC_DELAY_1 = 0, .ASYNC_DELAY_2 = 0, .FLAGS = 0 },
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "DRIVER_SUPPLIED",       .PROBE_MAXPAGES = 0,     .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0,       .MAX_SIZE_TX = 0,      .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0 ,  .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0,       .ASYNC_DELAY_1 = 0, .ASYNC_DELAY_2 = 0, .FLAGS = 0 },
 };
 
 /*
@@ -235,6 +238,12 @@ typedef struct tdDEVICE_CONTEXT_FPGA {
         DWORD cb;
         DWORD cbMax;
     } txbuf;
+    struct {
+        PBYTE pb;
+        DWORD cb;
+        DWORD cbMax;
+        SRWLOCK LockSRW;
+    } txbuf_fastwrite;
     struct {
         HMODULE hModule;
         BOOL fInitialized;
@@ -1157,6 +1166,7 @@ VOID DeviceFPGA_Close(_Inout_ PLC_CONTEXT ctxLC)
     Ob_DECREF(ctx->async2.pmQueue);
     LocalFree(ctx->rxbuf.pb);
     LocalFree(ctx->txbuf.pb);
+    LocalFree(ctx->txbuf_fastwrite.pb);
     LocalFree(ctx);
     ctxLC->hDevice = 0;
 }
@@ -2129,6 +2139,59 @@ BOOL DeviceFPGA_TxTlp(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx, _In
 }
 
 /*
+* Fast transmit of packets, this is meant to transmit packets which does not
+* require any reply and only if the underlying device supports async write ops.
+* I.e. the flag DEVICE_PERFORMANCE_FLAG_FASTWRITE must be set.
+*/
+_Success_(return)
+BOOL DeviceFPGA_TxTlp_FastWrite_NoLock(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx, _In_reads_(cbTlp) PBYTE pbTlp, _In_ DWORD cbTlp, _In_ BOOL fRdKeepalive, _In_ BOOL fFlush)
+{
+    DWORD status;
+    PBYTE pbTx;
+    QWORD i;
+    DWORD cbTx, cbTxed = 0;
+    if(cbTlp & 0x3) { return FALSE; }
+    if(cbTlp > 4 * 4 + 128) { return FALSE; }
+    if(cbTlp && (ctx->txbuf_fastwrite.cb + (cbTlp << 1) + (fFlush ? 8 : 0) >= ctx->perf.MAX_SIZE_TX)) {
+        if(!DeviceFPGA_TxTlp_FastWrite_NoLock(ctxLC, ctx, NULL, 0, FALSE, TRUE)) { return FALSE; }
+    }
+    if(ctxLC->fPrintf[LC_PRINTF_VVV] && cbTlp) {
+        TLP_Print(ctxLC, pbTlp, cbTlp, TRUE);
+    }
+    // prepare transmit buffer
+    AcquireSRWLockExclusive(&ctx->txbuf_fastwrite.LockSRW);     // DeviceFPGA_TxTlp_FastWrite_NoLock is called outside the main lock, implement its own locking to keep buffer consistent.
+    pbTx = ctx->txbuf_fastwrite.pb + ctx->txbuf_fastwrite.cb;
+    cbTx = 2 * cbTlp;
+    for(i = 0; i < cbTlp; i += 4) {
+        *(PDWORD)(pbTx + (i << 1)) = *(PDWORD)(pbTlp + i);
+        *(PDWORD)(pbTx + ((i << 1) + 4)) = 0x77000000;    // TX TLP
+    }
+    if(cbTlp) {
+        *(PDWORD)(pbTx + ((i << 1) - 4)) = 0x77040000;    // TX TLP VALID LAST
+    }
+    if(fRdKeepalive) {
+        cbTx += 8;
+        *(PDWORD)(pbTx + (i << 1)) = 0xffeeddcc;
+        *(PDWORD)(pbTx + ((i << 1) + 4)) = 0x77020000;    // LOOPBACK TX
+    }
+    ctx->txbuf_fastwrite.cb += cbTx;
+    // transmit
+    if((ctx->txbuf_fastwrite.cb >= ctx->perf.MAX_SIZE_TX) || (fFlush && ctx->txbuf_fastwrite.cb)) {
+        status = ctx->dev.pfnFT_WritePipe(ctx->dev.hFTDI, 0x02, ctx->txbuf_fastwrite.pb, ctx->txbuf_fastwrite.cb, &cbTxed, NULL);
+        if(status == 0x20) {
+            DeviceFPGA_ReInitializeFTDI(ctx); // try recovery if possible.
+            status = ctx->dev.pfnFT_WritePipe(ctx->dev.hFTDI, 0x02, ctx->txbuf_fastwrite.pb, ctx->txbuf_fastwrite.cb, &cbTxed, NULL);
+        }
+        ctx->txbuf_fastwrite.cb = 0;
+        BusySleep(ctx->perf.DELAY_WRITE);
+        ReleaseSRWLockExclusive(&ctx->txbuf_fastwrite.LockSRW);
+        return (0 == status);
+    }
+    ReleaseSRWLockExclusive(&ctx->txbuf_fastwrite.LockSRW);
+    return TRUE;
+}
+
+/*
 * Prepare a single TLP for the user-set custom callback function and dispatch.
 */
 VOID DeviceFPGA_RxTlp_UserCallback(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx, PBYTE pbTlp, DWORD cbTlp)
@@ -2203,7 +2266,9 @@ VOID DeviceFPGA_Synch_RxTlpSynchronous(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONT
                         if(ctxLC->fPrintf[LC_PRINTF_VVV]) {
                             TLP_Print(ctxLC, pbTlp, cdwTlp << 2, FALSE);
                         }
-                        ObByteQueue_Push(ctx->tlp_callback.pBqRx, 0, (SIZE_T)cdwTlp << 2, pbTlp);
+                        if(ctx->tlp_callback.pBqRx) {
+                            ObByteQueue_Push(ctx->tlp_callback.pBqRx, 0, (SIZE_T)cdwTlp << 2, pbTlp);
+                        }
                         if(ctx->hRxTlpCallbackFn) {
                             ctx->hRxTlpCallbackFn(ctx->pMRdBufferX, pbTlp, cdwTlp << 2);
                         }
@@ -3061,9 +3126,10 @@ DWORD DeviceFPGA_Tlp_Callback_ThreadProc(_In_ PLC_CONTEXT ctxLC)
 {
     PDEVICE_CONTEXT_FPGA ctx = (PDEVICE_CONTEXT_FPGA)ctxLC->hDevice;
     BOOL fActiveRun;
-    DWORD dwInactiveCount = 0;
     BYTE pbTlp[TLP_RX_MAX_SIZE];
     SIZE_T cbTlp;
+    QWORD tcInactivity = GetTickCount64();
+    POB_BYTEQUEUE pObBqRx_Terminate = NULL, pObBqTx_Terminate = NULL;
     if(ctx->tlp_callback.fThread) { return 1; }
     ctx->tlp_callback.fThread = TRUE;
     InterlockedIncrement(&ctxLC->dwHandleCount);    // increment device handle count
@@ -3077,24 +3143,40 @@ DWORD DeviceFPGA_Tlp_Callback_ThreadProc(_In_ PLC_CONTEXT ctxLC)
         }
         // TRANSMIT / RECEIVE TLPs:
         // (only if there are no already queued received TLPs to process):
-        if((0 == ObByteQueue_Size(ctx->tlp_callback.pBqRx)) && TryEnterCriticalSection(&ctx->Lock)) {
+        if(0 == ObByteQueue_Size(ctx->tlp_callback.pBqRx)) {
+            // Write TLPs (if any):
             if(ObByteQueue_Size(ctx->tlp_callback.pBqTx)) {
-                fActiveRun = TRUE;
-                while(ObByteQueue_Pop(ctx->tlp_callback.pBqTx, NULL, sizeof(pbTlp), pbTlp, &cbTlp)) {
-                    DeviceFPGA_TxTlp(ctxLC, ctx, pbTlp, (DWORD)cbTlp, FALSE, FALSE);
+                if(ctx->perf.FLAGS & DEVICE_PERFORMANCE_FLAG_FASTWRITE) {
+                    // fast "async" write:
+                    fActiveRun = TRUE;
+                    while(ObByteQueue_Pop(ctx->tlp_callback.pBqTx, NULL, sizeof(pbTlp), pbTlp, &cbTlp)) {
+                        DeviceFPGA_TxTlp_FastWrite_NoLock(ctxLC, ctx, pbTlp, (DWORD)cbTlp, FALSE, FALSE);
+                    }
+                    DeviceFPGA_TxTlp_FastWrite_NoLock(ctxLC, ctx, NULL, 0, FALSE, TRUE);
                 }
-                DeviceFPGA_TxTlp(ctxLC, ctx, NULL, 0, TRUE, TRUE);
+                else if(TryEnterCriticalSection(&ctx->Lock)) {
+                    // "sync" write (when fast write is not supported by the device):
+                    fActiveRun = TRUE;
+                    while(ObByteQueue_Pop(ctx->tlp_callback.pBqTx, NULL, sizeof(pbTlp), pbTlp, &cbTlp)) {
+                        DeviceFPGA_TxTlp(ctxLC, ctx, pbTlp, (DWORD)cbTlp, FALSE, FALSE);
+                    }
+                    DeviceFPGA_TxTlp(ctxLC, ctx, NULL, 0, TRUE, TRUE);
+                    LeaveCriticalSection(&ctx->Lock);
+                }
             }
-            if(ctx->async2.fEnabled) {
-                if(ctx->async2.fOldAsync) {
-                    DeviceFPGA_SynchOldAsync_RxTlpAsynchronous(ctxLC, ctx, ctx->perf.MAX_SIZE_RX);
+            // Read TLPs (if no thread is already processing them):
+            if(TryEnterCriticalSection(&ctx->Lock)) {
+                if(ctx->async2.fEnabled) {
+                    if(ctx->async2.fOldAsync) {
+                        DeviceFPGA_SynchOldAsync_RxTlpAsynchronous(ctxLC, ctx, ctx->perf.MAX_SIZE_RX);
+                    } else {
+                        DeviceFPGA_Async2_ReadOnlyFast_DoWork(ctxLC, ctx);
+                    }
                 } else {
-                    DeviceFPGA_Async2_ReadOnlyFast_DoWork(ctxLC, ctx);
+                    DeviceFPGA_Synch_RxTlpSynchronous(ctxLC, ctx, 0x00100000);
                 }
-            } else {
-                DeviceFPGA_Synch_RxTlpSynchronous(ctxLC, ctx, 0x00100000);
+                LeaveCriticalSection(&ctx->Lock);
             }
-            LeaveCriticalSection(&ctx->Lock);
         }
         // PROCESS RECEIVED TLPs:
         while(ObByteQueue_Pop(ctx->tlp_callback.pBqRx, NULL, sizeof(pbTlp), pbTlp, &cbTlp)) {
@@ -3112,20 +3194,21 @@ DWORD DeviceFPGA_Tlp_Callback_ThreadProc(_In_ PLC_CONTEXT ctxLC)
         }
         // SLEEP (if inactive):
         if(fActiveRun) {
-            dwInactiveCount = 0;
-        } else if(dwInactiveCount < 1000) {
-            dwInactiveCount++;
-            Sleep(1);
-        } else if(dwInactiveCount < 2000) {
-            dwInactiveCount++;
-            Sleep(5);
+            tcInactivity = GetTickCount64();
+        } else if((GetTickCount64() - tcInactivity) < 1000) {   // 1s inactivity
+            BusySleep(5);       // 5uS "sleep"
+        } else if((GetTickCount64() - tcInactivity) < 15000) {  // 15s inactivity
+            BusySleep(50);      // 50uS "sleep"
         } else {
-            Sleep(25);
+            Sleep(16);          // 16ms sleep
         }
     }
 fail:
-    Ob_DECREF_NULL(&ctx->tlp_callback.pBqRx);
-    Ob_DECREF_NULL(&ctx->tlp_callback.pBqTx);
+    pObBqRx_Terminate = ctx->tlp_callback.pBqRx; ctx->tlp_callback.pBqRx = NULL;
+    pObBqTx_Terminate = ctx->tlp_callback.pBqTx; ctx->tlp_callback.pBqTx = NULL;
+    Sleep(16);
+    Ob_DECREF(pObBqRx_Terminate);
+    Ob_DECREF(pObBqTx_Terminate);
     ctx->tlp_callback.fThread = FALSE;
     LcClose(ctxLC);     // decrement handle count (and close if required)
     return 1;
@@ -3272,7 +3355,11 @@ BOOL DeviceFPGA_WriteMEM_TXP(_In_ PLC_CONTEXT ctxLC, _Inout_ PDEVICE_CONTEXT_FPG
         memcpy(pbTlp + 16, pb, cb);
         cbTlp = (16 + cb + 3) & ~0x3;
     }
-    return DeviceFPGA_TxTlp(ctxLC, ctx, pbTlp, cbTlp, FALSE, FALSE);
+    if(ctx->perf.FLAGS & DEVICE_PERFORMANCE_FLAG_FASTWRITE) {
+        return DeviceFPGA_TxTlp_FastWrite_NoLock(ctxLC, ctx, pbTlp, cbTlp, FALSE, FALSE);
+    } else {
+        return DeviceFPGA_TxTlp(ctxLC, ctx, pbTlp, cbTlp, FALSE, FALSE);
+    }
 }
 
 VOID DeviceFPGA_WriteScatter(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cpMEMs, _Inout_ PPMEM_SCATTER ppMEMs)
@@ -3314,13 +3401,20 @@ VOID DeviceFPGA_WriteScatter(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cpMEMs, _Inout_ 
         }
         pMEM->f = TRUE;
     }
-    DeviceFPGA_TxTlp(ctxLC, ctx, NULL, 0, FALSE, TRUE) && result; // Flush and Return.
+    // Flush & return
+    if(ctx->perf.FLAGS & DEVICE_PERFORMANCE_FLAG_FASTWRITE) {
+        DeviceFPGA_TxTlp_FastWrite_NoLock(ctxLC, ctx, NULL, 0, FALSE, TRUE);
+    } else {
+        DeviceFPGA_TxTlp(ctxLC, ctx, NULL, 0, FALSE, TRUE);
+    }
 }
 
 VOID DeviceFPGA_WriteScatter_DoLock(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cpMEMs, _Inout_ PPMEM_SCATTER ppMEMs)
 {
     PDEVICE_CONTEXT_FPGA ctx = (PDEVICE_CONTEXT_FPGA)ctxLC->hDevice;
-    if(ctx->async2.fEnabled) {
+    if(ctx->perf.FLAGS & DEVICE_PERFORMANCE_FLAG_FASTWRITE) {
+        DeviceFPGA_WriteScatter(ctxLC, cpMEMs, ppMEMs);
+    } else if(ctx->async2.fEnabled) {
         DeviceFPGA_Async2_WriteScatter(ctxLC, cpMEMs, ppMEMs);
     } else {
         EnterCriticalSection(&ctx->Lock);
@@ -3509,21 +3603,35 @@ BOOL DeviceFPGA_Command_DoLock(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _In_ 
     if(ctx->tlp_callback.pBqRx) {
         switch(qwOptionHi) {
             case LC_CMD_FPGA_TLP_WRITE_SINGLE:
-                // queue single TLP for transmission in other thread:
+                // queue single TLP for transmission in other thread (or perform a direct fast-write if possible):
                 if((cbDataIn >= 12) && !(cbDataIn % 4) && pbDataIn) {
-                    ObByteQueue_Push(ctx->tlp_callback.pBqTx, 0, cbDataIn, pbDataIn);
+                    if(ctx->perf.FLAGS & DEVICE_PERFORMANCE_FLAG_FASTWRITE) {
+                        DeviceFPGA_TxTlp_FastWrite_NoLock(ctxLC, ctx, pbDataIn, cbDataIn, FALSE, TRUE);
+                    } else {
+                        ObByteQueue_Push(ctx->tlp_callback.pBqTx, 0, cbDataIn, pbDataIn);
+                    }
                     if(ppbDataOut) { *ppbDataOut = NULL; }
                     if(pcbDataOut) { *pcbDataOut = 0; }
                     return TRUE;
                 }
                 break;
             case LC_CMD_FPGA_TLP_WRITE_MULTIPLE:
-                // queue multiple TLPs for transmission in other thread:
+                // queue multiple TLPs for transmission in other thread (or perform a fast-write if possible):
                 if(pbDataIn && !(cbDataIn % sizeof(LC_TLP))) {
-                    for(i = 0, c = cbDataIn / sizeof(LC_TLP); i < c; i++) {
-                        pTLP = ((PLC_TLP)pbDataIn) + i;
-                        if((pTLP->cb >= 12) && !(pTLP->cb % 4)) {
-                            ObByteQueue_Push(ctx->tlp_callback.pBqTx, 0, pTLP->cb, pTLP->pb);
+                    if(ctx->perf.FLAGS & DEVICE_PERFORMANCE_FLAG_FASTWRITE) {
+                        for(i = 0, c = cbDataIn / sizeof(LC_TLP); i < c; i++) {
+                            pTLP = ((PLC_TLP)pbDataIn) + i;
+                            if((pTLP->cb >= 12) && !(pTLP->cb % 4)) {
+                                DeviceFPGA_TxTlp_FastWrite_NoLock(ctxLC, ctx, pTLP->pb, pTLP->cb, FALSE, FALSE);
+                            }
+                        }
+                        DeviceFPGA_TxTlp_FastWrite_NoLock(ctxLC, ctx, NULL, 0, FALSE, FALSE);
+                    } else {
+                        for(i = 0, c = cbDataIn / sizeof(LC_TLP); i < c; i++) {
+                            pTLP = ((PLC_TLP)pbDataIn) + i;
+                            if((pTLP->cb >= 12) && !(pTLP->cb % 4)) {
+                                ObByteQueue_Push(ctx->tlp_callback.pBqTx, 0, pTLP->cb, pTLP->pb);
+                            }
                         }
                     }
                     if(ppbDataOut) { *ppbDataOut = NULL; }
@@ -3747,6 +3855,9 @@ BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
     ctx->txbuf.cbMax = ctx->perf.MAX_SIZE_TX + 0x10000;
     ctx->txbuf.pb = LocalAlloc(0, ctx->txbuf.cbMax);
     if(!ctx->txbuf.pb) { goto fail; }
+    ctx->txbuf_fastwrite.cbMax = ctx->perf.MAX_SIZE_TX + 0x10000;
+    ctx->txbuf_fastwrite.pb = LocalAlloc(0, ctx->txbuf.cbMax);
+    if(!ctx->txbuf_fastwrite.pb) { goto fail; }
     // set callback functions and fix up config
     ctxLC->fMultiThread = TRUE;
     ctxLC->Config.fVolatile = TRUE;

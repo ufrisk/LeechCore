@@ -247,6 +247,7 @@ v1.0-1.8
 * Bug fixes.
 * Hibernation file support.
 
-Latest:
+[v2.19](https://github.com/ufrisk/LeechCore/releases/tag/v2.19)
 * Bug fixes.
 * Windows 11 24H2 hibernation file support.
+* ZDMA fast-write "lockless" support.
