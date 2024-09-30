@@ -251,3 +251,6 @@ v1.0-1.8
 * Bug fixes.
 * Windows 11 24H2 hibernation file support.
 * ZDMA fast-write "lockless" support.
+
+Latest:
+* Bug fixes.

@@ -2214,6 +2214,22 @@ VOID DeviceFPGA_RxTlp_UserCallback(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_
     if(szTlpText) { LocalFree(szTlpText); }
 }
 
+/*
+* Queue a received TLP for user callback by the user-callback thread.
+*/
+VOID DeviceFPGA_RxTlp_QueueUserCallback(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ SIZE_T cbTlp, _In_ PBYTE pbTlp)
+{
+    DWORD hdrDwBuf;
+    PTLP_HDR hdr = (PTLP_HDR)&hdrDwBuf;
+    if(ctx->tlp_callback.fNoCpl && (cbTlp >= 4)) {
+        hdrDwBuf = _byteswap_ulong(*(PDWORD)pbTlp);
+        if((hdr->TypeFmt == TLP_Cpl) || (hdr->TypeFmt == TLP_CplD) || (hdr->TypeFmt == TLP_CplLk) || (hdr->TypeFmt == TLP_CplDLk)) {
+            return;
+        }
+    }
+    ObByteQueue_Push(ctx->tlp_callback.pBqRx, 0, cbTlp, pbTlp);
+}
+
 VOID DeviceFPGA_Synch_RxTlpSynchronous(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx, _In_opt_ DWORD dwBytesToRead)
 {
     DWORD status;
@@ -2267,7 +2283,7 @@ VOID DeviceFPGA_Synch_RxTlpSynchronous(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONT
                             TLP_Print(ctxLC, pbTlp, cdwTlp << 2, FALSE);
                         }
                         if(ctx->tlp_callback.pBqRx) {
-                            ObByteQueue_Push(ctx->tlp_callback.pBqRx, 0, (SIZE_T)cdwTlp << 2, pbTlp);
+                            DeviceFPGA_RxTlp_QueueUserCallback(ctx, (SIZE_T)cdwTlp << 2, pbTlp);
                         }
                         if(ctx->hRxTlpCallbackFn) {
                             ctx->hRxTlpCallbackFn(ctx->pMRdBufferX, pbTlp, cdwTlp << 2);
@@ -2575,7 +2591,7 @@ DWORD DeviceFPGA_Async2_Read_RxTlpSingle(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CO
                     TLP_Print(ctxLC, pbTlp, cdwTlp << 2, FALSE);
                 }
                 if(ctx->tlp_callback.pBqRx) {
-                    ObByteQueue_Push(ctx->tlp_callback.pBqRx, 0, (SIZE_T)cdwTlp << 2, pbTlp);
+                    DeviceFPGA_RxTlp_QueueUserCallback(ctx, (SIZE_T)cdwTlp << 2, pbTlp);
                 }
                 DeviceFPGA_Async2_Read_RxTlpSingle_MRdCpl(ctxLC, ctx, pbTlp, cdwTlp << 2);
                 pdwData[iStartWord] = pdwData[iStartWord] | (0xffffffff >> (28 - (j << 2)));
@@ -3024,7 +3040,7 @@ DWORD DeviceFPGA_SynchOldAsync_Tlp(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_
                     TLP_Print(ctxLC, pbTlp, cdwTlp << 2, FALSE);
                 }
                 if(ctx->tlp_callback.pBqRx) {
-                    ObByteQueue_Push(ctx->tlp_callback.pBqRx, 0, (SIZE_T)cdwTlp << 2, pbTlp);
+                    DeviceFPGA_RxTlp_QueueUserCallback(ctx, (SIZE_T)cdwTlp << 2, pbTlp);
                 }
                 if(ctx->hRxTlpCallbackFn) {
                     ctx->hRxTlpCallbackFn(ctx->pMRdBufferX, pbTlp, cdwTlp << 2);
@@ -3133,8 +3149,8 @@ DWORD DeviceFPGA_Tlp_Callback_ThreadProc(_In_ PLC_CONTEXT ctxLC)
     if(ctx->tlp_callback.fThread) { return 1; }
     ctx->tlp_callback.fThread = TRUE;
     InterlockedIncrement(&ctxLC->dwHandleCount);    // increment device handle count
-    if(!(ctx->tlp_callback.pBqRx = ObByteQueue_New(NULL, 0x00100000))) { goto fail; }
-    if(!(ctx->tlp_callback.pBqTx = ObByteQueue_New(NULL, 0x00100000))) { goto fail; }
+    if(!(ctx->tlp_callback.pBqRx = ObByteQueue_New(NULL, 0x01000000))) { goto fail; }   // 16MB
+    if(!(ctx->tlp_callback.pBqTx = ObByteQueue_New(NULL, 0x00100000))) { goto fail; }   //  1MB
     while(TRUE) {
         fActiveRun = FALSE;
         // Exit criteria?:
