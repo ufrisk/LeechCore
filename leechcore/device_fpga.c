@@ -1850,9 +1850,15 @@ VOID DeviceFPGA_GetDeviceID_FpgaVersion(_In_ PDEVICE_CONTEXT_FPGA ctx)
 VOID DeviceFPGA_SetPerformanceProfile(_Inout_ PDEVICE_CONTEXT_FPGA ctx)
 {
     if((ctx->wFpgaID >= DEVICE_ID_DRIVER_SUPPLIED_0) && (ctx->wFpgaID <= DEVICE_ID_DRIVER_SUPPLIED_7)) {
-        if(ctx->dev.pfnLcSetPerformanceProfile && (0 == ctx->dev.pfnLcSetPerformanceProfile(&ctx->perf, DEVICE_PERFORMANCE_VERSION, ctx->wFpgaID))) {
+        if(!ctx->dev.pfnLcSetPerformanceProfile) {
+            printf("DEVICE: FPGA: ERROR! Unable to locate performance profile export.\n");
             return;
         }
+        if((0 != ctx->dev.pfnLcSetPerformanceProfile(&ctx->perf, DEVICE_PERFORMANCE_VERSION, ctx->wFpgaID))) {
+            printf("DEVICE: FPGA: ERROR! Unable to load performance profile - ensure leechcore.dll/so and leechcore_driver.dll/so are compatible!\n");
+            return;
+        }
+        return;     // driver-supplied performance profile loaded successfully!
     }
     memcpy(&ctx->perf, &PERFORMANCE_PROFILES[(ctx->wFpgaID <= DEVICE_ID_MAX) ? ctx->wFpgaID : 0], sizeof(DEVICE_PERFORMANCE));
 }
