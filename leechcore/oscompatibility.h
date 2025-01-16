@@ -1,6 +1,6 @@
 // oscompatibility.h : LeechCore Windows/Linux compatibility layer.
 //
-// (c) Ulf Frisk, 2017-2024
+// (c) Ulf Frisk, 2017-2025
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #ifndef __OSCOMPATIBILITY_H__
@@ -15,20 +15,35 @@
 #include <setupapi.h>
 #include <conio.h>
 
-#define SOCK_NONBLOCK                       0
-
 #pragma warning( disable : 4477)
 
+#define SOCK_NONBLOCK                       0
 #define LC_LIBRARY_FILETYPE                 ".dll"
+#define libusb_device_handle                HANDLE
 #define LINUX_NO_OPTIMIZE
 
 VOID BusySleep(_In_ DWORD us);
 
 #endif /* _WIN32 */
+
 #ifdef LINUX
-#define _FILE_OFFSET_BITS 64
+#define LC_LIBRARY_FILETYPE                 ".so"
 #include <libusb.h>
-#include <byteswap.h>
+// for some unexplainable reasons the gcc on -O2 will optimize out functionality
+// and destroy the proper workings on some functions due to an unexplainable
+// reason disable optimization on a function level resolves the issues ...
+#define LINUX_NO_OPTIMIZE __attribute__((optimize("O0")))
+#endif /* LINUX */
+
+#ifdef MACOS
+#define SOCK_NONBLOCK                       0
+#define LC_LIBRARY_FILETYPE                 ".dylib"
+#define libusb_device_handle                HANDLE
+#define LINUX_NO_OPTIMIZE
+#endif /* MACOS */
+
+#if defined(LINUX) || defined(MACOS)
+#define _FILE_OFFSET_BITS 64
 #include <ctype.h>
 #include <dirent.h>
 #include <dlfcn.h>
@@ -40,13 +55,10 @@ VOID BusySleep(_In_ DWORD us);
 #include <pthread.h>
 #include <time.h>
 #include <unistd.h>
-#include <sys/eventfd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-
-#define LC_LIBRARY_FILETYPE                 ".so"
 
 typedef void                                VOID, *PVOID;
 typedef void                                *HANDLE, **PHANDLE, *HMODULE, *FARPROC;
@@ -95,9 +107,11 @@ typedef int(*_CoreCrtNonSecureSearchSortCompareFunction)(void const *, void cons
 #define INVALID_SOCKET	                    -1
 #define SOCKET_ERROR	                    -1
 #define WSAEWOULDBLOCK                      10035L
-#define WAIT_OBJECT_0                       (0x00000000UL)
-#define INFINITE                            (0xFFFFFFFFUL)
 #define MAXIMUM_WAIT_OBJECTS                64
+#define WAIT_OBJECT_0                       (0x00000000UL)
+#define WAIT_FAILED                         (0xFFFFFFFFUL)
+#define WAIT_TIMEOUT                        (258L)
+#define INFINITE                            (0xFFFFFFFFUL)
 
 #define _In_
 #define _In_z_
@@ -125,9 +139,9 @@ typedef int(*_CoreCrtNonSecureSearchSortCompareFunction)(void const *, void cons
 
 #define max(a, b)                           (((a) > (b)) ? (a) : (b))
 #define min(a, b)                           (((a) < (b)) ? (a) : (b))
-#define _byteswap_ushort(v)                 (bswap_16(v))
-#define _byteswap_ulong(v)                  (bswap_32(v))
-#define _byteswap_uint64(v)                 (bswap_64(v))
+#define _byteswap_ushort(v)                 (__builtin_bswap16(v))
+#define _byteswap_ulong(v)                  (__builtin_bswap32(v))
+#define _byteswap_uint64(v)                 (__builtin_bswap64(v))
 #ifndef _rotr
 #define _rotr(v,c)                          ((((DWORD)v) >> ((DWORD)c) | (DWORD)((DWORD)v) << (32 - (DWORD)c)))
 #endif /* _rotr */
@@ -243,22 +257,28 @@ DWORD WaitForMultipleObjects(_In_ DWORD nCount, HANDLE *lpHandles, _In_ BOOL bWa
 DWORD WaitForSingleObject(_In_ HANDLE hHandle, _In_ DWORD dwMilliseconds);
 
 // SRWLOCK
+#ifdef LINUX
 typedef struct tdSRWLOCK {
     uint32_t xchg;
     int c;
 } SRWLOCK, *PSRWLOCK;
-VOID InitializeSRWLock(PSRWLOCK SRWLock);
-VOID AcquireSRWLockExclusive(_Inout_ PSRWLOCK SRWLock);
-VOID ReleaseSRWLockExclusive(_Inout_ PSRWLOCK SRWLock);
+#endif /* LINUX */
+#ifdef MACOS
+#include <dispatch/dispatch.h>
+typedef struct tdSRWLOCK {
+    union {
+        QWORD valid;
+        dispatch_semaphore_t sem;
+    };
+} SRWLOCK, *PSRWLOCK;
+#endif /* MACOS */
+VOID InitializeSRWLock(PSRWLOCK pSRWLock);
+VOID AcquireSRWLockExclusive(_Inout_ PSRWLOCK pSRWLock);
+VOID ReleaseSRWLockExclusive(_Inout_ PSRWLOCK pSRWLock);
 #define AcquireSRWLockShared    AcquireSRWLockExclusive
 #define ReleaseSRWLockShared    ReleaseSRWLockExclusive
 #define SRWLOCK_INIT            { 0 }
 
-// for some unexplainable reasons the gcc on -O2 will optimize out functionality
-// and destroy the proper workings on some functions due to an unexplainable
-// reason disable optimization on a function level resolves the issues ...
-#define LINUX_NO_OPTIMIZE __attribute__((optimize("O0")))
-
-#endif /* LINUX */
+#endif /* LINUX || MACOS */
 
 #endif /* __OSCOMPATIBILITY_H__ */

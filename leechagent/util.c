@@ -1,6 +1,6 @@
 // util.h : implementations of various utility functions.
 //
-// (c) Ulf Frisk, 2020-2024
+// (c) Ulf Frisk, 2020-2025
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include "util.h"

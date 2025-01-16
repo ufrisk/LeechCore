@@ -15,7 +15,7 @@
 // device may be created/opened - if only one instance may be open at the same
 // time this should be handled by the plugin module itself.
 //
-// (c) Ulf Frisk, 2020-2024
+// (c) Ulf Frisk, 2020-2025
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 // Header Version: 2.5
@@ -29,7 +29,7 @@ extern "C" {
 #include <stdio.h>
 #include "leechcore.h"
 
-#ifdef LINUX
+#if defined(LINUX) || defined(MACOS)
 #include <string.h>
 #include <pthread.h>
 #ifndef _LINUX_DEF_CRITICAL_SECTION
@@ -39,7 +39,7 @@ typedef struct tdCRITICAL_SECTION {
     pthread_mutexattr_t mta;
 } CRITICAL_SECTION, *LPCRITICAL_SECTION;
 #endif /* _LINUX_DEF_CRITICAL_SECTION */
-#endif /* LINUX */
+#endif /* LINUX || MACOS */
 
 #define LC_CONTEXT_VERSION                  0xc0e10004
 #define LC_DEVICE_PARAMETER_MAX_ENTRIES     0x10

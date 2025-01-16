@@ -1,6 +1,6 @@
 // util.h : definitions of various utility functions.
 //
-// (c) Ulf Frisk, 2018-2024
+// (c) Ulf Frisk, 2018-2025
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #ifndef __UTIL_H__
@@ -54,8 +54,19 @@ BOOL Util_FillHexAscii(_In_ PBYTE pb, _In_ DWORD cb, _In_ DWORD cbInitialOffset,
 * -- psz1
 * -- psz2
 */
-VOID Util_Split2(_In_ LPSTR sz, CHAR chDelimiter, _Out_writes_(MAX_PATH) PCHAR _szBuf, _Out_ LPSTR *psz1, _Out_ LPSTR *psz2);
-VOID Util_Split3(_In_ LPSTR sz, CHAR chDelimiter, _Out_writes_(MAX_PATH) PCHAR _szBuf, _Out_ LPSTR *psz1, _Out_ LPSTR *psz2, _Out_ LPSTR *psz3);
+VOID Util_Split2(_In_ LPSTR sz, _In_ CHAR chDelimiter, _Out_writes_(MAX_PATH) PCHAR _szBuf, _Out_ LPSTR *psz1, _Out_ LPSTR *psz2);
+VOID Util_Split3(_In_ LPSTR sz, _In_ CHAR chDelimiter, _Out_writes_(MAX_PATH) PCHAR _szBuf, _Out_ LPSTR *psz1, _Out_ LPSTR *psz2, _Out_ LPSTR *psz3);
+
+/*
+* Split a string into N strings at the chDelimiter character. If no Nth string
+* is not found then it's returned as null character '\0' (i.e. not as NULL).
+* -- sz = the original string to split (of maximum MAX_PATH length)
+* -- szDelimiter = the delimiter character splitting the string.
+* -- cpsz = the number of strings to split the input string into.
+* -- _szBuf = MAX_PATH sized buffer that will be overwritten and used throughout the lifetime of *ppsz outputs.
+* -- psz = array of pointers to receive the N strings.
+*/
+VOID Util_SplitN(_In_ LPSTR sz, _In_ CHAR chDelimiter, _In_ DWORD cpsz, _Out_writes_(MAX_PATH) PCHAR _szBuf, _Inout_ LPSTR *psz);
 
 /*
 * Simple random number function.

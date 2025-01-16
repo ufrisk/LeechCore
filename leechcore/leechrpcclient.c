@@ -1,6 +1,6 @@
 // leechrpcclient.c : implementation of the remote procedure call (RPC) client.
 //
-// (c) Ulf Frisk, 2018-2024
+// (c) Ulf Frisk, 2018-2025
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include "leechcore.h"
@@ -221,9 +221,7 @@ BOOL LeechRPC_RpcInitialize_NtlmWithUserCreds(_In_ PLC_CONTEXT ctxLC, _In_ PLEEC
     PackageName.Length = (USHORT)strlen(PackageName.Buffer);
     PackageName.MaximumLength = (USHORT)strlen(PackageName.Buffer);
     if(ERROR_SUCCESS != LsaLookupAuthenticationPackage(LsaHandle, &PackageName, &AuthenticationPackage)) { goto fail; }
-    // get user creds:
-    if(ERROR_SUCCESS != CredUIPromptForWindowsCredentialsW(&credui, 0, &AuthenticationPackage, NULL, 0, &pvAuthBuffer, &cbAuthBuffer, NULL, CREDUIWIN_GENERIC)) { goto fail; }
-    // unpack user creds:
+    // get user creds via credprompt (unless user already set both user & password by command line):
     AuthIdentity.Domain = wszAuthIdentityDomain;
     AuthIdentity.DomainLength = (DWORD)_countof(wszAuthIdentityDomain);
     AuthIdentity.User = wszAuthIdentityUser;
@@ -231,10 +229,22 @@ BOOL LeechRPC_RpcInitialize_NtlmWithUserCreds(_In_ PLC_CONTEXT ctxLC, _In_ PLEEC
     AuthIdentity.Password = wszAuthIdentityPassword;
     AuthIdentity.PasswordLength = (DWORD)_countof(wszAuthIdentityPassword);
     AuthIdentity.Flags = SEC_WINNT_AUTH_IDENTITY_UNICODE;
-    if(FALSE == CredUnPackAuthenticationBufferW(CRED_PACK_PROTECTED_CREDENTIALS, pvAuthBuffer, cbAuthBuffer, AuthIdentity.User, &AuthIdentity.UserLength, AuthIdentity.Domain, &AuthIdentity.DomainLength, AuthIdentity.Password, &AuthIdentity.PasswordLength)) { goto fail; }
-    if(AuthIdentity.UserLength && (wszAuthIdentityUser[AuthIdentity.UserLength - 1] == 0)) { AuthIdentity.UserLength--; }
-    if(AuthIdentity.DomainLength && (wszAuthIdentityDomain[AuthIdentity.DomainLength - 1] == 0)) { AuthIdentity.DomainLength--; }
-    if(AuthIdentity.PasswordLength && (wszAuthIdentityPassword[AuthIdentity.PasswordLength - 1] == 0)) { AuthIdentity.PasswordLength--; }
+    if(ctx->szAuthNtlmUserInitOnly && ctx->szAuthNtlmPasswordInitOnly) {
+        AuthIdentity.DomainLength = 0;
+    } else {
+        if(ERROR_SUCCESS != CredUIPromptForWindowsCredentialsW(&credui, 0, &AuthenticationPackage, NULL, 0, &pvAuthBuffer, &cbAuthBuffer, NULL, CREDUIWIN_GENERIC)) { goto fail; }
+        // unpack user creds:
+        if(FALSE == CredUnPackAuthenticationBufferW(CRED_PACK_PROTECTED_CREDENTIALS, pvAuthBuffer, cbAuthBuffer, AuthIdentity.User, &AuthIdentity.UserLength, AuthIdentity.Domain, &AuthIdentity.DomainLength, AuthIdentity.Password, &AuthIdentity.PasswordLength)) { goto fail; }
+        if(AuthIdentity.UserLength && (wszAuthIdentityUser[AuthIdentity.UserLength - 1] == 0)) { AuthIdentity.UserLength--; }
+        if(AuthIdentity.DomainLength && (wszAuthIdentityDomain[AuthIdentity.DomainLength - 1] == 0)) { AuthIdentity.DomainLength--; }
+        if(AuthIdentity.PasswordLength && (wszAuthIdentityPassword[AuthIdentity.PasswordLength - 1] == 0)) { AuthIdentity.PasswordLength--; }
+    }
+    if(ctx->szAuthNtlmUserInitOnly) {
+        AuthIdentity.UserLength = _snwprintf_s(wszAuthIdentityUser, _countof(wszAuthIdentityUser), _TRUNCATE, L"%S", ctx->szAuthNtlmUserInitOnly);
+    }
+    if(ctx->szAuthNtlmPasswordInitOnly) {
+        AuthIdentity.PasswordLength = _snwprintf_s(wszAuthIdentityPassword, _countof(wszAuthIdentityPassword), _TRUNCATE, L"%S", ctx->szAuthNtlmPasswordInitOnly);
+    }
     status = RpcBindingSetAuthInfoExW(
         ctx->hRPC,
         NULL,
@@ -626,12 +636,13 @@ BOOL LeechRPC_Command(
 _Success_(return)
 BOOL LeechRpc_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo)
 {
+    BOOL f;
     PLEECHRPC_CLIENT_CONTEXT ctx;
     CHAR _szBufferArg[MAX_PATH], _szBufferOpt[MAX_PATH];
     LEECHRPC_MSG_OPEN MsgReq = { 0 };
     PLEECHRPC_MSG_OPEN pMsgRsp = NULL;
     LPSTR szArg1, szArg2, szArg3;
-    LPSTR szOpt[3];
+    LPSTR aszOpt[5];
     DWORD i, dwPort = 0;
     HANDLE hThread;
     int(*pfn_printf_opt_tmp)(_In_z_ _Printf_format_string_ char const* const _Format, ...);
@@ -664,25 +675,36 @@ BOOL LeechRpc_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO pp
         strncpy_s(ctx->szTcpAddr, _countof(ctx->szTcpAddr), szArg2, MAX_PATH);
         // Argument3 : Options.
         if(szArg3[0]) {
-            Util_Split3(szArg3, ',', _szBufferOpt, &szOpt[0], &szOpt[1], &szOpt[2]);
-            for(i = 0; i < 3; i++) {
-                if(0 == _stricmp("nocompress", szOpt[i])) {
+            Util_SplitN(szArg3, ',', 5, _szBufferOpt, aszOpt);
+            for(i = 0; i < 5; i++) {
+                if(0 == _stricmp("nocompress", aszOpt[i])) {
                     ctxLC->Rpc.fCompress = FALSE;
                 }
-                if(0 == _strnicmp("port=", szOpt[i], 5)) {
-                    dwPort = atoi(szOpt[i] + 5);
+                if(0 == _strnicmp("port=", aszOpt[i], 5)) {
+                    dwPort = atoi(aszOpt[i] + 5);
                 }
-                if(0 == _stricmp("logon", szOpt[i])) {
+                if(0 == _stricmp("logon", aszOpt[i])) {
                     ctx->fIsAuthNTLMCredPrompt = ctx->fIsAuthNTLM;
+                }
+                if(0 == _strnicmp("user=", aszOpt[i], 5)) {
+                    ctx->szAuthNtlmUserInitOnly = aszOpt[i] + 5;
+                }
+                if(0 == _strnicmp("password=", aszOpt[i], 9)) {
+                    ctx->szAuthNtlmPasswordInitOnly = aszOpt[i] + 9;
                 }
             }
         }
+        ctx->fIsAuthNTLMCredPrompt = ctx->fIsAuthNTLMCredPrompt || ctx->szAuthNtlmUserInitOnly || ctx->szAuthNtlmPasswordInitOnly;
         if(dwPort == 0) {
             dwPort = 28473; // default port
         }
         _itoa_s(dwPort, ctx->szTcpPort, 6, 10);
         // initialize rpc connection and ping
-        if(!LeechRPC_RpcInitialize(ctxLC, ctx)) {
+        f = LeechRPC_RpcInitialize(ctxLC, ctx);
+        ctx->szAuthNtlmUserInitOnly = NULL;
+        ctx->szAuthNtlmPasswordInitOnly = NULL;
+        SecureZeroMemory(_szBufferOpt, sizeof(_szBufferOpt));
+        if(!f) {
             lcprintf(ctxLC, "REMOTE: ERROR: Unable to connect to remote service '%s'\n", ctxLC->Config.szRemote);
             goto fail;
         }
@@ -755,7 +777,7 @@ fail:
 }
 
 #endif /* _WIN32 */
-#ifdef LINUX
+#if defined(LINUX) || defined(MACOS)
 
 _Success_(return)
 BOOL LeechRpc_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo)
@@ -764,4 +786,4 @@ BOOL LeechRpc_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO pp
     return FALSE;
 }
 
-#endif /* LINUX */
+#endif /* LINUX || MACOS */

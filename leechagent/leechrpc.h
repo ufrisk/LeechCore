@@ -1,6 +1,6 @@
 // leechrpcclient.h : definitions related to the leech rpc service.
 //
-// (c) Ulf Frisk, 2018-2024
+// (c) Ulf Frisk, 2018-2025
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #ifndef __LEECHRPC_H__
@@ -59,6 +59,8 @@ typedef struct tdLEECHRPC_CLIENT_CONTEXT {
     CHAR szRemoteSPN[MAX_PATH];
     CHAR szTcpAddr[MAX_PATH];
     CHAR szTcpPort[6];
+    LPSTR szAuthNtlmUserInitOnly;       // NTLM username (only valid during initialization phase).
+    LPSTR szAuthNtlmPasswordInitOnly;   // NTLM password (only valid during initialization phase).
     RPC_BINDING_HANDLE hRPC;
     RPC_CSTR szStringBinding;
     LEECHRPC_COMPRESS Compress;

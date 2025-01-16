@@ -4,7 +4,7 @@
 //                 Child processes are spawned and controlled by the main
 //                 LeechAgent process.
 //
-// (c) Ulf Frisk, 2020-2024
+// (c) Ulf Frisk, 2020-2025
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #ifndef __LEECHAGENT_PROC_H__

@@ -8,7 +8,7 @@ Use the LeechCore library locally or connect to, over the network, a LeechAgent 
 
 The LeechCore library is used by [PCILeech](https://github.com/ufrisk/pcileech) and [The Memory Process File System (MemProcFS)](https://github.com/ufrisk/MemProcFS).
 
-The LeechCore library is supported on 32/64-bit **Windows** (`.dll`) and 64-bit **Linux** (`.so`). No executable exists for LeechCore - the library is always loaded by other applications using it - such as PCILeech and The Memory Process File System `MemProcFS.exe`.
+The LeechCore library is supported on 32/64-bit **Windows** (`.dll`), x64 and arm64 **Linux** (`.so`) and **macOS**. No executable exists for LeechCore - the library is always loaded by other applications using it - such as PCILeech and MemProcFS.
 
 For detailed information about individual memory acquisition methods, the API and related examples please check out the [LeechCore wiki](https://github.com/ufrisk/LeechCore/wiki).
 
@@ -50,7 +50,6 @@ Please find a summary of the supported hardware based memory acquisition methods
 | [CaptainDMA 75T](https://github.com/ufrisk/pcileech-fpga-dev/blob/master/CaptainDMA)       | [FPGA](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)          | USB-C | 190MB/s  | Yes | Yes | 💖 |
 | [AC701/FT601](https://github.com/ufrisk/pcileech-fpga/tree/master/ac701_ft601)             | [FPGA](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)          | USB3  | 190MB/s  | Yes | Yes |    |
 | USB3380-EVB                                                                                | [USB3380](https://github.com/ufrisk/LeechCore/wiki/Device_USB3380)    | USB3  | 150MB/s  | No  | No  |    |
-| PP3380                                                                                     | [USB3380](https://github.com/ufrisk/LeechCore/wiki/Device_USB3380)    | USB3  | 150MB/s  | No  | No  |    |
 | DMA patched HP iLO                                                                         | [BMC](https://github.com/ufrisk/LeechCore/wiki/Device_RawTCP)         | TCP   |  1MB/s   | Yes | No  |    |
 
 
@@ -127,7 +126,6 @@ Links:
 * PCILeech FPGA: https://github.com/ufrisk/pcileech-fpga
 * LeechCore: https://github.com/ufrisk/LeechCore
 * MemProcFS: https://github.com/ufrisk/MemProcFS
-* YouTube: https://www.youtube.com/channel/UC2aAi-gjqvKiC7s7Opzv9rg
 * Blog: http://blog.frizk.net
 
 
@@ -252,5 +250,5 @@ v1.0-1.8
 * Windows 11 24H2 hibernation file support.
 * ZDMA fast-write "lockless" support.
 
-Latest:
-* Bug fixes.
+[v2.20](https://github.com/ufrisk/LeechCore/releases/tag/v2.20)
+* macOS support

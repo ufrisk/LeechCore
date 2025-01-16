@@ -1,7 +1,7 @@
 // leechcore_internal.h : definitions of internal leechcore functionality such
 //                        as non exported parts of memory map functionality.
 //
-// (c) Ulf Frisk, 2020-2024
+// (c) Ulf Frisk, 2020-2025
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 

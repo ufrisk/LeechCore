@@ -1,6 +1,6 @@
 //	leechagent.c : Implementation the LeechAgent service related functionality.
 //
-// (c) Ulf Frisk, 2018-2023
+// (c) Ulf Frisk, 2018-2025
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include "leechagent.h"

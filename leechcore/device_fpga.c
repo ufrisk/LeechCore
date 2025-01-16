@@ -7,7 +7,7 @@
 //     - FT2232H/FT245 protocol - access FPGA via FT2232H USB2 instead of FT601 USB3.
 //     - Other devices with plugin driver - ZDMA etc.
 //
-// (c) Ulf Frisk, 2017-2024
+// (c) Ulf Frisk, 2017-2025
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include "leechcore.h"
@@ -33,11 +33,19 @@
 
 #ifdef _WIN32
 #define DEVICE_FPGA_FT601_LIBRARY          "FTD3XX.dll"
+#define DEVICE_FPGA_FT2XX_LIBRARY          "FTD2XX.dll"
 #define DEVICE_FPGA_DRIVER_LIBRARY         "leechcore_driver.dll"
-#else
-#define DEVICE_FPGA_FT601_LIBRARY          "leechcore_ft601_driver_linux.so"
-#define DEVICE_FPGA_DRIVER_LIBRARY         "leechcore_driver.so"
 #endif /* _WIN32 */
+#ifdef LINUX
+#define DEVICE_FPGA_FT601_LIBRARY          "leechcore_ft601_driver_linux.so"
+#define DEVICE_FPGA_FT2XX_LIBRARY          "libftd2xx.so"
+#define DEVICE_FPGA_DRIVER_LIBRARY         "leechcore_driver.so"
+#endif /* LINUX */
+#ifdef MACOS
+#define DEVICE_FPGA_FT601_LIBRARY          "leechcore_ft601_driver_macos.dylib"
+#define DEVICE_FPGA_FT2XX_LIBRARY          "libftd2xx.dylib"
+#define DEVICE_FPGA_DRIVER_LIBRARY         "leechcore_driver.dylib"
+#endif /* MACOS */
 
 #define ENDIAN_SWAP_DWORD(x)    (x = (x << 24) | ((x >> 8) & 0xff00) | ((x << 8) & 0xff0000) | (x >> 24))
 
@@ -673,7 +681,7 @@ ULONG WINAPI DeviceFPGA_UDP_FT60x_FT_WritePipe(HANDLE ftHandle, UCHAR ucPipeID, 
 ULONG WINAPI DeviceFPGA_UDP_FT60x_FT_ReadPipe(HANDLE ftHandle, UCHAR ucPipeID, PUCHAR pucBuffer, ULONG ulBufferLength, PULONG pulBytesTransferred, PVOID pOverlapped)
 {
     int status;
-    DWORD cbTx, cSleep = 0, cbRead, cbReadTotal = 0, cPass = 0;
+    DWORD cbTx, cSleep = 0, cbRead, cbReadTotal = 0;
     BYTE pbTx[] = { 0x01, 0x00, 0x01, 0x00,  0x80, 0x02, 0x23, 0x77 };                  // cmd msg: inactivity timer enable - 1ms
     FPGA_HANDLESOCKET hs;
     hs.h = ftHandle;
@@ -700,7 +708,6 @@ ULONG WINAPI DeviceFPGA_UDP_FT60x_FT_ReadPipe(HANDLE ftHandle, UCHAR ucPipeID, P
             return 1;
         }
         cSleep = 0;
-        cPass++;
         cbRead = min(ulBufferLength, (DWORD)status);
         cbReadTotal += cbRead;
         ulBufferLength -= cbRead;
@@ -778,9 +785,9 @@ static BOOL g_fDeviceFpgaMultiHandleLock[0x10] = { 0 };
 
 BOOL DeviceFPGA_Initialize_LinuxMultiHandle_LockCheck(_In_ QWORD qwDeviceIndex)
 {
-#ifdef LINUX
+#if defined(LINUX) || defined(MACOS)
     if(g_fDeviceFpgaMultiHandleLock[min(0x10 - 1, qwDeviceIndex)]) { return TRUE; }
-#endif /* LINUX */
+#endif /* LINUX || MACOS */
     return FALSE;
 }
 
@@ -863,8 +870,8 @@ LPSTR DeviceFPGA_InitializeFT601(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ BOOL fFT601
     pfnFT_SetSuspendTimeout = (ULONG(WINAPI*)(HANDLE, ULONG))GetProcAddress(ctx->dev.hModule, "FT_SetSuspendTimeout");
     if(!ctx->dev.pfnFT_Create || !ctx->dev.pfnFT_ReadPipe || !ctx->dev.pfnFT_WritePipe) {
         szErrorReason = ctx->dev.pfnFT_ReadPipe ?
-            "Unable to retrieve required functions from device driver dll/so." :
-            "Unable to retrieve required functions from FTD3XX.dll v1.3.0.4 or later";
+            "Unable to retrieve required functions from device driver dll/so/dylib." :
+            "Unable to retrieve required functions from "DEVICE_FPGA_FT601_LIBRARY;
         goto fail;
     }
     // Open FTDI
@@ -1032,11 +1039,11 @@ LPSTR DeviceFPGA_InitializeFT2232(_In_ PDEVICE_CONTEXT_FPGA ctx)
     ctx->dev.hModule = LoadLibraryA("FTD2XX.dll");
     if(!ctx->dev.hModule) {
         Util_GetPathLib(szModuleFTDI);
-        strcat_s(szModuleFTDI, sizeof(szModuleFTDI) - 1, "FTD2XX.dll / libftd2xx.so");
+        strcat_s(szModuleFTDI, sizeof(szModuleFTDI) - 1, DEVICE_FPGA_FT2XX_LIBRARY);
         ctx->dev.hModule = LoadLibraryA(szModuleFTDI);
     }
     if(!ctx->dev.hModule) {
-        szErrorReason = "Unable to load FTD2XX.dll / libftd2xx.so";
+        szErrorReason = "Unable to load "DEVICE_FPGA_FT2XX_LIBRARY;
         goto fail;
     }
     // Assign FT601 compatibility functions to device object:
@@ -1060,7 +1067,7 @@ LPSTR DeviceFPGA_InitializeFT2232(_In_ PDEVICE_CONTEXT_FPGA ctx)
     hFT2232H->pfnFT_Close = (ULONG(WINAPI*)(HANDLE))
         GetProcAddress(ctx->dev.hModule, "FT_Close");
     if(!hFT2232H->pfnFT_GetStatus || !hFT2232H->pfnFT_Read || !hFT2232H->pfnFT_Write || !hFT2232H->pfnFT_Close) {
-        szErrorReason = "Unable to retrieve required functions from FTD2XX.dll";
+        szErrorReason = "Unable to retrieve required functions from "DEVICE_FPGA_FT2XX_LIBRARY;
         goto fail;
     }
     // Retrieve required function-local function pointers from FTDI library:
@@ -1077,7 +1084,7 @@ LPSTR DeviceFPGA_InitializeFT2232(_In_ PDEVICE_CONTEXT_FPGA ctx)
     pfnFT_SetFlowControl = (ULONG(WINAPI*)(HANDLE, USHORT, UCHAR, UCHAR))
         GetProcAddress(ctx->dev.hModule, "FT_SetFlowControl");
     if(!pfnFT_Open || !pfnFT_ResetDevice || !pfnFT_SetBitMode || !pfnFT_SetLatencyTimer || !pfnFT_SetUSBParameters || !pfnFT_SetFlowControl) {
-        szErrorReason = "Unable to retrieve required functions from FTD2XX.dll";
+        szErrorReason = "Unable to retrieve required functions from "DEVICE_FPGA_FT2XX_LIBRARY;
         goto fail;
     }
     // Open FTDI

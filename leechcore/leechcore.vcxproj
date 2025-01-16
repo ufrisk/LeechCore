@@ -380,6 +380,10 @@ copy "$(ProjectDir)\leechcore.h" "$(SolutionDir)\includes\" /y
   <ItemGroup>
     <ResourceCompile Include="leechcore.rc" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="Makefile" />
+    <None Include="Makefile.macos" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

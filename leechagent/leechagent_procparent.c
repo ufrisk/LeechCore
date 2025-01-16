@@ -3,7 +3,7 @@
 //                 Python environment which allows for execution of scripts.
 //                 The Parent process controls the child processes.
 //
-// (c) Ulf Frisk, 2020-2024
+// (c) Ulf Frisk, 2020-2025
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include "leechagent_proc.h"

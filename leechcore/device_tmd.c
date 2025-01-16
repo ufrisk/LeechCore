@@ -2,7 +2,7 @@
 //                Also known as: CVE-2018-1038. Please see Microsoft advisory for more information:
 //                https://portal.msrc.microsoft.com/en-US/security-guidance/advisory/CVE-2018-1038
 //
-// (c) Ulf Frisk, 2020-2024
+// (c) Ulf Frisk, 2020-2025
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include "leechcore.h"
@@ -250,7 +250,7 @@ fail:
 }
 
 #endif /* _WIN32 */
-#ifdef LINUX
+#if defined(LINUX) || defined(MACOS)
 
 _Success_(return)
 BOOL DeviceTMD_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo)
@@ -260,4 +260,4 @@ BOOL DeviceTMD_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO p
     return FALSE;
 }
 
-#endif /* LINUX */
+#endif /* LINUX || MACOS */

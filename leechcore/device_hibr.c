@@ -5,7 +5,7 @@
 // blog post by ForensicXlab at: https://www.forensicxlab.com/posts/hibernation/
 // Also the original paper at: https://www.cct.lsu.edu/~golden/Papers/sylvehiber.pdf
 //
-// (c) Ulf Frisk, 2024
+// (c) Ulf Frisk, 2024-2025
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include "leechcore.h"
@@ -154,7 +154,7 @@ BOOL DeviceHibr_InitializeFunctions(_In_ PDEVICE_CONTEXT_FILE ctx)
 }
 #endif /* _WIN32 */
 
-#ifdef LINUX
+#if defined(LINUX) || defined(MACOS)
 
 /*
 * Linux implementation of ntdll!RtlDecompressBuffer for COMPRESS_ALGORITHM_XPRESS:
@@ -173,7 +173,7 @@ NTSTATUS OSCOMPAT_RtlDecompressBufferEx(USHORT CompressionFormat, PUCHAR Uncompr
     static int(*pfn_xpress_decompress_huff)(PBYTE pbIn, SIZE_T cbIn, PBYTE pbOut, SIZE_T * pcbOut) = NULL;
     CHAR szPathLib[MAX_PATH] = { 0 };
     Util_GetPathLib(szPathLib);
-    strncat_s(szPathLib, sizeof(szPathLib), "libMSCompression.so", _TRUNCATE);
+    strncat_s(szPathLib, sizeof(szPathLib), "libMSCompression"LC_LIBRARY_FILETYPE, _TRUNCATE);
     if((CompressionFormat != 3) && (CompressionFormat != 4)) { return HIBR_STATUS_UNSUCCESSFUL; } // 3 == COMPRESS_ALGORITHM_XPRESS, 4 == COMPRESS_ALGORITHM_XPRESS_HUFF
     if(fFirst) {
         AcquireSRWLockExclusive(&LockSRW);
@@ -213,7 +213,7 @@ BOOL DeviceHibr_InitializeFunctions(_In_ PDEVICE_CONTEXT_FILE ctx)
     void *lib_mscompress;
     CHAR szPathLib[MAX_PATH] = { 0 };
     Util_GetPathLib(szPathLib);
-    strncat_s(szPathLib, sizeof(szPathLib), "libMSCompression.so", _TRUNCATE);
+    strncat_s(szPathLib, sizeof(szPathLib), "libMSCompression"LC_LIBRARY_FILETYPE, _TRUNCATE);
     lib_mscompress = dlopen(szPathLib, RTLD_NOW);
     if(lib_mscompress) {
         dlclose(lib_mscompress);
@@ -222,7 +222,7 @@ BOOL DeviceHibr_InitializeFunctions(_In_ PDEVICE_CONTEXT_FILE ctx)
     }
     return FALSE;
 }
-#endif /* LINUX */
+#endif /* LINUX || MACOS */
 
 
 
@@ -508,7 +508,7 @@ BOOL DeviceHIBR_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
     lcprintfv(ctxLC, "DEVICE: HIBR: OPEN: '%s'\n", ctx->szFileName);
     // initialize decompression:
     if(!DeviceHibr_InitializeFunctions(ctx)) {
-        lcprintf(ctxLC, "DEVICE: HIBR: Failed to load compression function [libMSCompression.so missing?].\n");
+        lcprintf(ctxLC, "DEVICE: HIBR: Failed to load compression function [libMSCompression"LC_LIBRARY_FILETYPE" missing?].\n");
         goto fail;
     }
     // open backing file:

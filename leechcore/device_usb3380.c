@@ -1,6 +1,6 @@
 // device_usb3380.c : implementation related to the USB3380 hardware device.
 //
-// (c) Ulf Frisk, 2017-2024
+// (c) Ulf Frisk, 2017-2025
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include "leechcore.h"
@@ -8,6 +8,7 @@
 #include "leechcore_internal.h"
 #include "oscompatibility.h"
 
+#if defined(_WIN32) || defined(LINUX)
 #define USB3380_MAX_PAGES_READ              0x1000
 
 #define CSR_BYTE0                           0x01
@@ -216,6 +217,7 @@ BOOL Device3380_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
     // ... PCI SPACE 0xF0000000-0xFFFFFFFF (guess)
     return TRUE;
 }
+#endif /* _WIN32 || LINUX */
 
 #ifdef _WIN32
 
@@ -315,6 +317,7 @@ BOOL Device3380_Open2(_Inout_ PLC_CONTEXT ctxLC)
 }
 
 #endif /* _WIN32 */
+
 #ifdef LINUX
 
 _Success_(return)
@@ -341,3 +344,14 @@ BOOL Device3380_Open2(_Inout_ PLC_CONTEXT ctxLC)
 }
 
 #endif /* LINUX */
+
+#ifdef MACOS
+
+_Success_(return)
+BOOL Device3380_Open(_Inout_ PLC_CONTEXT ctxLC)
+{
+    lcprintfv(ctxLC, "DEVICE: USB3380: FAIL: not supported on macOS.\n");
+    return FALSE;
+}
+
+#endif /* MACOS */

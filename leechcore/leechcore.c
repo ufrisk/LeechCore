@@ -1,6 +1,6 @@
 // leechcore.c : core implementation of the the LeechCore physical memory acquisition library.
 //
-// (c) Ulf Frisk, 2020-2024
+// (c) Ulf Frisk, 2020-2025
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 
@@ -51,7 +51,7 @@ BOOL WINAPI DllMain(_In_ HINSTANCE hinstDLL, _In_ DWORD fdwReason, _In_ PVOID lp
     return TRUE;
 }
 #endif /* _WIN32 */
-#ifdef LINUX
+#if defined(LINUX) || defined(MACOS)
 __attribute__((constructor)) VOID LcAttach()
 {
     ZeroMemory(&g_ctx, sizeof(LC_MAIN_CONTEXT));
@@ -64,7 +64,7 @@ __attribute__((destructor)) VOID LcDetach()
     DeleteCriticalSection(&g_ctx.Lock);
     ZeroMemory(&g_ctx, sizeof(LC_MAIN_CONTEXT));
 }
-#endif /* LINUX */
+#endif /* LINUX || MACOS */
 
 
 

@@ -2,7 +2,7 @@
 // 
 // tested with vmware workstation 16.1.2
 //
-// (c) Ulf Frisk, 2022-2024
+// (c) Ulf Frisk, 2022-2025
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include "leechcore.h"
@@ -203,7 +203,7 @@ BOOL DeviceVMWare_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINF
 }
 
 #endif /* _WIN32 */
-#ifdef LINUX
+#if defined(LINUX) || defined(MACOS)
 
 _Success_(return)
 BOOL DeviceVMWare_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo)
@@ -213,4 +213,4 @@ BOOL DeviceVMWare_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINF
     return FALSE;
 }
 
-#endif /* LINUX */
+#endif /* LINUX || MACOS */
