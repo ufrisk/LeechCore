@@ -183,7 +183,7 @@ BOOL DevicePMEM_SvcStart(_In_ PLC_CONTEXT ctxLC)
                 pDriverFile = NULL;
                 break;
             }
-            ZeroMemory(szDriverFile, _countof(szDriverFile));
+            strcpy_s(szDriverFile, _countof(szDriverFile), ctxLC->Config.szDevice);
         }
     }
     if(fopen_s(&pDriverFile, szDriverFile, "rb") || !pDriverFile) {
