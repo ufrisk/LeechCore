@@ -60,7 +60,7 @@ BOOL DeviceVMWare_Open_GetRange(_In_ DWORD dwPID, _Out_writes_opt_(42) LPWSTR ws
 {
     DWORD cch;
     HANDLE hProcess = 0;
-    QWORD va = 0x0000001000000000;
+    QWORD va = 0x0000000000000000;
     WCHAR wsz[MAX_PATH + 1] = { 0 };
     MEMORY_BASIC_INFORMATION BI;
     hProcess = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, dwPID);
