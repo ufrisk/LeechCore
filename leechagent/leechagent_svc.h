@@ -22,9 +22,9 @@ VOID WINAPI LeechSvc_SvcMain(DWORD dwArgc, LPWSTR *pwszArgv);
 
 /*
 * Run the "service" in interactive mode - i.e. run it as a normal application.
-* -- fInsecure
+* -- pConfig
 */
-VOID LeechSvc_Interactive(_In_ BOOL fInsecure);
+VOID LeechSvc_Interactive(_In_ PLEECHSVC_CONFIG pConfig);
 
 /*
 * Install the service.

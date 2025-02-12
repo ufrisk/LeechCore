@@ -39,7 +39,6 @@ BOOL Util_GetPathExe(_Out_writes_(MAX_PATH) PCHAR szPath)
 #if defined(LINUX) || defined(MACOS)
 
 #include "oscompatibility.h"
-#include "util.h"
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -325,45 +324,6 @@ VOID LeaveCriticalSection(LPCRITICAL_SECTION lpCriticalSection)
 
 
 // ----------------------------------------------------------------------------
-// WINUSB functionality below: (only Linux):
-// ----------------------------------------------------------------------------
-
-#ifdef LINUX
-
-BOOL __WinUsb_ReadWritePipe(
-    WINUSB_INTERFACE_HANDLE InterfaceHandle,
-    UCHAR    PipeID,
-    PUCHAR    Buffer,
-    ULONG    BufferLength,
-    PULONG    LengthTransferred,
-    PVOID    Overlapped
-) {
-    int result, cbTransferred;
-    result = libusb_bulk_transfer(
-        InterfaceHandle,
-        PipeID,
-        Buffer,
-        BufferLength,
-        &cbTransferred,
-        500);
-    *LengthTransferred = (ULONG)cbTransferred;
-    return result ? FALSE : TRUE;
-}
-
-BOOL WinUsb_Free(WINUSB_INTERFACE_HANDLE InterfaceHandle)
-{
-    if(!InterfaceHandle) { return TRUE; }
-    libusb_release_interface(InterfaceHandle, 0);
-    libusb_reset_device(InterfaceHandle);
-    libusb_close(InterfaceHandle);
-    return TRUE;
-}
-
-#endif /* LINUX */
-
-
-
-// ----------------------------------------------------------------------------
 // SRWLock functionality below:
 // ----------------------------------------------------------------------------
 
@@ -615,3 +575,177 @@ VOID CloseEvent(_In_ HANDLE hEvent)
 }
 
 #endif /* LINUX || MACOS */
+
+
+
+// ----------------------------------------------------------------------------
+// GetModule*() functionality below:
+// ----------------------------------------------------------------------------
+
+#ifdef LINUX
+
+#include <link.h>
+
+typedef struct tdMODULE_CB_INFO {
+    LPCSTR lpModuleName;
+    HMODULE hModule;
+} MODULE_CB_INFO, *PMODULE_CB_INFO;
+
+int GetModuleHandleA_CB(struct dl_phdr_info *info, size_t size, void *data)
+{
+    PMODULE_CB_INFO ctx = (PMODULE_CB_INFO)data;
+    if(!ctx->lpModuleName && (info->dlpi_name[0] == 0)) {
+        ctx->hModule = (HMODULE)info->dlpi_addr;
+        return 1;
+    }
+    if(ctx->lpModuleName && info->dlpi_name[0] && strstr(info->dlpi_name, ctx->lpModuleName)) {
+        ctx->hModule = (HMODULE)info->dlpi_addr;
+        return 1;
+    }
+    return 0;
+}
+
+HMODULE GetModuleHandleA(_In_opt_ LPCSTR lpModuleName)
+{
+    MODULE_CB_INFO info = { 0 };
+    info.lpModuleName = lpModuleName;
+    dl_iterate_phdr(GetModuleHandleA_CB, (void *)&info);
+    return info.hModule;
+}
+
+/*
+* Retrieve the operating system path of the directory which is containing this:
+* .dll/.so file.
+* -- szPath
+*/
+VOID Util_GetPathLib(_Out_writes_(MAX_PATH) PCHAR szPath)
+{
+    SIZE_T i;
+    ZeroMemory(szPath, MAX_PATH);
+    readlink("/proc/self/exe", szPath, MAX_PATH - 4);
+    for(i = strlen(szPath) - 1; i > 0; i--) {
+        if(szPath[i] == '/' || szPath[i] == '\\') {
+            szPath[i + 1] = '\0';
+            return;
+        }
+    }
+}
+
+#endif /* LINUX */
+
+#ifdef MACOS
+
+#include <mach-o/dyld.h>
+#include <mach-o/dyld_images.h>
+
+DWORD GetModuleFileNameA(_In_opt_ HMODULE hModule, _Out_ LPSTR lpFilename, _In_ DWORD nSize)
+{
+    int ret;
+    char resolvedPath[MAX_PATH];
+    // ----------------------------------------------------------------------
+    // 1) Handle the case hModule == NULL => main executable path
+    // ----------------------------------------------------------------------
+    if(hModule == NULL) {
+        // macOS function to get the path of the main executable
+        uint32_t bufSize = (uint32_t)nSize;
+        ret = _NSGetExecutablePath(lpFilename, &bufSize);
+        if(ret == 0) {
+            // If you want to resolve symlinks and get an absolute path:
+            // (optional: remove if you just want the raw path from dyld)
+            if(realpath(lpFilename, resolvedPath)) {
+                strncpy(lpFilename, resolvedPath, nSize);
+                lpFilename[nSize - 1] = '\0';
+            } else {
+                // realpath failed, but we still have _NSGetExecutablePath
+                // fallback to leaving lpFilename as-is
+            }
+            return (DWORD)strlen(lpFilename);
+        } else {
+            // _NSGetExecutablePath indicates buffer too small
+            // or some other error
+            // Ideally you handle this more gracefully by re-allocating
+            // or returning an error code.
+            if(bufSize > 0 && bufSize <= nSize) {
+                // The function might have written a partial path, but typically
+                // ret != 0 means not enough space. Return 0 or handle error.
+            }
+            return 0;
+        }
+    }
+    // ----------------------------------------------------------------------
+    // 2) hModule != NULL => look up the corresponding Mach-O image
+    // ----------------------------------------------------------------------
+    uint32_t imageCount = _dyld_image_count();
+    for(uint32_t i = 0; i < imageCount; i++) {
+        const struct mach_header *header = _dyld_get_image_header(i);
+        intptr_t slide = _dyld_get_image_vmaddr_slide(i);
+        // Base address of this Mach-O image
+        uintptr_t baseAddr = (uintptr_t)header + (uintptr_t)slide;
+        if((uintptr_t)hModule == baseAddr) {
+            // Found the matching Mach-O
+            const char *imagePath = _dyld_get_image_name(i);
+            if(imagePath) {
+                strncpy(lpFilename, imagePath, nSize);
+                lpFilename[nSize - 1] = '\0';
+                return (DWORD)strlen(lpFilename);
+            } else {
+                // If for some reason there's no name
+                return 0;
+            }
+        }
+    }
+    // ----------------------------------------------------------------------
+    // 3) If we didn't find a matching image, return 0 or some error code
+    // ----------------------------------------------------------------------
+    return 0;
+}
+
+HMODULE GetModuleHandleA(LPCSTR lpModuleName)
+{
+    // If lpModuleName == NULL, we’ll mimic the Windows behavior of
+    // returning the handle for the main executable.
+    if(!lpModuleName) {
+        // Index 0 should be the main executable
+        const struct mach_header *hdr = _dyld_get_image_header(0);
+        intptr_t slide = _dyld_get_image_vmaddr_slide(0);
+        return (HMODULE)((uintptr_t)hdr + (uintptr_t)slide);
+    }
+    // Otherwise, iterate over all loaded images looking for a match
+    uint32_t count = _dyld_image_count();
+    for(uint32_t i = 0; i < count; i++) {
+        const char *imageName = _dyld_get_image_name(i);
+        if(imageName && strstr(imageName, lpModuleName)) {
+            // Found a match, return base address of this image
+            const struct mach_header *hdr = _dyld_get_image_header(i);
+            intptr_t slide = _dyld_get_image_vmaddr_slide(i);
+            return (HMODULE)((uintptr_t)hdr + (uintptr_t)slide);
+        }
+    }
+    // If nothing found, return NULL
+    return NULL;
+}
+
+/*
+* Retrieve the operating system path of the directory which is containing this:
+* .dll/.so file.
+* -- szPath
+*/
+VOID Util_GetPathLib(_Out_writes_(MAX_PATH) PCHAR szPath)
+{
+    SIZE_T i;
+    ZeroMemory(szPath, MAX_PATH);
+    Dl_info Info = { 0 };
+    if(!dladdr((void *)Util_GetPathLib, &Info) || !Info.dli_fname) {
+        GetModuleFileNameA(NULL, szPath, MAX_PATH - 4);
+    } else {
+        strncpy(szPath, Info.dli_fname, MAX_PATH - 1);
+    }
+    for(i = strlen(szPath) - 1; i > 0; i--) {
+        if(szPath[i] == '/' || szPath[i] == '\\') {
+            szPath[i + 1] = '\0';
+            return;
+        }
+    }
+}
+
+#endif /* MACOS */

@@ -15,6 +15,22 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "leechagent", "leechagent\le
 		{3476ABD2-5DEA-43E6-A676-8BE25F74535A} = {3476ABD2-5DEA-43E6-A676-8BE25F74535A}
 	EndProjectSection
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "leechagent_linux", "leechagent_linux", "{51A6D505-4CE1-4F3A-8213-9E9B92FF21B7}"
+	ProjectSection(SolutionItems) = preProject
+		leechagent_linux\leechagent.c = leechagent_linux\leechagent.c
+		leechagent_linux\leechagent.h = leechagent_linux\leechagent.h
+		leechagent_linux\leechagent_linux.code-workspace = leechagent_linux\leechagent_linux.code-workspace
+		leechagent_linux\leechagent_proc.h = leechagent_linux\leechagent_proc.h
+		leechagent_linux\leechagent_rpc.c = leechagent_linux\leechagent_rpc.c
+		leechagent_linux\leechagent_rpc.h = leechagent_linux\leechagent_rpc.h
+		leechagent_linux\leechrpc.h = leechagent_linux\leechrpc.h
+		leechagent_linux\leechrpcserver.c = leechagent_linux\leechrpcserver.c
+		leechagent_linux\leechrpcshared.c = leechagent_linux\leechrpcshared.c
+		leechagent_linux\Makefile = leechagent_linux\Makefile
+		leechagent_linux\oscompatibility.c = leechagent_linux\oscompatibility.c
+		leechagent_linux\oscompatibility.h = leechagent_linux\oscompatibility.h
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|ARM64 = Debug|ARM64

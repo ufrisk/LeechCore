@@ -6,6 +6,68 @@
 #ifndef __LEECHRPC_H__
 #define __LEECHRPC_H__
 #include "leechcore.h"
+#include <leechgrpc.h>
+
+#ifdef _WIN32
+#include <windows.h>
+
+#define CLSID_BINDING_INTERFACE_LEECHRPC "906B0DC2-1337-0666-0001-0000657A63DD"
+
+#define LEECHRPC_COMPRESS_MAXTHREADS    8
+
+typedef NTSTATUS WINAPI PFN_RtlCompressBuffer(
+    _In_ USHORT CompressionFormatAndEngine,
+    _In_  PUCHAR UncompressedBuffer,
+    _In_  ULONG  UncompressedBufferSize,
+    _Out_ PUCHAR CompressedBuffer,
+    _In_  ULONG  CompressedBufferSize,
+    _In_  ULONG  UncompressedChunkSize,
+    _Out_ PULONG FinalCompressedSize,
+    _In_  PVOID  WorkSpace
+);
+
+typedef NTSTATUS WINAPI PFN_RtlDecompressBuffer(
+    _In_  USHORT CompressionFormat,
+    _Out_ PUCHAR UncompressedBuffer,
+    _In_  ULONG  UncompressedBufferSize,
+    _In_  PUCHAR CompressedBuffer,
+    _In_  ULONG  CompressedBufferSize,
+    _Out_ PULONG FinalUncompressedSize
+);
+
+typedef struct tdLEECHRPC_COMPRESS {
+    BOOL fValid;
+    HANDLE hDll;
+    DWORD iCompress;
+    struct {
+        CRITICAL_SECTION Lock;
+        PVOID pbWorkspace;
+    } Compress[LEECHRPC_COMPRESS_MAXTHREADS];
+    struct {
+        PFN_RtlCompressBuffer *pfnRtlCompressBuffer;
+        PFN_RtlDecompressBuffer *pfnRtlDecompressBuffer;
+    } fn;
+} LEECHRPC_COMPRESS, *PLEECHRPC_COMPRESS;
+
+#endif /* _WIN32 */
+#if defined(LINUX) || defined(MACOS)
+
+#define WINAPI
+#define RPC_BINDING_HANDLE  PVOID
+#define RPC_CSTR            LPSTR
+typedef const void          *LPCVOID;
+
+typedef int(*pfn_xpress_compress)(PBYTE pbIn, SIZE_T cbIn, PBYTE pbOut, SIZE_T *pcbOut);
+typedef int(*pfn_xpress_decompress)(PBYTE pbIn, SIZE_T cbIn, PBYTE pbOut, SIZE_T *pcbOut);
+
+typedef struct tdLEECHRPC_COMPRESS {
+    BOOL fValid;
+    HMODULE lib_mscompress;
+    pfn_xpress_compress pfn_xpress_compress;
+    pfn_xpress_decompress pfn_xpress_decompress;
+} LEECHRPC_COMPRESS, *PLEECHRPC_COMPRESS;
+
+#endif /* LINUX || MACOS */
 
 #define LEECHRPC_MSGMAGIC                   0xd05a2667
 #define LEECHRPC_FLAG_NOCOMPRESS                0x0010
@@ -16,41 +78,26 @@
 #define LEECHRPC_FLAG_FNEXIST_SetOption         0x2000
 #define LEECHRPC_FLAG_FNEXIST_Command           0x4000
 
-#ifdef _WIN32
-#include <windows.h>
-
-#define CLSID_BINDING_INTERFACE_LEECHRPC "906B0DC2-1337-0666-0001-0000657A63DD"
-
-#define LEECHRPC_COMPRESS_MAXTHREADS    8
-
-typedef struct tdLEECHRPC_COMPRESS {
-    BOOL fValid;
-    HANDLE hDll;
-    DWORD iCompress;
-    DWORD iDecompress;
-    struct {
-        CRITICAL_SECTION Lock;
-        HANDLE h;
-    } Compress[LEECHRPC_COMPRESS_MAXTHREADS];
-    struct {
-        CRITICAL_SECTION Lock;
-        HANDLE h;
-    } Decompress[LEECHRPC_COMPRESS_MAXTHREADS];
-    struct {
-        BOOL(WINAPI *pfnCreateCompressor)(DWORD Algorithm, PVOID AllocationRoutines, PHANDLE CompressorHandle);
-        BOOL(WINAPI *pfnCreateDecompressor)(DWORD Algorithm, PVOID AllocationRoutines, PHANDLE DecompressorHandle);
-        BOOL(WINAPI *pfnCloseCompressor)(HANDLE CompressorHandle);
-        BOOL(WINAPI *pfnCloseDecompressor)(HANDLE DecompressorHandle);
-        BOOL(WINAPI *pfnCompress)(HANDLE CompressorHandle, LPCVOID UncompressedData, SIZE_T UncompressedDataSize, PVOID CompressedBuffer, SIZE_T CompressedBufferSize, PSIZE_T CompressedDataSize);
-        BOOL(WINAPI *pfnDecompress)(HANDLE DecompressorHandle, LPCVOID CompressedData, SIZE_T CompressedDataSize, PVOID UncompressedBuffer, SIZE_T UncompressedBufferSize, PSIZE_T UncompressedDataSize);
-    } fn;
-} LEECHRPC_COMPRESS, *PLEECHRPC_COMPRESS;
+typedef struct LEECHRPC_GRPC {
+    HMODULE hDll;
+    HANDLE hGRPC;
+    pfn_leechgrpc_client_create_insecure pfn_leechgrpc_client_create_insecure;
+    pfn_leechgrpc_client_create_secure_p12 pfn_leechgrpc_client_create_secure_p12;
+    pfn_leechgrpc_client_free pfn_leechgrpc_client_free;
+    pfn_leechgrpc_client_submit_command pfn_leechgrpc_client_submit_command;
+    CHAR szClientTlsP12Path[MAX_PATH];
+    CHAR szClientTlsP12Password[MAX_PATH];
+    CHAR szServerCertCaPath[MAX_PATH];
+    CHAR szServerCertHostnameOverride[MAX_PATH];
+} LEECHRPC_GRPC, *PLEECHRPC_GRPC;
 
 typedef struct tdLEECHRPC_CLIENT_CONTEXT {
     BOOL fIsProtoRpc;               // RPC over TCP/IP.
     BOOL fIsProtoSmb;               // RPC over SMB (named pipe).
+    BOOL fIsProtoGRpc;              // gRPC over TCP/IP.
     BOOL fHousekeeperThread;
     BOOL fHousekeeperThreadIsRunning;
+    HANDLE hHousekeeperThread;
     // RPC functionality below:
     BOOL fIsAuthInsecure;           // No authentication (insecure connection).
     BOOL fIsAuthNTLM;               // NTLM authentication (no server validation).
@@ -64,6 +111,7 @@ typedef struct tdLEECHRPC_CLIENT_CONTEXT {
     RPC_BINDING_HANDLE hRPC;
     RPC_CSTR szStringBinding;
     LEECHRPC_COMPRESS Compress;
+    LEECHRPC_GRPC grpc;
 } LEECHRPC_CLIENT_CONTEXT, *PLEECHRPC_CLIENT_CONTEXT;
 
 typedef enum {
@@ -185,7 +233,5 @@ VOID LeechSvc_GetTimeStamp(_Out_writes_(32) LPSTR szTime);
 */
 VOID LeechRpcOnLoadInitialize();
 VOID LeechRpcOnUnloadClose();
-
-#endif /* _WIN32 */
 
 #endif /* __LEECHRPC_H__ */

@@ -486,6 +486,7 @@ VOID WINAPI LeechSvc_SvcCtrlHandler(_In_ DWORD dwCtrl)
 */
 VOID LeechSvc_SvcInit()
 {
+    LEECHSVC_CONFIG cfg = { 0 };
     RPC_STATUS status;
     g_hSvcStopEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
     if(!g_hSvcStopEvent) {
@@ -495,12 +496,27 @@ VOID LeechSvc_SvcInit()
     // Report service status pending (starting).
     LeechSvc_ReportSvcStatus(SERVICE_START_PENDING, NO_ERROR, 3000);
     LeechRpcOnLoadInitialize();
-    status = RpcStart(FALSE, TRUE);
-    if(FAILED(status)) {
-        RpcStop();
-        LeechSvc_ReportSvcStatus(SERVICE_STOPPED, status, 0);
-        LeechRpcOnUnloadClose();
+    LeechSvc_ParseArgs_FromConfigFile(&cfg);
+    if(cfg.fInteractive || cfg.fInsecure || (!cfg.fMSRPC || !cfg.fgRPC)) {
+        LeechSvc_ReportSvcStatus(SERVICE_STOPPED, ERROR_INVALID_PARAMETER, 0);
         return;
+    }
+    if(cfg.fgRPC) {
+        if(!RpcStartGRPC(&cfg)) {
+            RpcStop();
+            LeechSvc_ReportSvcStatus(SERVICE_STOPPED, ERROR_INVALID_PARAMETER, 0);
+            LeechRpcOnUnloadClose();
+            return;
+        }
+    }
+    if(cfg.fMSRPC) {
+        status = RpcStartMSRPC(FALSE, TRUE);
+        if(FAILED(status)) {
+            RpcStop();
+            LeechSvc_ReportSvcStatus(SERVICE_STOPPED, status, 0);
+            LeechRpcOnUnloadClose();
+            return;
+        }
     }
     // Report running status when initialization is complete.
     LeechSvc_ReportSvcStatus(SERVICE_RUNNING, NO_ERROR, 0);
@@ -535,17 +551,33 @@ VOID WINAPI LeechSvc_SvcMain(DWORD dwArgc, LPWSTR *pwszArgv)
 
 /*
 * Run the "service" in interactive mode - i.e. run it as a normal application.
-* -- fInsecure
+* -- pConfig
 */
-VOID LeechSvc_Interactive(_In_ BOOL fInsecure)
+VOID LeechSvc_Interactive(_In_ PLEECHSVC_CONFIG pConfig)
 {
     RPC_STATUS status;
     LeechRpcOnLoadInitialize();
-    status = RpcStart(fInsecure, FALSE);
-    if(FAILED(status)) {
-        RpcStop();
-        LeechSvc_ReportSvcStatus(SERVICE_STOPPED, status, 0);
-        return;
+    if(pConfig->fgRPC) {
+        if(!RpcStartGRPC(pConfig)) {
+            printf("Unable to start GRPC service.\n");
+            RpcStop();
+            LeechRpcOnUnloadClose();
+            return;
+        }
+    }
+    if(pConfig->fMSRPC) {
+        status = RpcStartMSRPC(pConfig->fInsecure, FALSE);
+        if(FAILED(status)) {
+            printf("Unable to start MSRPC service.\n");
+            RpcStop();
+            LeechSvc_ReportSvcStatus(SERVICE_STOPPED, status, 0);
+            return;
+        } else if(pConfig->fInsecure) {
+            printf(
+                "WARNING! UNAUTHENTICATED REMOTE CODE EXECUTION! LeechAgent contains\n" \
+                "     agent-style functionality that allows unauthenticated users to\n" \
+                "     execute arbitrary code. Use INSECURE mode with caution!       \n");
+        }
     }
     // Check whether to stop the service.
     while(TRUE) {

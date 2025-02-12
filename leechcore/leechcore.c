@@ -244,6 +244,11 @@ VOID LcCreate_FetchDevice(_Inout_ PLC_CONTEXT ctx)
     DWORD cch, cszDevice = 0;
     LPSTR szDeviceSpecial = NULL;
     // 1: check against built-in devices:
+    if(0 == _strnicmp("grpc://", ctx->Config.szRemote, 7)) {
+        strncpy_s(ctx->Config.szDeviceName, sizeof(ctx->Config.szDeviceName), "grpc", _TRUNCATE);
+        ctx->pfnCreate = LeechRpc_Open;
+        return;
+    }
     if(0 == _strnicmp("rpc://", ctx->Config.szRemote, 6)) {
         strncpy_s(ctx->Config.szDeviceName, sizeof(ctx->Config.szDeviceName), "rpc", _TRUNCATE);
         ctx->pfnCreate = LeechRpc_Open;

@@ -6,9 +6,9 @@
 #include "leechagent.h"
 #include "leechagent_proc.h"
 #include "leechrpc.h"
-#include "leechrpc_h.h"
-#include "util.h"
 #include <stdio.h>
+
+#define error_status_t DWORD
 
 typedef struct tdLEECHRPC_SERVER_CONTEXT {
     BOOL fValid;
@@ -26,6 +26,8 @@ typedef struct tdLEECHRPC_SERVER_CONTEXT {
 } LEECHRPC_SERVER_CONTEXT, *PLEECHRPC_SERVER_CONTEXT;
 
 LEECHRPC_SERVER_CONTEXT ctxLeechRpc = { 0 };
+
+
 
 //-----------------------------------------------------------------------------
 // CLIENT TRACK / KEEPALIVE FUNCTIONALITY BELOW:
@@ -108,7 +110,8 @@ VOID LeechRPC_LcHandle_Close(_In_ DWORD dwRpcClientID, _In_ BOOL fReasonTimeout)
     }
     LeaveCriticalSection(&ctxLeechRpc.LockClientList);
     if(hPP) {
-        LeechAgent_ProcParent_Close(hPP);
+        // TODO: IMPLEMENT THIS
+        //LeechAgent_ProcParent_Close(hPP);
     }
     if(hLC) {
         LcClose(hLC);
@@ -173,7 +176,7 @@ VOID LeechRpcOnUnloadClose()
     ZeroMemory(&ctxLeechRpc, sizeof(LEECHRPC_SERVER_CONTEXT));
 }
 
-error_status_t LeechRpc_CommandReadScatter(_In_ HANDLE hLC, _In_ PLEECHRPC_MSG_BIN pReq, long *pcbOut, byte **ppbOut)
+error_status_t LeechRpc_CommandReadScatter(_In_ HANDLE hLC, _In_ PLEECHRPC_MSG_BIN pReq, QWORD *pcbOut, BYTE **ppbOut)
 {
     BOOL fOK;
     PLEECHRPC_MSG_BIN pRsp = NULL;
@@ -244,7 +247,7 @@ fail:
     return (error_status_t)-1;
 }
 
-error_status_t LeechRpc_CommandWriteScatter(_In_ HANDLE hLC, _In_ PLEECHRPC_MSG_BIN pReq, long *pcbOut, byte **ppbOut)
+error_status_t LeechRpc_CommandWriteScatter(_In_ HANDLE hLC, _In_ PLEECHRPC_MSG_BIN pReq, QWORD *pcbOut, BYTE **ppbOut)
 {
     PBOOL pfRsp;
     PLEECHRPC_MSG_BIN pRsp = NULL;
@@ -292,6 +295,7 @@ fail:
 }
 
 /*
+* NOTE! Remote agent command functionality is not currently supported by the Linux LeechAgent.
 * Transfer commands/data to/from the remote service (if it exists).
 * NB! USER-FREE: ppbDataOut (LocalFree)
 * -- hLC
@@ -308,39 +312,16 @@ BOOL LeechRpc_CommandAgent(_In_ HANDLE hLC, _In_opt_ PHANDLE phPP, _In_ QWORD fO
 {
     if(ppbDataOut) { *ppbDataOut = NULL; }
     if(pcbDataOut) { *pcbDataOut = 0; }
-    switch(fOption & 0xffffffff'00000000) {
-        case LC_CMD_AGENT_EXEC_PYTHON:
-            return LeechAgent_ProcParent_ExecPy(hLC, fOption & 0xffffffff, pbDataIn, cbDataIn, ppbDataOut, pcbDataOut);
+    switch(fOption & 0xffffffff00000000) {
         case LC_CMD_AGENT_EXIT_PROCESS:
-            ExitProcess(fOption & 0xffffffff);
+            exit(EXIT_SUCCESS);
             return FALSE;   // not reached ...
-        case LC_CMD_AGENT_VFS_INITIALIZE:
-            if(!phPP) { return FALSE; }
-            return LeechAgent_ProcParent_VfsInitialize(hLC, phPP, pbDataIn, cbDataIn, ppbDataOut, pcbDataOut);
-        case LC_CMD_AGENT_VFS_CONSOLE:
-            if(!phPP) { return FALSE; }
-            return LeechAgent_ProcParent_VfsConsole(hLC, phPP, ppbDataOut, pcbDataOut);
-        case LC_CMD_AGENT_VFS_LIST:
-            if(!phPP) { return FALSE; }
-            return LeechAgent_ProcParent_VfsCMD(hLC, phPP, LEECHAGENT_PROC_CMD_VFS_LIST, pbDataIn, cbDataIn, ppbDataOut, pcbDataOut);
-        case LC_CMD_AGENT_VFS_READ:
-            if(!phPP) { return FALSE; }
-            return LeechAgent_ProcParent_VfsCMD(hLC, phPP, LEECHAGENT_PROC_CMD_VFS_READ, pbDataIn, cbDataIn, ppbDataOut, pcbDataOut);
-        case LC_CMD_AGENT_VFS_WRITE:
-            if(!phPP) { return FALSE; }
-            return LeechAgent_ProcParent_VfsCMD(hLC, phPP, LEECHAGENT_PROC_CMD_VFS_WRITE, pbDataIn, cbDataIn, ppbDataOut, pcbDataOut);
-        case LC_CMD_AGENT_VFS_OPT_GET:
-            if(!phPP) { return FALSE; }
-            return LeechAgent_ProcParent_VfsCMD(hLC, phPP, LEECHAGENT_PROC_CMD_VFS_OPT_GET, pbDataIn, cbDataIn, ppbDataOut, pcbDataOut);
-        case LC_CMD_AGENT_VFS_OPT_SET:
-            if(!phPP) { return FALSE; }
-            return LeechAgent_ProcParent_VfsCMD(hLC, phPP, LEECHAGENT_PROC_CMD_VFS_OPT_SET, pbDataIn, cbDataIn, ppbDataOut, pcbDataOut);
         default:
             return FALSE;
     }
 }
 
-error_status_t LeechRpc_CommandOpen(_In_ PLEECHRPC_MSG_OPEN pReq, long *pcbOut, byte **ppbOut)
+error_status_t LeechRpc_CommandOpen(_In_ PLEECHRPC_MSG_OPEN pReq, QWORD *pcbOut, BYTE **ppbOut)
 {
     DWORD cbRsp;
     CHAR szTime[32];
@@ -381,11 +362,11 @@ error_status_t LeechRpc_CommandOpen(_In_ PLEECHRPC_MSG_OPEN pReq, long *pcbOut, 
 }
 
 error_status_t LeechRpc_ReservedSubmitCommand(
-    /* [in] */ handle_t hBinding,
-    /* [in] */ long cbIn,
-    /* [size_is][in] */ byte *pbIn,
-    /* [out] */ long *pcbOut,
-    /* [size_is][size_is][out] */ byte **ppbOut)
+    /* [in] */ HANDLE hBinding,
+    /* [in] */ QWORD cbIn,
+    /* [size_is][in] */ BYTE *pbIn,
+    /* [out] */ QWORD *pcbOut,
+    /* [size_is][size_is][out] */ BYTE **ppbOut)
 {
     HANDLE hLC = NULL, *phPP = NULL;
     BOOL fTMP = FALSE;
@@ -511,7 +492,7 @@ error_status_t LeechRpc_ReservedSubmitCommand(
             pRspBin->fMsgResult = fTMP;
             pRspBin->cb = cbTMP;
             memcpy(pRspBin->pb, pbTMP, cbTMP);
-            pbTMP = LocalFree(pbTMP);
+            LocalFree(pbTMP); pbTMP = NULL;
             pRspBin->tpMsg = LEECHRPC_MSGTYPE_COMMAND_RSP;
             pRspBin->dwMagic = LEECHRPC_MSGMAGIC;
             pRspBin->cbMsg = sizeof(LEECHRPC_MSG_BIN) + pRspBin->cb;
@@ -536,5 +517,7 @@ fail:
 
 VOID LeechGRPC_ReservedSubmitCommand(_In_opt_ PVOID ctx, _In_ PBYTE pbIn, _In_ SIZE_T cbIn, _Out_ PBYTE *ppbOut, _Out_ SIZE_T *pcbOut)
 {
-    LeechRpc_ReservedSubmitCommand(NULL, (long)cbIn, pbIn, (long*)pcbOut, ppbOut);
+    QWORD cbOut = 0;
+    LeechRpc_ReservedSubmitCommand(NULL, cbIn, pbIn, &cbOut, ppbOut);
+    *pcbOut = (SIZE_T)cbOut;
 }

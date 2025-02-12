@@ -11,8 +11,18 @@
 #define SECURITY_WIN32
 #include <security.h>
 #include <sddl.h>
+#include <leechgrpc.h>
 
+// MS-RPC:
 RPC_BINDING_VECTOR *g_rpc_pbindingVector = NULL;
+
+// gRPC:
+HANDLE g_hGRPC = NULL;
+
+pfn_leechgrpc_server_create_insecure g_pfn_leechgrpc_server_create_insecure;
+pfn_leechgrpc_server_create_secure_p12 g_pfn_leechgrpc_server_create_secure_p12;
+pfn_leechgrpc_server_shutdown g_pfn_leechgrpc_server_shutdown;
+VOID LeechGRPC_ReservedSubmitCommand(_In_opt_ PVOID ctx, _In_ PBYTE pbIn, _In_ SIZE_T cbIn, _Out_ PBYTE *ppbOut, _Out_ SIZE_T *pcbOut);
 
 VOID LeechSvcRpc_WriteInfoEventLog(_In_z_ _Printf_format_string_ char const* const _Format, ...)
 {
@@ -122,7 +132,73 @@ RPC_STATUS CALLBACK LeechSvcRpc_SecurityCallback_AlwaysAllow(RPC_IF_HANDLE Inter
     return RPC_S_OK;
 }
 
-RPC_STATUS RpcStart(_In_ BOOL fInsecure, _In_ BOOL fSvc)
+VOID RpcStopGRPC()
+{
+    if(g_hGRPC) {
+        g_pfn_leechgrpc_server_shutdown(g_hGRPC);
+        g_hGRPC = NULL;
+    }
+}
+
+_Success_(return)
+BOOL RpcStartGRPC(_In_ PLEECHSVC_CONFIG pConfig)
+{
+    DWORD dwTcpPort = 0;
+    if(!pConfig->hModuleGRPC) {
+        printf("Failed: gRPC: library 'leechgrpc.dll' missing - gRPC functionality is disabled.\n");
+        return FALSE;
+    }
+    dwTcpPort = _wtoi(pConfig->wszTcpPortGRPC);
+    if(!dwTcpPort) {
+        printf("Failed: gRPC: Invalid port number '%i' - gRPC functionality is disabled.\n", dwTcpPort);
+        return FALSE;
+    }
+    g_pfn_leechgrpc_server_create_insecure = (pfn_leechgrpc_server_create_insecure)GetProcAddress(pConfig->hModuleGRPC, "leechgrpc_server_create_insecure");
+    g_pfn_leechgrpc_server_create_secure_p12 = (pfn_leechgrpc_server_create_secure_p12)GetProcAddress(pConfig->hModuleGRPC, "leechgrpc_server_create_secure_p12");
+    g_pfn_leechgrpc_server_shutdown = (pfn_leechgrpc_server_shutdown)GetProcAddress(pConfig->hModuleGRPC, "leechgrpc_server_shutdown");
+    if(!g_pfn_leechgrpc_server_create_insecure || !g_pfn_leechgrpc_server_create_secure_p12 || !g_pfn_leechgrpc_server_shutdown) {
+        printf("Failed: gRPC: library 'leechgrpc.dll' missing required functions, gRPC functionality is disabled.\n");
+        RpcStopGRPC();
+        return FALSE;
+    }
+    if(pConfig->fInsecure) {
+        g_hGRPC = g_pfn_leechgrpc_server_create_insecure(
+            pConfig->grpc.szListenAddress,
+            dwTcpPort,
+            NULL,
+            LeechGRPC_ReservedSubmitCommand
+        );
+    } else {
+        g_hGRPC = g_pfn_leechgrpc_server_create_secure_p12(
+            pConfig->grpc.szListenAddress,
+            dwTcpPort,
+            NULL, LeechGRPC_ReservedSubmitCommand,
+            pConfig->grpc.szTlsClientCaCert,
+            pConfig->grpc.szTlsServerP12,
+            pConfig->grpc.szTlsServerP12Pass
+        );
+    }
+    if(!g_hGRPC) {
+        printf("Failed: gRPC: initialization failed, gRPC functionality is disabled.\n");
+        RpcStopGRPC();
+        return FALSE;
+    }
+    if(pConfig->fInsecure) {
+        printf(
+            "WARNING! Starting LeechAgent in INSECURE gRPC mode!                \n" \
+            "     Any user may connect unauthenticated unless firewalled!       \n" \
+            "     Ensure that port tcp/%i is properly configured in firewall!\n" \
+            "                                                                   \n", dwTcpPort);
+    } else {
+        printf(
+            "INFO: Starting LeechAgent in gRPC mTLS mode!                       \n" \
+            "     Ensure that port tcp/%i is properly configured in firewall!\n" \
+            "                                                                   \n", dwTcpPort);
+    }
+    return TRUE;
+}
+
+RPC_STATUS RpcStartMSRPC(_In_ BOOL fInsecure, _In_ BOOL fSvc)
 {
     RPC_STATUS status;
     RPC_CSTR szSPN = NULL;
@@ -160,7 +236,7 @@ RPC_STATUS RpcStart(_In_ BOOL fInsecure, _In_ BOOL fSvc)
         return status;
     }
 #pragma warning(suppress: 6102)
-    status = RpcEpRegister(LeechRpc_v1_0_s_ifspec, g_rpc_pbindingVector, 0, LEECHSVC_TCP_PORT);
+    status = RpcEpRegister(LeechRpc_v1_0_s_ifspec, g_rpc_pbindingVector, 0, LEECHSVC_TCP_PORT_MSRPC);
     if(status) {
         printf("Failed: RPC: RpcServerInqBindings (0x%08x).\n", status);
         return status;
@@ -168,12 +244,10 @@ RPC_STATUS RpcStart(_In_ BOOL fInsecure, _In_ BOOL fSvc)
     // Set security mode.
     if(fInsecure) {
         printf(
-            "WARNING! Starting LeechAgent in INSECURE mode! WARNING any user may\n" \
-            "     connect unauthenticated to service unless properly firewalled!\n" \
+            "WARNING! Starting LeechAgent in INSECURE MS-RPC mode!              \n" \
+            "     Any user may connect unauthenticated unless firewalled!       \n" \
             "     Ensure that port tcp/28473 is properly configured in firewall!\n" \
-            "WARNING! UNAUTHENTICATED REMOTE CODE EXECUTION! LeechAgent contains\n" \
-            "     agent-style functionality that allows unauthenticated users to\n" \
-            "     execute arbitrary code. Use INSECURE mode with caution!\n" );
+            "                                                                   \n");
     } else {
         // enable ntlm security (for local non-domain joined use case).
         status = RpcServerRegisterAuthInfoA("", RPC_C_AUTHN_WINNT, NULL, NULL);
@@ -183,10 +257,10 @@ RPC_STATUS RpcStart(_In_ BOOL fInsecure, _In_ BOOL fSvc)
         }
         // enable kerberos security.
         status = RpcServerInqDefaultPrincNameA(RPC_C_AUTHN_GSS_KERBEROS, &szSPN);
-        if(status) { 
+        if(status) {
             printf("WARN: Kerberos authentication is unavailable.\n");
             printf("      NTLM authentication is available.      \n");
-            RpcStringFreeA(&szSPN); 
+            RpcStringFreeA(&szSPN);
         } else {
             status = RpcServerRegisterAuthInfoA(szSPN, RPC_C_AUTHN_GSS_KERBEROS, NULL, NULL);
             if(status) {
@@ -219,8 +293,13 @@ RPC_STATUS RpcStart(_In_ BOOL fInsecure, _In_ BOOL fSvc)
 
 void RpcStop()
 {
+    // stop gRPC server:
+    RpcStopGRPC();
+    // stop MS-RPC server:
 #pragma warning(suppress: 6031)
-    RpcEpUnregister(LeechRpc_v1_0_s_ifspec, g_rpc_pbindingVector, 0);
-    RpcBindingVectorFree(&g_rpc_pbindingVector);
-    g_rpc_pbindingVector = NULL;
+    if(g_rpc_pbindingVector) {
+        RpcEpUnregister(LeechRpc_v1_0_s_ifspec, g_rpc_pbindingVector, 0);
+        RpcBindingVectorFree(&g_rpc_pbindingVector);
+        g_rpc_pbindingVector = NULL;
+    }
 }

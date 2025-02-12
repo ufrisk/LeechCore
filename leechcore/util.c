@@ -148,11 +148,11 @@ VOID Util_SplitN(_In_ LPSTR sz, _In_ CHAR chDelimiter, _In_ DWORD cpsz, _Out_wri
             return;
         }
         if(chDelimiter == _szBuf[i]) {
-            _szBuf[i] = '\0';
             j++;
             if(j >= cpsz) {
                 return;
             }
+            _szBuf[i] = '\0';
             psz[j] = _szBuf + i + 1;
         }
     }

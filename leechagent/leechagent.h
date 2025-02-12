@@ -10,13 +10,39 @@
 #define LEECHSVC_NAME           L"LeechAgent"
 #define LEECHSVC_DISPLAY_NAME   L"Leech Memory Acquisition Agent"
 #define LEECHSVC_DESCR_LONG     L"The Leech Memory Acquisition Agent allows for LeechCore library users to connect remotely to the agent."
-#define LEECHSVC_TCP_PORT       L"28473"
+#define LEECHSVC_TCP_PORT_MSRPC L"28473"
+#define LEECHSVC_TCP_PORT_GRPC  L"28474"
 #define SVC_ERROR				0x0000
 
 #define LEECHAGENT_CLIENTKEEPALIVE_MAX_CLIENTS            0x40
 #define LEECHAGENT_CLIENTKEEPALIVE_TIMEOUT_MS          75*1000    // recommended to be less than LEECHAGENT_CHILDPROCESS_TIMEOUT_DEFAULT_MS
 #define LEECHAGENT_CHILDPROCESS_TIMEOUT_MAX_MS      30*60*1000
 #define LEECHAGENT_CHILDPROCESS_TIMEOUT_DEFAULT_MS   2*60*1000
+
+#define LEECHGRPC_LIBRARY_NAME L"libleechgrpc.dll"
+#define LEECHAGENT_CONFIG_FILE L"leechagent_config.txt"
+
+typedef struct tdLEECHAGENT_CONFIG {
+    BOOL fInstall;
+    BOOL fUpdate;
+    BOOL fUninstall;
+    BOOL fInteractive;
+    BOOL fInsecure;
+    BOOL fChildProcess;
+    BOOL fMSRPC;
+    BOOL fgRPC;
+    WCHAR wszRemote[MAX_PATH];
+    WCHAR wszTcpPortMSRPC[0x10];
+    WCHAR wszTcpPortGRPC[0x10];
+    HMODULE hModuleGRPC;
+    struct {
+        CHAR szCurrentDirectory[MAX_PATH];
+        CHAR szTlsClientCaCert[MAX_PATH];
+        CHAR szTlsServerP12[MAX_PATH];
+        CHAR szTlsServerP12Pass[MAX_PATH];
+        CHAR szListenAddress[MAX_PATH];
+    } grpc;
+} LEECHSVC_CONFIG, *PLEECHSVC_CONFIG;
 
 typedef struct tdLEECHAGENT_REMOTE_ENTRY {
     BOOL f32;
@@ -57,13 +83,23 @@ static LEECHAGENT_REMOTE_ENTRY g_REMOTE_FILES_OPTIONAL[] = {
     {.f32 = FALSE,.f64 = TRUE,.wsz = L"hvmm.sys"},
     // 32/64-bit FTDI driver (PCIe DMA FPGA)
     {.f32 = TRUE,.f64 = TRUE,.wsz = L"FTD3XX.dll"},
+    // config file
+    {.f32 = TRUE,.f64 = TRUE,.wsz = LEECHAGENT_CONFIG_FILE},
+    // grpc library
+    {.f32 = TRUE,.f64 = TRUE,.wsz = LEECHGRPC_LIBRARY_NAME},
 };
 static LEECHAGENT_REMOTE_ENTRY g_REMOTE_DIRS_OPTIONAL[] = {
     {.f32 = FALSE,.f64 = TRUE,.wsz = L"Plugins"},
     {.f32 = FALSE,.f64 = TRUE,.wsz = L"Python"},
     {.f32 = FALSE,.f64 = TRUE,.wsz = L"Yara"},
+    {.f32 = FALSE,.f64 = TRUE,.wsz = L"Cert"},
 };
 
 BOOL g_LeechAgent_IsService;
+
+/*
+* Read arguments from a the config file 'leechagent_config.txt' into the config.
+*/
+VOID LeechSvc_ParseArgs_FromConfigFile(_In_ PLEECHSVC_CONFIG pConfig);
 
 #endif /* __LEECHAGENT_H__ */

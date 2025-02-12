@@ -14,16 +14,6 @@
 #define SECURITY_WIN32
 #include <security.h>
 
-typedef struct tdLEECHAGENT_CONFIG {
-    BOOL fInstall;
-    BOOL fUpdate;
-    BOOL fUninstall;
-    BOOL fInteractive;
-    BOOL fInsecure;
-	BOOL fChildProcess;
-    WCHAR wszRemote[MAX_PATH];
-} LEECHSVC_CONFIG, *PEECHSVC_CONFIG;
-
 //-----------------------------------------------------------------------------
 // MAIN, PARSE AND HELP FUNCTIONALITY BELOW:
 //-----------------------------------------------------------------------------
@@ -31,13 +21,15 @@ typedef struct tdLEECHAGENT_CONFIG {
 /*
 * Parse the application command line arguments.
 * -- argc
-* -- argc
+* -- argv
 * -- pConfig
 * -- return
 */
 _Success_(return)
-BOOL LeechSvc_ParseArgs(_In_ DWORD argc, _In_ wchar_t *argv[], _In_ PEECHSVC_CONFIG pConfig)
+BOOL LeechSvc_ParseArgs(_In_ DWORD argc, _In_ wchar_t *argv[], _In_ PLEECHSVC_CONFIG pConfig)
 {
+    LPWSTR wszOpt;
+    LPSTR szCurrentDirectory;
     DWORD c = 0, i = 1;
     while(i < argc) {
         if((0 == _wcsicmp(argv[i], L"-install")) || (0 == _wcsicmp(argv[i], L"install"))) {
@@ -60,23 +52,68 @@ BOOL LeechSvc_ParseArgs(_In_ DWORD argc, _In_ wchar_t *argv[], _In_ PEECHSVC_CON
             pConfig->fChildProcess = TRUE;
             return TRUE;
         } else if(0 == _wcsicmp(argv[i], L"-remoteinstall") && (i + 1 < argc)) {
-            wcscpy_s(pConfig->wszRemote, MAX_PATH - 1, argv[i + 1]);
+            wcsncpy_s(pConfig->wszRemote, _countof(pConfig->wszRemote), argv[i + 1], _TRUNCATE);
             pConfig->fInstall = TRUE;
             i += 2;
             continue;
         } else if(0 == _wcsicmp(argv[i], L"-remoteuninstall") && (i + 1 < argc)) {
-            wcscpy_s(pConfig->wszRemote, MAX_PATH - 1, argv[i + 1]);
+            wcsncpy_s(pConfig->wszRemote, _countof(pConfig->wszRemote), argv[i + 1], _TRUNCATE);
             pConfig->fUninstall = TRUE;
             i += 2;
             continue;
         } else if(0 == _wcsicmp(argv[i], L"-remoteupdate") && (i + 1 < argc)) {
-            wcscpy_s(pConfig->wszRemote, MAX_PATH - 1, argv[i + 1]);
+            wcsncpy_s(pConfig->wszRemote, _countof(pConfig->wszRemote), argv[i + 1], _TRUNCATE);
             pConfig->fUpdate = TRUE;
             i += 2;
             continue;
         } else if(0 == _wcsicmp(argv[i], L"-z") && (i + 1 < argc)) {
             // DumpIt.exe emits -z <filename> in livekd mode - it has no meaning
             // to the LeechAgent - but should be considered valid - so skip it!
+            i += 2;
+            continue;
+        } else if(0 == _wcsicmp(argv[i], L"-no-msrpc")) {
+            pConfig->fMSRPC = FALSE;
+            i++;
+            continue;
+        } else if(0 == _wcsicmp(argv[i], L"-grpc")) {
+            pConfig->fgRPC = TRUE;
+            i++;
+            continue;
+        } else if(0 == _wcsicmp(argv[i], L"-grpc-tls-p12") && (i + 1 < argc)) {
+            wszOpt = argv[i + 1];
+            szCurrentDirectory = "";
+            if((wcslen(wszOpt) > 2) && (wszOpt[0] != '/') && (wszOpt[0] != '\\') && (wszOpt[1] != ':')) {
+                szCurrentDirectory = pConfig->grpc.szCurrentDirectory;
+            }
+            _snprintf_s(pConfig->grpc.szTlsServerP12, _countof(pConfig->grpc.szTlsServerP12), _TRUNCATE, "%s%S", szCurrentDirectory, wszOpt);
+            pConfig->fgRPC = TRUE;
+            i += 2;
+            continue;
+        } else if(0 == _wcsicmp(argv[i], L"-grpc-client-ca") && (i + 1 < argc)) {
+            wszOpt = argv[i + 1];
+            szCurrentDirectory = "";
+            if((wcslen(wszOpt) > 2) && (wszOpt[0] != '/') && (wszOpt[0] != '\\') && (wszOpt[1] != ':')) {
+                szCurrentDirectory = pConfig->grpc.szCurrentDirectory;
+            }
+            _snprintf_s(pConfig->grpc.szTlsClientCaCert, _countof(pConfig->grpc.szTlsClientCaCert), _TRUNCATE, "%s%S", szCurrentDirectory, wszOpt);
+            pConfig->fgRPC = TRUE;
+            i += 2;
+            continue;
+        } else if(0 == _wcsicmp(argv[i], L"-grpc-tls-p12-password") && (i + 1 < argc)) {
+            _snprintf_s(pConfig->grpc.szTlsServerP12Pass, _countof(pConfig->grpc.szTlsServerP12Pass), _TRUNCATE, "%S", argv[i + 1]);
+            pConfig->fgRPC = TRUE;
+            i += 2;
+            continue;
+        } else if(0 == _wcsicmp(argv[i], L"-grpc-port") && (i + 1 < argc)) {
+            wcsncpy_s(pConfig->wszTcpPortGRPC, _countof(pConfig->wszTcpPortGRPC), argv[i + 1], _TRUNCATE);
+            i += 2;
+            continue;
+        } else if(0 == _wcsicmp(argv[i], L"-msrpc-port") && (i + 1 < argc)) {
+            wcsncpy_s(pConfig->wszTcpPortMSRPC, _countof(pConfig->wszTcpPortMSRPC), argv[i + 1], _TRUNCATE);
+            i += 2;
+            continue;
+        } else if(0 == _wcsicmp(argv[i], L"-grpc-listen-address") && (i + 1 < argc)) {
+            _snprintf_s(pConfig->grpc.szListenAddress, _countof(pConfig->grpc.szListenAddress), _TRUNCATE, "%S", argv[i + 1]);
             i += 2;
             continue;
         }
@@ -94,6 +131,14 @@ BOOL LeechSvc_ParseArgs(_In_ DWORD argc, _In_ wchar_t *argv[], _In_ PEECHSVC_CON
             "No insecure / no security mode may only be enabled in interactive mode. \n");
         return FALSE;
     }
+    if(!pConfig->fMSRPC && !pConfig->fgRPC) {
+        printf("No active transport protocol. Both MS-RPC and gRPC are disabled.\n");
+        return FALSE;
+    }
+    if(pConfig->fgRPC && !pConfig->fInsecure && (!pConfig->grpc.szTlsClientCaCert[0] || !pConfig->grpc.szTlsServerP12[0] || !pConfig->grpc.szTlsServerP12Pass[0])) {
+        printf("gRPC missing required parameters: -grpc-tls-p12, -grpc-tls-p12-password, -grpc-client-ca\n");
+        return FALSE;
+    }
     c += pConfig->fInstall ? 1 : 0;
     c += pConfig->fUpdate ? 1 : 0;
     c += pConfig->fUninstall ? 1 : 0;
@@ -101,7 +146,56 @@ BOOL LeechSvc_ParseArgs(_In_ DWORD argc, _In_ wchar_t *argv[], _In_ PEECHSVC_CON
         printf("Installation/Update/Uninstallation of agent may not take place simultaneously.\n");
         return FALSE;
     }
+    if(pConfig->fgRPC && !pConfig->hModuleGRPC) {
+        pConfig->hModuleGRPC = LoadLibraryW(LEECHGRPC_LIBRARY_NAME);
+        if(!pConfig->hModuleGRPC) {
+            wprintf(L"Failed to load gRPC library "LEECHGRPC_LIBRARY_NAME".\n");
+            return FALSE;
+        }
+    }
     return TRUE;
+}
+
+#define MAX_CONFIGFILE_ARGS 100
+#define MAX_CONFIGFILE_ARG_LENGTH 4096
+
+VOID LeechSvc_ParseArgs_FromConfigFile(_In_ PLEECHSVC_CONFIG pConfig)
+{
+    FILE *hFile;
+    DWORD i, argc = 0;
+    LPWSTR argv[MAX_CONFIGFILE_ARGS] = { 0 };
+    CHAR szBuffer[MAX_CONFIGFILE_ARG_LENGTH];
+    WCHAR wszPath[MAX_PATH] = { 0 };
+    CHAR szConfigFileName[MAX_PATH] = { 0 };
+    CHAR *szToken, *ctx = NULL;
+    SIZE_T cch;
+    ZeroMemory(pConfig, sizeof(LEECHSVC_CONFIG));
+    pConfig->fMSRPC = TRUE;
+    wcscpy_s(pConfig->wszTcpPortMSRPC, _countof(pConfig->wszTcpPortMSRPC), LEECHSVC_TCP_PORT_MSRPC);
+    wcscpy_s(pConfig->wszTcpPortGRPC, _countof(pConfig->wszTcpPortGRPC), LEECHSVC_TCP_PORT_GRPC);
+    strcpy_s(pConfig->grpc.szListenAddress, _countof(pConfig->grpc.szListenAddress), "0.0.0.0");
+    // Get the path of the directory of the executable:
+    Util_GetPathDllW(wszPath, NULL);
+    if(wszPath[0]) {
+        _snprintf_s(pConfig->grpc.szCurrentDirectory, _countof(pConfig->grpc.szCurrentDirectory), _TRUNCATE, "%S", wszPath);
+    }
+    _snprintf_s(szConfigFileName, _countof(szConfigFileName), _TRUNCATE, "%S%S", wszPath, LEECHAGENT_CONFIG_FILE);
+    if(fopen_s(&hFile, szConfigFileName, "r")) { return; }
+    while(fgets(szBuffer, sizeof(szBuffer), hFile)) {
+        while((szToken = strtok_s((ctx ? NULL : szBuffer), " \n", &ctx))) {
+            cch = strlen(szToken) + 1;
+            argv[argc] = LocalAlloc(LMEM_ZEROINIT, cch * sizeof(WCHAR));
+            if(!argv[argc]) { return; }
+            MultiByteToWideChar(CP_UTF8, 0, szToken, -1, argv[argc], (int)cch);
+            argc++;
+            if(argc >= MAX_CONFIGFILE_ARGS) { return; }
+        }
+    }
+    LeechSvc_ParseArgs(argc, argv, pConfig);
+    for(i = 0; i < argc; i++) {
+        LocalFree(argv[i]);
+    }
+    fclose(hFile);
 }
 
 /*
@@ -119,8 +213,13 @@ VOID LeechSvc_PrintHelp()
         "Use the agent together with MemProcFS with or without the -remotefs option!   \n" \
         "Python API based analysis is also possible by submitting a Python script.     \n" \
         "                                                                              \n" \
-        "The LeechAgent supports RPC over SMB and TCP (tcp/28473).                     \n" \
+        "The LeechAgent supports MS-RPC over SMB (tcp/445) and TCP (tcp/28473).        \n" \
         "The LeechAgent supports Kerberos, NTLM and INSECURE (no authentication).      \n" \
+        "                                                                              \n" \
+        "The LeechAgent supports gRPC (tcp/28474) using mTLS or INSECURE auth.         \n" \
+        "gRPC is disabled by default, enable with '-grpc' command line option.         \n" \
+        "To use mTLS authentication specify:                                           \n" \
+        "'-grpc-client-ca', '-grpc-tls-p12' and '-grpc-tls-p12-password'.              \n" \
         "                                                                              \n" \
         "The LeechAgent may be run as a service after being installed.  In the service \n" \
         "mode only authenticated connections are allowed. Only install the LeechAgent  \n" \
@@ -135,8 +234,8 @@ VOID LeechSvc_PrintHelp()
         "    - Remote Service Management (RPC).                                        \n" \
         "    - Remote Service Management (RPC-EPMAP).                                  \n" \
         "smb:// connection method only requires the above firewall openings.           \n" \
-        "rpc:// connection method also requires the following port to be opened:       \n" \
-        "    - LeechSvc / port: tcp/28473.                                             \n" \
+        "rpc:// connection requires the following port to be opened: tcp/28473         \n" \
+        "grpc:// connection requires the following port to be opened: tcp/28474        \n" \
         "The remote service will be installed in the C:\\Program Files\\LeechAgent\\   \n" \
         "directory of the remote system.                                               \n" \
         "                                                                              \n" \
@@ -177,6 +276,7 @@ int wmain(int argc, wchar_t *argv[])
     WCHAR wszLocalUserUPN[MAX_PATH] = { 0 };
     g_LeechAgent_IsService = FALSE;
     // PARSE ARGUMENTS AND VALIDITY CHECK
+    LeechSvc_ParseArgs_FromConfigFile(&cfg);
     if(!LeechSvc_ParseArgs(argc, argv, &cfg)) { return; }
 	// CHILD PROCESS MODE
 	if(cfg.fChildProcess) {
@@ -233,7 +333,7 @@ int wmain(int argc, wchar_t *argv[])
                 }
             }
         }
-        LeechSvc_Interactive(cfg.fInsecure);
+        LeechSvc_Interactive(&cfg);
         return 1;
     }
     // ERROR - SHOULD NOT HAPPEN ...

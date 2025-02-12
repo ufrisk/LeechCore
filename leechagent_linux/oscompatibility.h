@@ -5,30 +5,10 @@
 //
 #ifndef __OSCOMPATIBILITY_H__
 #define __OSCOMPATIBILITY_H__
-#include "leechcore.h"
-
-#ifdef _WIN32
-
-#include <Windows.h>
-#include <stdio.h>
-#include <winusb.h>
-#include <setupapi.h>
-#include <conio.h>
-
-#pragma warning( disable : 4477)
-
-#define SOCK_NONBLOCK                       0
-#define LC_LIBRARY_FILETYPE                 ".dll"
-#define libusb_device_handle                HANDLE
-#define LINUX_NO_OPTIMIZE
-
-VOID BusySleep(_In_ DWORD us);
-
-#endif /* _WIN32 */
+#include <leechcore.h>
 
 #ifdef LINUX
 #define LC_LIBRARY_FILETYPE                 ".so"
-#include <libusb.h>
 // for some unexplainable reasons the gcc on -O2 will optimize out functionality
 // and destroy the proper workings on some functions due to an unexplainable
 // reason disable optimization on a function level resolves the issues ...
@@ -38,7 +18,6 @@ VOID BusySleep(_In_ DWORD us);
 #ifdef MACOS
 #define SOCK_NONBLOCK                       0
 #define LC_LIBRARY_FILETYPE                 ".dylib"
-#define libusb_device_handle                HANDLE
 #define LINUX_NO_OPTIMIZE
 #endif /* MACOS */
 
@@ -100,7 +79,6 @@ typedef int(*_CoreCrtNonSecureSearchSortCompareFunction)(void const *, void cons
 #define INVALID_FILE_SIZE                   (0xffffffffL)
 #define _TRUNCATE                           ((SIZE_T)-1LL)
 #define LPTHREAD_START_ROUTINE              PVOID
-#define WINUSB_INTERFACE_HANDLE             libusb_device_handle*
 #define PIPE_TRANSFER_TIMEOUT               0x03
 #define CONSOLE_SCREEN_BUFFER_INFO          PVOID    // TODO: remove this dummy
 #define SOCKET                              int
@@ -170,9 +148,7 @@ typedef int(*_CoreCrtNonSecureSearchSortCompareFunction)(void const *, void cons
 #define ExitProcess(c)                      (exit(c ? EXIT_SUCCESS : EXIT_FAILURE))
 #define Sleep(dwMilliseconds)               (usleep(1000*dwMilliseconds))
 #define fopen_s(ppFile, szFile, szAttr)     ((*ppFile = fopen(szFile, szAttr)) ? 0 : 1)
-#define GetModuleFileNameA(m, f, l)         (readlink("/proc/self/exe", f, l))
 #define ZeroMemory(pb, cb)                  (memset(pb, 0, cb))
-#define WinUsb_SetPipePolicy(h, p, t, cb, pb)   // TODO: implement this for better USB2 performance.
 #define WSAGetLastError()                   (WSAEWOULDBLOCK)    // TODO: remove this dummy when possible.
 #define _ftelli64(f)                        (ftello(f))
 #define _fseeki64(f, o, w)                  (fseeko(f, o, w))
@@ -226,7 +202,6 @@ BOOL QueryPerformanceFrequency(_Out_ LARGE_INTEGER *lpFrequency);
 BOOL QueryPerformanceCounter(_Out_ LARGE_INTEGER *lpPerformanceCount);
 VOID GetLocalTime(LPSYSTEMTIME lpSystemTime);
 DWORD InterlockedAdd(DWORD *Addend, DWORD Value);
-BOOL WinUsb_Free(WINUSB_INTERFACE_HANDLE InterfaceHandle);
 BOOL IsWow64Process(HANDLE hProcess, PBOOL Wow64Process);
 
 HANDLE CreateThread(
@@ -238,17 +213,6 @@ HANDLE CreateThread(
     PDWORD    lpThreadId
 );
 
-BOOL __WinUsb_ReadWritePipe(
-    WINUSB_INTERFACE_HANDLE InterfaceHandle,
-    UCHAR    PipeID,
-    PUCHAR    Buffer,
-    ULONG    BufferLength,
-    PULONG    LengthTransferred,
-    PVOID    Overlapped
-);
-#define WinUsb_ReadPipe(h, p, b, l, t, o)   (__WinUsb_ReadWritePipe(h, p, b, l, t, o))
-#define WinUsb_WritePipe(h, p, b, l, t, o)  (__WinUsb_ReadWritePipe(h, p, b, l, t, o))
-
 HMODULE LoadLibraryA(LPSTR lpFileName);
 BOOL FreeLibrary(_In_ HMODULE hLibModule);
 FARPROC GetProcAddress(HMODULE hModule, LPSTR lpProcName);
@@ -259,6 +223,8 @@ BOOL SetEvent(_In_ HANDLE hEvent);
 HANDLE CreateEvent(_In_opt_ PVOID lpEventAttributes, _In_ BOOL bManualReset, _In_ BOOL bInitialState, _In_opt_ PVOID lpName);
 DWORD WaitForMultipleObjects(_In_ DWORD nCount, HANDLE *lpHandles, _In_ BOOL bWaitAll, _In_ DWORD dwMilliseconds);
 DWORD WaitForSingleObject(_In_ HANDLE hHandle, _In_ DWORD dwMilliseconds);
+
+VOID Util_GetPathLib(_Out_writes_(MAX_PATH) PCHAR szPath);
 
 // SRWLOCK
 #ifdef LINUX

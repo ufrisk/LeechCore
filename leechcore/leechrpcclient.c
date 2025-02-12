@@ -8,12 +8,25 @@
 #include "leechcore_internal.h"
 #include "leechrpc.h"
 #include "util.h"
+#include "oscompatibility.h"
+#include <leechgrpc.h>
 
 #ifdef _WIN32
+
 #include <rpc.h>
 #include <ntsecapi.h>
 #include <wincred.h>
 #include "leechrpc_h.h"
+
+#endif /* _WIN32 */
+#if defined(LINUX) || defined(MACOS)
+
+#define LeechRPC_CompressClose(ctxCompress)
+#define LeechRPC_CompressInitialize(ctxCompress)                    FALSE
+#define LeechRPC_Compress(ctxCompress, pMsg, fCompressDisable)
+#define LeechRPC_Decompress(ctxCompress, pMsgIn, ppMsgOut)          FALSE
+
+#endif /* LINUX || MACOS */
 
 //-----------------------------------------------------------------------------
 // CORE FUNCTIONALITY BELOW:
@@ -26,6 +39,7 @@ BOOL LeechRPC_SubmitCommand(_In_ PLC_CONTEXT ctxLC, _In_ PLEECHRPC_MSG_HDR pMsgI
     error_status_t error;
     BOOL fOK;
     DWORD cbMsgOut = 0;
+    SIZE_T cbMsgOutSize = 0;
     PLEECHRPC_MSG_BIN pMsgOutDecompress = NULL;
     // fill out message header given a message type
     pMsgIn->dwMagic = LEECHRPC_MSGMAGIC;
@@ -53,17 +67,30 @@ BOOL LeechRPC_SubmitCommand(_In_ PLC_CONTEXT ctxLC, _In_ PLEECHRPC_MSG_HDR pMsgI
             return FALSE;
     }
     // submit message to RPC server:
+    *ppMsgOut = NULL;
+    pMsgIn->dwRpcClientID = ctxLC->Rpc.dwRpcClientId;
+    pMsgIn->flags = ctxLC->Rpc.fCompress ? 0 : LEECHRPC_FLAG_NOCOMPRESS;
     if(ctx->fIsProtoRpc || ctx->fIsProtoSmb) {
         // RPC (over tcp or smb) connection methods:
+        error = E_FAIL;
+#ifdef _WIN32
         __try {
-            pMsgIn->dwRpcClientID = ctxLC->Rpc.dwRpcClientId;
-            pMsgIn->flags = ctxLC->Rpc.fCompress ? 0 : LEECHRPC_FLAG_NOCOMPRESS;
-            error = LeechRpc_ReservedSubmitCommand(ctx->hRPC, pMsgIn->cbMsg, (PBYTE)pMsgIn, &cbMsgOut, (PBYTE *)ppMsgOut);
+            error = LeechRpc_ReservedSubmitCommand(ctx->hRPC, pMsgIn->cbMsg, (PBYTE)pMsgIn, &cbMsgOut, (PBYTE*)ppMsgOut);
         } __except(EXCEPTION_EXECUTE_HANDLER) { error = E_FAIL; }
+#endif /* _WIN32 */
         if(error) {
             *ppMsgOut = NULL;
             return FALSE;
         }
+    }
+    else if(ctx->fIsProtoGRpc) {
+        // gRPC (over tcp) connection method:
+        fOK = ctx->grpc.hGRPC && ctx->grpc.pfn_leechgrpc_client_submit_command(ctx->grpc.hGRPC, (PBYTE)pMsgIn, pMsgIn->cbMsg, (PBYTE*)ppMsgOut, &cbMsgOutSize);
+        if(!fOK) {
+            *ppMsgOut = NULL;
+            return FALSE;
+        }
+        cbMsgOut = (DWORD)cbMsgOutSize;
     }
     // sanity check non-trusted incoming message from RPC server.
     fOK = (cbMsgOut >= sizeof(LEECHRPC_MSG_HDR)) && *ppMsgOut && ((*ppMsgOut)->dwMagic == LEECHRPC_MSGMAGIC);
@@ -154,6 +181,17 @@ VOID LeechRPC_KeepaliveThreadClient(_In_ PLC_CONTEXT ctxLC)
 
 VOID LeechRPC_RpcClose(PLEECHRPC_CLIENT_CONTEXT ctx)
 {
+    // Close the gRPC connection:
+    if(ctx->grpc.hGRPC) {
+        ctx->grpc.pfn_leechgrpc_client_free(ctx->grpc.hGRPC);
+        ctx->grpc.hGRPC = NULL;
+    }
+    if(ctx->grpc.hDll) {
+        FreeLibrary(ctx->grpc.hDll);
+    }
+    ZeroMemory(&ctx->grpc, sizeof(ctx->grpc));
+    // Close the MR-RPC connection:
+#ifdef _WIN32
     if(ctx->hRPC) { 
         RpcBindingFree(ctx->hRPC);
         ctx->hRPC = NULL;
@@ -162,6 +200,7 @@ VOID LeechRPC_RpcClose(PLEECHRPC_CLIENT_CONTEXT ctx)
         RpcStringFreeA(&ctx->szStringBinding);
         ctx->szStringBinding = NULL;
     }
+#endif /* _WIN32 */
 }
 
 VOID LeechRPC_Close(_Inout_ PLC_CONTEXT ctxLC)
@@ -180,9 +219,12 @@ VOID LeechRPC_Close(_Inout_ PLC_CONTEXT ctxLC)
     }
     LeechRPC_RpcClose(ctx);
     LeechRPC_CompressClose(&ctx->Compress);
+    if(ctx->hHousekeeperThread) { CloseHandle(ctx->hHousekeeperThread); }
     LocalFree(ctx);
     ctxLC->hDevice = 0;
 }
+
+#ifdef _WIN32
 
 /*
 * Helper function - connect with custom ntlm credentials to target:
@@ -362,6 +404,53 @@ BOOL LeechRPC_RpcInitialize(_In_ PLC_CONTEXT ctxLC, _In_ PLEECHRPC_CLIENT_CONTEX
         }
     }
     lcprintfv_fn(ctxLC, "'%s'\n", ctx->szStringBinding);
+    return TRUE;
+}
+
+#endif /* _WIN32 */
+#if defined(LINUX) || defined(MACOS)
+
+_Success_(return)
+BOOL LeechRPC_RpcInitialize(_In_ PLC_CONTEXT ctxLC, _In_ PLEECHRPC_CLIENT_CONTEXT ctx)
+{
+    lcprintf(ctxLC, "REMOTE: MS-RPC with '-remote rpc' or '-remote smb' is only supported on Windows. gRPC is supported.\n");
+    return FALSE;
+}
+
+#endif /* LINUX || MACOS */
+
+_Success_(return)
+BOOL LeechRPC_GRpcInitialize(_In_ PLC_CONTEXT ctxLC, _In_ PLEECHRPC_CLIENT_CONTEXT ctx)
+{
+    DWORD dwTcpPort = strtol(ctx->szTcpPort, NULL, 10);
+    ctx->grpc.hDll = LoadLibraryA("libleechgrpc"LC_LIBRARY_FILETYPE);
+    if(!ctx->grpc.hDll) {
+        lcprintf(ctxLC, "REMOTE: Failed to load 'libleechgrpc"LC_LIBRARY_FILETYPE"'\n");
+        return FALSE;
+    }
+    ctx->grpc.pfn_leechgrpc_client_create_insecure = (pfn_leechgrpc_client_create_insecure)GetProcAddress(ctx->grpc.hDll, "leechgrpc_client_create_insecure");
+    ctx->grpc.pfn_leechgrpc_client_create_secure_p12 = (pfn_leechgrpc_client_create_secure_p12)GetProcAddress(ctx->grpc.hDll, "leechgrpc_client_create_secure_p12");
+    ctx->grpc.pfn_leechgrpc_client_free = (pfn_leechgrpc_client_free)GetProcAddress(ctx->grpc.hDll, "leechgrpc_client_free");
+    ctx->grpc.pfn_leechgrpc_client_submit_command = (pfn_leechgrpc_client_submit_command)GetProcAddress(ctx->grpc.hDll, "leechgrpc_client_submit_command");
+    if(!ctx->grpc.pfn_leechgrpc_client_create_insecure || !ctx->grpc.pfn_leechgrpc_client_create_secure_p12 || !ctx->grpc.pfn_leechgrpc_client_free || !ctx->grpc.pfn_leechgrpc_client_submit_command) {
+        lcprintf(ctxLC, "REMOTE: Failed to load functions from 'libleechgrpc"LC_LIBRARY_FILETYPE"'\n");
+        return FALSE;
+    }
+    if(ctx->fIsAuthInsecure) {
+        ctx->grpc.hGRPC = ctx->grpc.pfn_leechgrpc_client_create_insecure(ctx->szTcpAddr, dwTcpPort);
+    } else {
+        ctx->grpc.hGRPC = ctx->grpc.pfn_leechgrpc_client_create_secure_p12(
+            ctx->szTcpAddr,
+            dwTcpPort,
+            ctx->grpc.szServerCertHostnameOverride[0] ? ctx->grpc.szServerCertHostnameOverride : NULL,
+            ctx->grpc.szServerCertCaPath[0] ? ctx->grpc.szServerCertCaPath : NULL,
+            ctx->grpc.szClientTlsP12Path,
+            ctx->grpc.szClientTlsP12Password);
+    }
+    if(!ctx->grpc.hGRPC) {
+        lcprintf(ctxLC, "REMOTE: Failed to create gRPC client connection\n");
+        return FALSE;
+    }
     return TRUE;
 }
 
@@ -614,7 +703,7 @@ BOOL LeechRPC_Command(
     if(result) {
         if(pcbDataOut) { *pcbDataOut = pMsgRsp->cb; }
         if(ppbDataOut) {
-            if(*ppbDataOut = LocalAlloc(0, pMsgRsp->cb)) {
+            if((*ppbDataOut = LocalAlloc(0, pMsgRsp->cb))) {
                 memcpy(*ppbDataOut, pMsgRsp->pb, pMsgRsp->cb);
             } else {
                 result = FALSE;
@@ -642,17 +731,17 @@ BOOL LeechRpc_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO pp
     LEECHRPC_MSG_OPEN MsgReq = { 0 };
     PLEECHRPC_MSG_OPEN pMsgRsp = NULL;
     LPSTR szArg1, szArg2, szArg3;
-    LPSTR aszOpt[5];
+    LPSTR aszOpt[6];
     DWORD i, dwPort = 0;
-    HANDLE hThread;
     int(*pfn_printf_opt_tmp)(_In_z_ _Printf_format_string_ char const* const _Format, ...);
     if(ppLcCreateErrorInfo) { *ppLcCreateErrorInfo = NULL; }
     ctx = (PLEECHRPC_CLIENT_CONTEXT)LocalAlloc(LMEM_ZEROINIT, sizeof(LEECHRPC_CLIENT_CONTEXT));
     if(!ctx) { return FALSE; }
     ctxLC->hDevice = (HANDLE)ctx;
+    if(!_stricmp(ctxLC->Config.szDeviceName, "grpc")) { ctx->fIsProtoGRpc = TRUE; }
     if(!_stricmp(ctxLC->Config.szDeviceName, "rpc")) { ctx->fIsProtoRpc = TRUE; }
     if(!_stricmp(ctxLC->Config.szDeviceName, "smb")) { ctx->fIsProtoSmb = TRUE; }
-    if(!ctx->fIsProtoRpc && !ctx->fIsProtoSmb) {
+    if(!ctx->fIsProtoGRpc && !ctx->fIsProtoRpc && !ctx->fIsProtoSmb) {
         lcprintf(ctxLC, "REMOTE: ERROR: No valid remote transport protocol specified.\n");
         goto fail;
     }
@@ -713,6 +802,60 @@ BOOL LeechRpc_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO pp
             goto fail;
         }
     }
+    if(ctx->fIsProtoGRpc) {
+        // RPC SPECIFIC INITIALIZATION BELOW:
+        ctxLC->Rpc.fCompress = !ctxLC->Config.fRemoteDisableCompress;
+        // parse arguments
+        Util_Split3(ctxLC->Config.szRemote + 7, ':', _szBufferArg, &szArg1, &szArg2, &szArg3);
+        if(!szArg1 || !szArg2 || !szArg2[0]) { goto fail; }
+        // Argument1 : Auth method, insecure
+        if(!_stricmp("insecure", szArg1)) {
+            ctx->fIsAuthInsecure = TRUE;
+        } else if(szArg1[0]) {
+            strncpy_s(ctx->grpc.szServerCertHostnameOverride, _countof(ctx->grpc.szServerCertHostnameOverride), szArg1, _TRUNCATE);
+        }
+        // Argument2 : Tcp Address.
+        strncpy_s(ctx->szTcpAddr, _countof(ctx->szTcpAddr), szArg2, MAX_PATH);
+        // Argument3 : Options.
+        if(szArg3[0]) {
+            Util_SplitN(szArg3, ',', 6, _szBufferOpt, aszOpt);
+            for(i = 0; i < 6; i++) {
+                if(0 == _stricmp("nocompress", aszOpt[i])) {
+                    ctxLC->Rpc.fCompress = FALSE;
+                }
+                if(0 == _strnicmp("port=", aszOpt[i], 5)) {
+                    dwPort = atoi(aszOpt[i] + 5);
+                }
+                if(0 == _strnicmp("client-cert-p12-password=", aszOpt[i], 25)) {
+                    strncpy_s(ctx->grpc.szClientTlsP12Password, _countof(ctx->grpc.szClientTlsP12Password), aszOpt[i] + 25, _TRUNCATE);
+                }
+                if(0 == _strnicmp("client-cert-p12=", aszOpt[i], 16)) {
+                    strncpy_s(ctx->grpc.szClientTlsP12Path, _countof(ctx->grpc.szClientTlsP12Path), aszOpt[i] + 16, _TRUNCATE);
+                }
+                if(0 == _strnicmp("server-cert=", aszOpt[i], 12)) {
+                    strncpy_s(ctx->grpc.szServerCertCaPath, _countof(ctx->grpc.szServerCertCaPath), aszOpt[i] + 12, _TRUNCATE);
+                }
+                if(0 == _strnicmp("server-cert-host-override=", aszOpt[i], 26)) {
+                    strncpy_s(ctx->grpc.szServerCertHostnameOverride, _countof(ctx->grpc.szServerCertHostnameOverride), aszOpt[i] + 26, _TRUNCATE);
+                }
+            }
+        }
+        if(dwPort == 0) {
+            dwPort = 28474; // default port
+        }
+        _itoa_s(dwPort, ctx->szTcpPort, 6, 10);
+        // initialize rpc connection and ping
+        f = LeechRPC_GRpcInitialize(ctxLC, ctx);
+        SecureZeroMemory(_szBufferOpt, sizeof(_szBufferOpt));
+        if(!f) {
+            lcprintf(ctxLC, "REMOTE: ERROR: Unable to connect to remote gRPC service '%s'\n", ctxLC->Config.szRemote);
+            goto fail;
+        }
+        if(!LeechRPC_Ping(ctxLC)) {
+            lcprintf(ctxLC, "REMOTE: ERROR: Unable to ping remote gRPC service '%s'\n", ctxLC->Config.szRemote);
+            goto fail;
+        }
+    }
     if(0 == _strnicmp(ctxLC->Config.szDevice, "existingremote", 14)) {
         for(i = 14; i < _countof(ctxLC->Config.szDevice); i++) {
             ctxLC->Config.szDevice[i - 6] = ctxLC->Config.szDevice[i];
@@ -753,8 +896,7 @@ BOOL LeechRpc_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO pp
         lcprintfv(ctxLC, "REMOTE: INFO: Compression disabled.\n");
     }
     // all ok - initialize this rpc device stub.
-    hThread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)LeechRPC_KeepaliveThreadClient, ctxLC, 0, NULL);
-    if(hThread) { CloseHandle(hThread); hThread = 0; }
+    ctx->hHousekeeperThread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)LeechRPC_KeepaliveThreadClient, ctxLC, 0, NULL);
     strncpy_s(pMsgRsp->cfg.szRemote, sizeof(pMsgRsp->cfg.szRemote), ctxLC->Config.szRemote, _TRUNCATE); // ctx from remote doesn't contain remote info ...
     pfn_printf_opt_tmp = ctxLC->Config.pfn_printf_opt;
     memcpy(&ctxLC->Config, &pMsgRsp->cfg, sizeof(LC_CONFIG));
@@ -775,15 +917,3 @@ fail:
     LocalFree(pMsgRsp);
     return FALSE;
 }
-
-#endif /* _WIN32 */
-#if defined(LINUX) || defined(MACOS)
-
-_Success_(return)
-BOOL LeechRpc_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo)
-{
-    if(ppLcCreateErrorInfo) { *ppLcCreateErrorInfo = NULL; }
-    return FALSE;
-}
-
-#endif /* LINUX || MACOS */

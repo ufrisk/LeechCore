@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS  += -I. -D LINUX -D _GNU_SOURCE -shared -fPIC -fvisibility=hidden -pthread `pkg-config libusb-1.0 --libs --cflags`
+CFLAGS  += -I. -I../includes/ -D LINUX -D _GNU_SOURCE -shared -fPIC -fvisibility=hidden -pthread `pkg-config libusb-1.0 --libs --cflags`
 # DEBUG FLAGS BELOW
 # export ASAN_OPTIONS=strict_string_checks=1:detect_stack_use_after_return=1:check_initialization_order=1:strict_init_order=1:detect_invalid_pointer_pairs=2
 # CFLAGS  += -g -O0 -Wextra -Wno-unused-parameter -Wno-cast-function-type
