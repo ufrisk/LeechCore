@@ -252,3 +252,8 @@ v1.0-1.8
 
 [v2.20](https://github.com/ufrisk/LeechCore/releases/tag/v2.20)
 * macOS support
+
+[v2.21](https://github.com/ufrisk/LeechCore/releases/tag/v2.21)
+* LeechAgent gRPC support.
+* LeechAgent Linux support.
+* **Breaking change**: LeechAgent is incompatible with previous versions (unless compressed memory is explicitly disabled).
