@@ -3,8 +3,8 @@
 
 #define VERSION_MAJOR               2
 #define VERSION_MINOR               21
-#define VERSION_REVISION            0
-#define VERSION_BUILD               84
+#define VERSION_REVISION            1
+#define VERSION_BUILD               85
 
 #define VER_FILE_DESCRIPTION_STR    "LeechAgent Memory Acquisition Service"
 #define VER_FILE_VERSION            VERSION_MAJOR, VERSION_MINOR, VERSION_REVISION, VERSION_BUILD
@@ -19,4 +19,4 @@
 #define VER_PRODUCT_VERSION_STR     VER_FILE_VERSION_STR
 #define VER_ORIGINAL_FILENAME_STR   VER_PRODUCTNAME_STR ".exe"
 #define VER_INTERNAL_NAME_STR       VER_ORIGINAL_FILENAME_STR
-#define VER_COPYRIGHT_STR           "Copyright (c) Ulf Frisk 2018-2022"
+#define VER_COPYRIGHT_STR           "Copyright (c) Ulf Frisk 2018-2025"
