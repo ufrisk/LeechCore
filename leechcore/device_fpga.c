@@ -32,17 +32,20 @@
 #define FPGA_REG_SHADOWCFGSPACE       0xC000
 
 #ifdef _WIN32
-#define DEVICE_FPGA_FT601_LIBRARY          "FTD3XX.dll"
+#define DEVICE_FPGA_FT601_LIBRARY          "FTD3XXWU.dll"
+#define DEVICE_FPGA_FT601_OLD_LIBRARY      "FTD3XX.dll"
 #define DEVICE_FPGA_FT2XX_LIBRARY          "FTD2XX.dll"
 #define DEVICE_FPGA_DRIVER_LIBRARY         "leechcore_driver.dll"
 #endif /* _WIN32 */
 #ifdef LINUX
 #define DEVICE_FPGA_FT601_LIBRARY          "leechcore_ft601_driver_linux.so"
+#define DEVICE_FPGA_FT601_OLD_LIBRARY      ""
 #define DEVICE_FPGA_FT2XX_LIBRARY          "libftd2xx.so"
 #define DEVICE_FPGA_DRIVER_LIBRARY         "leechcore_driver.so"
 #endif /* LINUX */
 #ifdef MACOS
 #define DEVICE_FPGA_FT601_LIBRARY          "leechcore_ft601_driver_macos.dylib"
+#define DEVICE_FPGA_FT601_OLD_LIBRARY      ""
 #define DEVICE_FPGA_FT2XX_LIBRARY          "libftd2xx.dylib"
 #define DEVICE_FPGA_DRIVER_LIBRARY         "leechcore_driver.dylib"
 #endif /* MACOS */
@@ -804,13 +807,15 @@ VOID DeviceFPGA_Initialize_LinuxMultiHandle_LockRelease(_In_ QWORD qwDeviceIndex
 
 LPSTR DeviceFPGA_InitializeFT601(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ BOOL fFT601, _In_ BOOL fCustomDriver)
 {
-    LPSTR szErrorReason;
+    LPSTR szErrorReason = NULL;
     CHAR c, szModuleFTDI[MAX_PATH + 1] = { 0 };
     DWORD status;
+    BOOL fUseFTD3XXWU = TRUE, fFailFTD3XXWU = FALSE;
     ULONG(WINAPI *pfnFT_GetChipConfiguration)(HANDLE ftHandle, PVOID pvConfiguration);
     ULONG(WINAPI *pfnFT_SetChipConfiguration)(HANDLE ftHandle, PVOID pvConfiguration);
     ULONG(WINAPI *pfnFT_SetSuspendTimeout)(HANDLE ftHandle, ULONG Timeout);
     FT_60XCONFIGURATION oCfgNew, oCfgOld;
+ftdi_retry_old:
     if(DeviceFPGA_Initialize_LinuxMultiHandle_LockCheck(ctx->qwDeviceIndex)) {
         szErrorReason = "FPGA linux handle already open";
         goto fail;
@@ -839,15 +844,18 @@ LPSTR DeviceFPGA_InitializeFT601(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ BOOL fFT601
     }
     // Load FTDI Library:
     if(fFT601) {
-        if(!ctx->dev.hModule) { ctx->dev.hModule = LoadLibraryA(DEVICE_FPGA_FT601_LIBRARY); }
+        if(!ctx->dev.hModule) { ctx->dev.hModule = LoadLibraryA((fUseFTD3XXWU ? DEVICE_FPGA_FT601_LIBRARY : DEVICE_FPGA_FT601_OLD_LIBRARY)); }
         if(!ctx->dev.hModule) {
             Util_GetPathLib(szModuleFTDI);
-            strcat_s(szModuleFTDI, sizeof(szModuleFTDI) - 1, DEVICE_FPGA_FT601_LIBRARY);
+            strcat_s(szModuleFTDI, sizeof(szModuleFTDI) - 1, (fUseFTD3XXWU ? DEVICE_FPGA_FT601_LIBRARY : DEVICE_FPGA_FT601_OLD_LIBRARY));
             ctx->dev.hModule = LoadLibraryA(szModuleFTDI);
         }
         ctx->fFT601 = ctx->dev.hModule ? TRUE : FALSE;
     }
     if(!ctx->dev.hModule) {
+#ifdef _WIN32
+        fFailFTD3XXWU = fUseFTD3XXWU;
+#endif /* _WIN32 */
         szErrorReason = "Unable to load '"DEVICE_FPGA_FT601_LIBRARY"' or '"DEVICE_FPGA_DRIVER_LIBRARY"'";
         goto fail;
     }
@@ -878,7 +886,12 @@ LPSTR DeviceFPGA_InitializeFT601(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ BOOL fFT601
     if(fFT601) {
         status = ctx->dev.pfnFT_Create((PVOID)ctx->qwDeviceIndex, 0x10 /*FT_OPEN_BY_INDEX*/, &ctx->dev.hFTDI);
         if(status || !ctx->dev.hFTDI) {
-            szErrorReason = "Unable to connect to FPGA device";
+#ifdef _WIN32
+            fFailFTD3XXWU = fUseFTD3XXWU;
+#endif /* _WIN32 */
+            if(!szErrorReason) {
+                szErrorReason = "Unable to connect to FPGA device";
+            }
             goto fail;
         }
         ctx->dev.pfnFT_AbortPipe(ctx->dev.hFTDI, 0x02);
@@ -934,6 +947,11 @@ fail:
     if(ctx->dev.hModule) { FreeLibrary(ctx->dev.hModule); }
     ctx->dev.hModule = NULL;
     ctx->dev.hFTDI = NULL;
+    // retry with older FTD3XX driver if FTD3XXWU fails.
+    if(fFailFTD3XXWU) {
+        fUseFTD3XXWU = FALSE;
+        goto ftdi_retry_old;
+    }
     return szErrorReason;
 }
 

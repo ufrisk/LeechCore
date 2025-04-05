@@ -2,9 +2,9 @@
 #define STRINGIZE(s) STRINGIZE2(s)
 
 #define VERSION_MAJOR               2
-#define VERSION_MINOR               21
-#define VERSION_REVISION            1
-#define VERSION_BUILD               85
+#define VERSION_MINOR               22
+#define VERSION_REVISION            0
+#define VERSION_BUILD               86
 
 #define VER_FILE_DESCRIPTION_STR    "LeechCore Memory Acquisition Library : Python API"
 #define VER_FILE_VERSION            VERSION_MAJOR, VERSION_MINOR, VERSION_REVISION, VERSION_BUILD

@@ -46,6 +46,10 @@ Please find a summary of the supported hardware based memory acquisition methods
 | [ZDMA](https://github.com/ufrisk/pcileech-fpga-dev/blob/master/ZDMA)                       | [FPGA](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)   | Thunderbolt3 | 1000MB/s | Yes | Yes | 💖 |
 | [GBOX](https://github.com/ufrisk/pcileech-fpga-dev/blob/master/GBOX)                       | [FPGA](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)        | OCuLink |  400MB/s | Yes | Yes | 💖 |
 | [LeetDMA](https://github.com/ufrisk/pcileech-fpga)                                         | [FPGA](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)          | USB-C | 190MB/s  | Yes | Yes | 💖 |
+| [CaptainDMA M2](https://github.com/ufrisk/pcileech-fpga)                                   | [FPGA](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)          | USB-C | 190MB/s  | Yes | Yes | 💖 |
+| [CaptainDMA 4.1th](https://github.com/ufrisk/pcileech-fpga)                                | [FPGA](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)          | USB-C | 190MB/s  | Yes | Yes | 💖 |
+| [CaptainDMA 75T](https://github.com/ufrisk/pcileech-fpga)                                  | [FPGA](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)          | USB-C | 200MB/s  | Yes | Yes | 💖 |
+| [CaptainDMA 100T](https://github.com/ufrisk/pcileech-fpga)                                 | [FPGA](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)          | USB-C | 220MB/s  | Yes | Yes | 💖 |
 | [AC701/FT601](https://github.com/ufrisk/pcileech-fpga/tree/master/ac701_ft601)             | [FPGA](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)          | USB3  | 190MB/s  | Yes | Yes |    |
 | USB3380-EVB                                                                                | [USB3380](https://github.com/ufrisk/LeechCore/wiki/Device_USB3380)    | USB3  | 150MB/s  | No  | No  |    |
 | DMA patched HP iLO                                                                         | [BMC](https://github.com/ufrisk/LeechCore/wiki/Device_RawTCP)         | TCP   |  1MB/s   | Yes | No  |    |
@@ -255,3 +259,6 @@ v1.0-1.8
 * LeechAgent gRPC support.
 * LeechAgent Linux support.
 * **Breaking change**: LeechAgent is incompatible with previous versions (unless compressed memory is explicitly disabled).
+
+[v2.22](https://github.com/ufrisk/LeechCore/releases/tag/v2.22)
+* Support for FTDI FT601 driver 1.4 (FTD3XXWU.dll)
