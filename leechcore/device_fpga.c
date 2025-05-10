@@ -3836,6 +3836,7 @@ BOOL DeviceFPGA_SetOption_DoLock(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _In
 #define FPGA_PARAMETER_FT2232H         "ft2232h"
 #define FPGA_PARAMETER_PCIE            "pciegen"
 #define FPGA_PARAMETER_PCIE_NOCONNECT  "pcienotconnected"
+#define FPGA_PARAMETER_PCIE_NOCONNECT2 "nc"
 #define FPGA_PARAMETER_RESTART_DEVICE  "devreload"
 #define FPGA_PARAMETER_DELAY_READ      "tmread"
 #define FPGA_PARAMETER_DELAY_WRITE     "tmwrite"
@@ -3891,7 +3892,8 @@ BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
     }
     // verify parameters and set version&speed
     DeviceFPGA_SetSpeedPCIeGen(ctx, (DWORD)LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_PCIE));
-    if(!ctx->wDeviceId && !LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_PCIE_NOCONNECT)) {
+    if((v = LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_DEVICE_ID))) { ctx->wDeviceId = (WORD)v; }
+    if(!ctx->wDeviceId && !(LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_PCIE_NOCONNECT) || LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_PCIE_NOCONNECT2))) {
         szDeviceError = "Unable to retrieve required Device PCIe ID";
         goto fail;
     }
@@ -3919,7 +3921,6 @@ BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
     if((v = LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_DELAY_PROBE))) { ctx->perf.DELAY_PROBE_READ = (DWORD)v; }
     if((v = LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_READ_RETRY)))  { ctx->perf.RETRY_ON_ERROR = (DWORD)v; }
     if((v = LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_READ_SIZE)))   { ctx->perf.MAX_SIZE_RX = min(ctx->perf.MAX_SIZE_RX, (DWORD)v & ~0xfff); }
-    if((v = LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_DEVICE_ID)))   { ctx->wDeviceId = (WORD)v; }
     v = LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_READ_ALGORITHM);
     ctx->fAlgorithmReadTiny = ((v & FPGA_PARAMETER_ALGO_TINY) ? TRUE : FALSE) || ctx->perf.F_TINY;
     ctx->async2.fEnabled = ctx->async2.fEnabled && !(v & FPGA_PARAMETER_ALGO_SYNCHRONOUS) && !ctx->perf.RX_FLUSH_LIMIT;
