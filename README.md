@@ -262,3 +262,6 @@ v1.0-1.8
 
 [v2.22](https://github.com/ufrisk/LeechCore/releases/tag/v2.22)
 * Support for FTDI FT601 driver 1.4 (FTD3XXWU.dll)
+
+Latest:
+* bug fix: hibernation file support.

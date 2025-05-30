@@ -2,7 +2,7 @@
 //                           Windows 8+.
 // 
 // The hibernation file format of Windows 8+ is documented in the excellent
-// blog post by ForensicXlab at: https://www.forensicxlab.com/posts/hibernation/
+// blog post by ForensicXlab at: https://www.forensicxlab.com/blog/hibernation
 // Also the original paper at: https://www.cct.lsu.edu/~golden/Papers/sylvehiber.pdf
 //
 // (c) Ulf Frisk, 2024-2025
@@ -32,7 +32,7 @@ typedef struct tdHIBR_OFFSET {
 } HIBR_OFFSET, *PHIBR_OFFSET;
 
 const HIBR_OFFSET HIBR_OFFSET_PROFILES[] = {
-    {.LengthSelf = 0x4d8, .f32 = FALSE, .PageSize = 0x18, .SystemTime = 0x20, .NumPagesForLoader = 0x58, .FirstBootRestorePage = 0x68, .FirstKernelRestorePage = 0x70, .KernelPagesProcessed = 0x230, .HighestPhysicalPage = 0x498},  // 64-bit build 26100
+    {.LengthSelf = 0x4d8, .f32 = FALSE, .PageSize = 0x18, .SystemTime = 0x20, .NumPagesForLoader = 0x58, .FirstBootRestorePage = 0x68, .FirstKernelRestorePage = 0x70, .KernelPagesProcessed = 0x238, .HighestPhysicalPage = 0x498},  // 64-bit build 26100
     {.LengthSelf = 0x448, .f32 = FALSE, .PageSize = 0x18, .SystemTime = 0x20, .NumPagesForLoader = 0x58, .FirstBootRestorePage = 0x68, .FirstKernelRestorePage = 0x70, .KernelPagesProcessed = 0x230, .HighestPhysicalPage = 0x400},  // 64-bit build 22621
     {.LengthSelf = 0x448, .f32 = FALSE, .PageSize = 0x18, .SystemTime = 0x20, .NumPagesForLoader = 0x58, .FirstBootRestorePage = 0x68, .FirstKernelRestorePage = 0x70, .KernelPagesProcessed = 0x230, .HighestPhysicalPage = 0x400},  // 64-bit build 22000
     {.LengthSelf = 0x448, .f32 = FALSE, .PageSize = 0x18, .SystemTime = 0x20, .NumPagesForLoader = 0x58, .FirstBootRestorePage = 0x68, .FirstKernelRestorePage = 0x70, .KernelPagesProcessed = 0x230, .HighestPhysicalPage = 0x400},  // 64-bit build 20348
@@ -109,7 +109,7 @@ typedef struct tdHIBR_COMPRESSION_SET_TABLE {
     HIBR_COMPRESSION_SET v[HIBR_COMPRESSION_TABLE_SIZE];
 } HIBR_COMPRESSION_SET_TABLE, *PHIBR_COMPRESSION_SET_TABLE;
 
-typedef struct tdDEVICE_CONTEXT_FILE {
+typedef struct tdDEVICE_CONTEXT_HIBRFILE {
     FILE *hFile;
     QWORD cbFile;
     CHAR szFileName[MAX_PATH];
@@ -128,7 +128,7 @@ typedef struct tdDEVICE_CONTEXT_FILE {
     } CS_Cache[HIBR_NUM_CACHE_ENTRIES];
     BYTE pbBufferCompressedData[0x10000];
     BYTE pbWorkSpace[0x00100000];
-} DEVICE_CONTEXT_FILE, *PDEVICE_CONTEXT_FILE;
+} DEVICE_CONTEXT_HIBRFILE, *PDEVICE_CONTEXT_HIBRFILE;
 
 
 //-----------------------------------------------------------------------------
@@ -143,7 +143,7 @@ typedef struct tdDEVICE_CONTEXT_FILE {
 * -- return = TRUE on success, FALSE on failure.
 */
 _Success_(return)
-BOOL DeviceHibr_InitializeFunctions(_In_ PDEVICE_CONTEXT_FILE ctx)
+BOOL DeviceHibr_InitializeFunctions(_In_ PDEVICE_CONTEXT_HIBRFILE ctx)
 {
     HMODULE hNtDll = NULL;
     if((hNtDll = LoadLibraryA("ntdll.dll"))) {
@@ -208,7 +208,7 @@ NTSTATUS OSCOMPAT_RtlDecompressBufferEx(USHORT CompressionFormat, PUCHAR Uncompr
 * -- return = TRUE on success, FALSE on failure.
 */
 _Success_(return)
-BOOL DeviceHibr_InitializeFunctions(_In_ PDEVICE_CONTEXT_FILE ctx)
+BOOL DeviceHibr_InitializeFunctions(_In_ PDEVICE_CONTEXT_HIBRFILE ctx)
 {
     void *lib_mscompress;
     CHAR szPathLib[MAX_PATH] = { 0 };
@@ -241,7 +241,7 @@ BOOL DeviceHibr_InitializeFunctions(_In_ PDEVICE_CONTEXT_FILE ctx)
 _Success_(return != NULL)
 PBYTE DeviceHibr_ReadPage(_In_ PLC_CONTEXT ctxLC, _In_ PHIBR_COMPRESSION_SET pCS, _In_ DWORD iCS, _In_ DWORD iPG)
 {
-    PDEVICE_CONTEXT_FILE ctx = (PDEVICE_CONTEXT_FILE)ctxLC->hDevice;
+    PDEVICE_CONTEXT_HIBRFILE ctx = (PDEVICE_CONTEXT_HIBRFILE)ctxLC->hDevice;
     NTSTATUS nt;
     PBYTE pbBufferUncompressed;
     DWORD i, cbUncompressed, cbUncompressedResult = 0;
@@ -287,7 +287,7 @@ PBYTE DeviceHibr_ReadPage(_In_ PLC_CONTEXT ctxLC, _In_ PHIBR_COMPRESSION_SET pCS
 */
 VOID DeviceHibr_ReadScatter(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cpMEMs, _Inout_ PPMEM_SCATTER ppMEMs)
 {
-    PDEVICE_CONTEXT_FILE ctx = (PDEVICE_CONTEXT_FILE)ctxLC->hDevice;
+    PDEVICE_CONTEXT_HIBRFILE ctx = (PDEVICE_CONTEXT_HIBRFILE)ctxLC->hDevice;
     DWORD iMEM, iCS, iPG;
     QWORD qwPfn;
     PBYTE pbPage;
@@ -335,7 +335,7 @@ VOID DeviceHibr_ReadScatter(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cpMEMs, _Inout_ P
 */
 VOID DeviceHibr_HibrInitialize_RestoreSet(_In_ PLC_CONTEXT ctxLC, _In_ QWORD cbo, _In_ QWORD cPageTotal)
 {
-    PDEVICE_CONTEXT_FILE ctx = (PDEVICE_CONTEXT_FILE)ctxLC->hDevice;
+    PDEVICE_CONTEXT_HIBRFILE ctx = (PDEVICE_CONTEXT_HIBRFILE)ctxLC->hDevice;
     BOOL fWarning = FALSE;
     BYTE i, j, cDescCS;
     BYTE pb[0x1000];
@@ -356,8 +356,8 @@ restart:
     if(fread(pb, 1, sizeof(pb), ctx->hFile) != sizeof(pb)) { return; }
     dwStatusCS = *(PDWORD)(pb + 0x000);
     cDescCS = dwStatusCS & 0xff;
-    pCS->cb = (dwStatusCS >> 8) & 0x3fffff;
-    pCS->tp = (dwStatusCS & 0x80000000) ? COMPRESS_ALGORITHM_XPRESS_HUFF : COMPRESS_ALGORITHM_XPRESS;
+    pCS->cb = (dwStatusCS >> 8) & 0x0fffff;
+    pCS->tp = (dwStatusCS & 0xC0000000) ? COMPRESS_ALGORITHM_XPRESS_HUFF : COMPRESS_ALGORITHM_XPRESS;
     if(!cDescCS || !pCS->cb) { return; }
     // 2: iterate over page descriptors in the compression set.
     pbo = 4;
@@ -381,7 +381,7 @@ restart:
         pCS->cpg += (WORD)cDescPages;
     }
     if((pCS->cpg > 0x10) && !fWarning) {
-        lcprintf(ctxLC, "DEVICE: HIBR: WARNING: COMPRESSION SET #PAGES > 10 (only showed once).\n");
+        lcprintf(ctxLC, "DEVICE: HIBR: WARNING: COMPRESSION SET #PAGES > 16 (only showed once).\n");
         fWarning = TRUE;
     }
     if(pCS->cb == ((DWORD)pCS->cpg << 12)) {
@@ -404,7 +404,7 @@ restart:
 _Success_(return)
 BOOL DeviceHibr_HibrInitialize(_In_ PLC_CONTEXT ctxLC)
 {
-    PDEVICE_CONTEXT_FILE ctx = (PDEVICE_CONTEXT_FILE)ctxLC->hDevice;
+    PDEVICE_CONTEXT_HIBRFILE ctx = (PDEVICE_CONTEXT_HIBRFILE)ctxLC->hDevice;
     BYTE pb[0x1000];
     DWORD i, cbPO_MEMORY_IMAGE;
     QWORD cboRestoreBoot = 0, cboRestoreKernel = 0, cPagesLoader = 0, cPagesKernel = 0;
@@ -462,7 +462,7 @@ fail:
 // OPEN/CLOSE FUNCTIONALITY BELOW:
 //-----------------------------------------------------------------------------
 
-VOID DeviceHibr_CloseInternal(_Frees_ptr_opt_ PDEVICE_CONTEXT_FILE ctx)
+VOID DeviceHibr_CloseInternal(_Frees_ptr_opt_ PDEVICE_CONTEXT_HIBRFILE ctx)
 {
     DWORD i;
     if(ctx) {
@@ -477,7 +477,7 @@ VOID DeviceHibr_CloseInternal(_Frees_ptr_opt_ PDEVICE_CONTEXT_FILE ctx)
 
 VOID DeviceHibr_Close(_Inout_ PLC_CONTEXT ctxLC)
 {
-    PDEVICE_CONTEXT_FILE ctx = (PDEVICE_CONTEXT_FILE)ctxLC->hDevice;
+    PDEVICE_CONTEXT_HIBRFILE ctx = (PDEVICE_CONTEXT_HIBRFILE)ctxLC->hDevice;
     DeviceHibr_CloseInternal(ctx);
 }
 
@@ -492,11 +492,11 @@ VOID DeviceHibr_Close(_Inout_ PLC_CONTEXT ctxLC)
 _Success_(return)
 BOOL DeviceHIBR_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO ppLcCreateErrorInfo)
 {
-    PDEVICE_CONTEXT_FILE ctx;
+    PDEVICE_CONTEXT_HIBRFILE ctx;
     PLC_DEVICE_PARAMETER_ENTRY pParam;
     QWORD tmEnd = 0, tmStart = GetTickCount64();
     if(ppLcCreateErrorInfo) { *ppLcCreateErrorInfo = NULL; }
-    if(!(ctx = (PDEVICE_CONTEXT_FILE)LocalAlloc(LMEM_ZEROINIT, sizeof(DEVICE_CONTEXT_FILE)))) { return FALSE; }
+    if(!(ctx = (PDEVICE_CONTEXT_HIBRFILE)LocalAlloc(LMEM_ZEROINIT, sizeof(DEVICE_CONTEXT_HIBRFILE)))) { return FALSE; }
     if(!(ctx->CS_Directory[0] = (PHIBR_COMPRESSION_SET_TABLE)LocalAlloc(LMEM_ZEROINIT, sizeof(HIBR_COMPRESSION_SET_TABLE)))) { goto fail; }
     ctx->cCS = 1;   // 0 = reserved for invalid/not set compression set.
     if(0 == _strnicmp("hibr://", ctxLC->Config.szDevice, 7)) {
