@@ -293,6 +293,8 @@ typedef struct tdDEVICE_CONTEXT_FPGA {
     } tlp_callback;
     BOOL fFT601;
     BOOL fCustomDriver;
+    BOOL fATS;
+    BYTE bAT;
 } DEVICE_CONTEXT_FPGA, *PDEVICE_CONTEXT_FPGA;
 
 // STRUCT FROM FTD3XX.h
@@ -339,7 +341,7 @@ typedef struct {
 
 typedef struct tdTLP_HDR {
     WORD Length : 10;
-    WORD _AT : 2;
+    WORD AT : 2;
     WORD _Attr : 2;
     WORD _EP : 1;
     WORD _TD : 1;
@@ -2354,6 +2356,7 @@ VOID DeviceFPGA_Synch_ReadScatter_Impl(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs,
     BYTE bTag;
     SIZE_T cbTlpRaw;
     BYTE pbTlpRaw[TLP_RX_MAX_SIZE];
+    BOOL fATS = ctx->fATS;
     // TX queued RAW TLPs (if any) from other threads and flush:
     if(ObByteQueue_Size(ctx->tlp_callback.pBqTx)) {
         while(ObByteQueue_Pop(ctx->tlp_callback.pBqTx, NULL, sizeof(pbTlpRaw), pbTlpRaw, &cbTlpRaw)) {
@@ -2392,6 +2395,7 @@ VOID DeviceFPGA_Synch_ReadScatter_Impl(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs,
                 is32 = pDMA->qwA < 0x100000000;
                 if(is32) {
                     hdrRd32->h.TypeFmt = TLP_MRd32;
+                    if(fATS) { hdrRd32->h.AT = ctx->bAT; }
                     hdrRd32->h.Length = (WORD)((cb < 0x1000) ? cb >> 2 : 0);
                     hdrRd32->RequesterID = ctx->wDeviceId;
                     hdrRd32->Tag = bTag;
@@ -2400,6 +2404,7 @@ VOID DeviceFPGA_Synch_ReadScatter_Impl(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs,
                     hdrRd32->Address = (DWORD)(pDMA->qwA + o);
                 } else {
                     hdrRd64->h.TypeFmt = TLP_MRd64;
+                    if(fATS) { hdrRd64->h.AT = ctx->bAT; }
                     hdrRd64->h.Length = (WORD)((cb < 0x1000) ? cb >> 2 : 0);
                     hdrRd64->RequesterID = ctx->wDeviceId;
                     hdrRd64->Tag = bTag;
@@ -2679,6 +2684,7 @@ VOID DeviceFPGA_Async2_Read_TxTlpSingle_MrdTlp(_In_ PLC_CONTEXT ctxLC, _In_ PDEV
     PTLP_HDR_MRdWr32 hdrRd32 = (PTLP_HDR_MRdWr32)tx;
     if(f32) {
         hdrRd32->h.TypeFmt = TLP_MRd32;
+        if(ctx->fATS) { hdrRd32->h.AT = ctx->bAT; }
         hdrRd32->h.Length = wTlpDwLength;
         hdrRd32->RequesterID = ctx->wDeviceId;
         hdrRd32->Tag = iTag;
@@ -2687,6 +2693,7 @@ VOID DeviceFPGA_Async2_Read_TxTlpSingle_MrdTlp(_In_ PLC_CONTEXT ctxLC, _In_ PDEV
         hdrRd32->Address = (DWORD)(qwA);
     } else {
         hdrRd64->h.TypeFmt = TLP_MRd64;
+        if(ctx->fATS) { hdrRd32->h.AT = ctx->bAT; }
         hdrRd64->h.Length = wTlpDwLength;
         hdrRd64->RequesterID = ctx->wDeviceId;
         hdrRd64->Tag = iTag;
@@ -3310,6 +3317,7 @@ VOID DeviceFPGA_ProbeMEM_Impl(_In_ PLC_CONTEXT ctxLC, _In_ QWORD qwAddr, _In_ DW
         is32 = qwAddr + (i << 12) < 0x100000000;
         if(is32) {
             hdrRd32->h.TypeFmt = TLP_MRd32;
+            if(ctx->fATS) { hdrRd32->h.AT = ctx->bAT; }
             hdrRd32->h.Length = 1;
             hdrRd32->RequesterID = ctx->wDeviceId;
             hdrRd32->FirstBE = 0xf;
@@ -3318,6 +3326,7 @@ VOID DeviceFPGA_ProbeMEM_Impl(_In_ PLC_CONTEXT ctxLC, _In_ QWORD qwAddr, _In_ DW
             hdrRd32->Tag = (BYTE)((i >> 5) & 0x1f); // 5 high address bits coded into tag.
         } else {
             hdrRd64->h.TypeFmt = TLP_MRd64;
+            if(ctx->fATS) { hdrRd32->h.AT = ctx->bAT; }
             hdrRd64->h.Length = 1;
             hdrRd64->RequesterID = ctx->wDeviceId;
             hdrRd64->FirstBE = 0xf;
@@ -3376,6 +3385,7 @@ BOOL DeviceFPGA_WriteMEM_TXP(_In_ PLC_CONTEXT ctxLC, _Inout_ PDEVICE_CONTEXT_FPG
     memset(pbTlp, 0, 16);
     if(pa < 0x100000000) {
         hdrWr32->h.TypeFmt = TLP_MWr32;
+        if(ctx->fATS) { hdrWr32->h.AT = ctx->bAT; }
         hdrWr32->h.Length = (WORD)(cb + 3) >> 2;
         hdrWr32->FirstBE = bFirstBE;
         hdrWr32->LastBE = bLastBE;
@@ -3389,6 +3399,7 @@ BOOL DeviceFPGA_WriteMEM_TXP(_In_ PLC_CONTEXT ctxLC, _Inout_ PDEVICE_CONTEXT_FPG
         cbTlp = (12 + cb + 3) & ~0x3;
     } else {
         hdrWr64->h.TypeFmt = TLP_MWr64;
+        if(ctx->fATS) { hdrWr64->h.AT = ctx->bAT; }
         hdrWr64->h.Length = (WORD)(cb + 3) >> 2;
         hdrWr64->FirstBE = bFirstBE;
         hdrWr64->LastBE = bLastBE;
@@ -3848,6 +3859,7 @@ BOOL DeviceFPGA_SetOption_DoLock(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _In
 #define FPGA_PARAMETER_DEVICE_ID       "bdf"
 #define FPGA_PARAMETER_DRIVER          "driver"
 #define FPGA_PARAMETER_FT601           "ft601"
+#define FPGA_PARAMETER_ATS             "ats"
 
 #define FPGA_PARAMETER_ALGO_TINY                0x01
 #define FPGA_PARAMETER_ALGO_SYNCHRONOUS         0x02
@@ -3885,6 +3897,8 @@ BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
     }
     if(szDeviceError) { goto fail; }
     ctx->fRestartDevice = (1 == LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_RESTART_DEVICE));
+    ctx->bAT = (BYTE)LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_ATS);
+    ctx->fATS = ((ctx->bAT >= 1) && (ctx->bAT <= 3));
     DeviceFPGA_GetDeviceID_FpgaVersion(ctx);
     if(!ctx->wFpgaVersionMajor) {
         szDeviceError = "Unable to connect to FPGA device";
