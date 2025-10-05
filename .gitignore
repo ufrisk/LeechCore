@@ -9,6 +9,7 @@
 *.pyd
 *.so
 *.dylib
+*.o
 /.vs
 leechrpc_h.h
 leechrpc_c.c
