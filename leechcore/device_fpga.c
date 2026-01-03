@@ -7,7 +7,7 @@
 //     - FT2232H/FT245 protocol - access FPGA via FT2232H USB2 instead of FT601 USB3.
 //     - Other devices with plugin driver - ZDMA etc.
 //
-// (c) Ulf Frisk, 2017-2025
+// (c) Ulf Frisk, 2017-2026
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include "leechcore.h"
@@ -2648,6 +2648,21 @@ BOOL DeviceFPGA_Async2_Read_RxTlpFromBuffer(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE
 {
     BOOL fReadTlp = FALSE;
     DWORD cdwTlpDataConsumed = 1;
+    PDWORD pdwSData = NULL;
+    // FPGA USB core contains a bug in which the initial 0x55556666 fillers may
+    // occur at start of buffer (or in rare cases, after the initial status dword).
+    if(ctx->rxbuf.cb - ctx->rxbuf.o >= 20) {
+        pdwSData = (PDWORD)(ctx->rxbuf.pb + ctx->rxbuf.o);
+        if((pdwSData[1] == 0x55556666) && (pdwSData[2] == 0x55556666) && (pdwSData[3] == 0x55556666) && (pdwSData[4] == 0x55556666)) {
+            if(pdwSData[0] == 0x55556666) {
+                ctx->rxbuf.o += 20;
+            } else if(((pdwSData[0] & 0xf0000000) == 0xe0000000) && (ctx->rxbuf.cb - ctx->rxbuf.o >= 24)) {
+                pdwSData[5] = pdwSData[0];
+                ctx->rxbuf.o += 20;
+            }
+        }
+    }
+    // Acquire one TLP at a time:
     while((ctx->rxbuf.o + 32 <= ctx->rxbuf.cb) && cdwTlpDataConsumed) {
         cdwTlpDataConsumed = DeviceFPGA_Async2_Read_RxTlpSingle(ctxLC, ctx, (ctx->rxbuf.cb - ctx->rxbuf.o) >> 2, (PDWORD)(ctx->rxbuf.pb + ctx->rxbuf.o));
         fReadTlp = fReadTlp || (cdwTlpDataConsumed & 0x80000000);

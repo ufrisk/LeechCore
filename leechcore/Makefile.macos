@@ -1,5 +1,5 @@
 CC=clang
-CFLAGS  += -I. -D MACOS -D _GNU_SOURCE -fPIC -fvisibility=hidden -pthread
+CFLAGS  += -I. -I../includes -D MACOS -D _GNU_SOURCE -fPIC -fvisibility=hidden -pthread
 CFLAGS += -fPIC -fstack-protector-strong -D_FORTIFY_SOURCE=2 -O1
 CFLAGS += -Wall -Wno-multichar -Wno-unused-result -Wno-unused-variable -Wno-unused-value
 CFLAGS += -Wno-pointer-to-int-cast -Wno-int-to-pointer-cast

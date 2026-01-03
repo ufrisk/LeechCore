@@ -5,7 +5,7 @@
 // blog post by ForensicXlab at: https://www.forensicxlab.com/blog/hibernation
 // Also the original paper at: https://www.cct.lsu.edu/~golden/Papers/sylvehiber.pdf
 //
-// (c) Ulf Frisk, 2024-2025
+// (c) Ulf Frisk, 2024-2026
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include "leechcore.h"
