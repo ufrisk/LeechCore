@@ -178,7 +178,7 @@ BOOL DevicePMEM_SvcStart(_In_ PLC_CONTEXT ctxLC)
         for(i = 0; i < (sizeof(szDEVICEPMEM_DRIVERFILE[f64 ? 1 : 0]) / sizeof(LPCSTR)); i++) {
             Util_GetPathLib(szDriverFile);
             strcat_s(szDriverFile, _countof(szDriverFile), szDEVICEPMEM_DRIVERFILE[f64 ? 1 : 0][i]);
-            if(!fopen_s(&pDriverFile, szDriverFile, "rb") && pDriverFile) {
+            if(!fopen_su(&pDriverFile, szDriverFile, "rb") && pDriverFile) {
                 fclose(pDriverFile);
                 pDriverFile = NULL;
                 break;
@@ -186,7 +186,7 @@ BOOL DevicePMEM_SvcStart(_In_ PLC_CONTEXT ctxLC)
             strcpy_s(szDriverFile, _countof(szDriverFile), ctxLC->Config.szDevice);
         }
     }
-    if(fopen_s(&pDriverFile, szDriverFile, "rb") || !pDriverFile) {
+    if(fopen_su(&pDriverFile, szDriverFile, "rb") || !pDriverFile) {
         lcprintf(ctxLC,
             "DEVICE: ERROR: unable to locate the winpmem driver file '%s'.\n",
             szDriverFile);

@@ -23,6 +23,7 @@
 #define LINUX_NO_OPTIMIZE
 
 VOID BusySleep(_In_ DWORD us);
+errno_t fopen_su(FILE **pFile, const char *filename, const char *mode);
 
 #endif /* _WIN32 */
 
@@ -49,6 +50,7 @@ VOID BusySleep(_In_ DWORD us);
 #include <dlfcn.h>
 #include <errno.h>
 #include <inttypes.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -127,6 +129,7 @@ typedef int(*_CoreCrtNonSecureSearchSortCompareFunction)(void const *, void cons
 #define _Out_opt_
 #define _Check_return_opt_
 #define _Frees_ptr_opt_
+#define _Maybenull_
 #define _Post_ptr_invalid_
 #define _Printf_format_string_
 #define _In_reads_(x)
@@ -138,6 +141,7 @@ typedef int(*_CoreCrtNonSecureSearchSortCompareFunction)(void const *, void cons
 #define _Inout_updates_bytes_(x)
 #define _Out_writes_opt_(x)
 #define _Success_(x)
+#define _Writable_bytes_(x)
 #define UNREFERENCED_PARAMETER(x)
 #define WINAPI
 
@@ -178,6 +182,7 @@ typedef int(*_CoreCrtNonSecureSearchSortCompareFunction)(void const *, void cons
 #define _fseeki64(f, o, w)                  (fseeko(f, o, w))
 #define _chsize_s(fd, cb)                   (ftruncate64(fd, cb))
 #define _fileno(f)                          (fileno(f))
+#define fopen_su(pFile, filename, mode)     (fopen_s(pFile, filename, mode))
 #define InterlockedAdd64(p, v)              (__sync_add_and_fetch_8(p, v))
 #define InterlockedIncrement64(p)           (__sync_add_and_fetch_8(p, 1))
 #define InterlockedIncrement(p)             (__sync_add_and_fetch_4(p, 1))

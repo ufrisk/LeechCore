@@ -251,3 +251,4 @@ v1.0-1.8
 
 Latest:
 * bug fix: hibernation file support.
+* Support for non-ascii characters in file paths.

@@ -353,10 +353,10 @@ VOID DeviceFile_VMwareDumpInitialize(_In_ PLC_CONTEXT ctxLC, _In_ BOOL fInlineMe
     strcpy_s(szFileName, _countof(szFileName), ctx->szFileName);
     // 1: open and verify metadata file
     memcpy(szFileName + strlen(szFileName) - 5, ".vmss", 5);
-    fopen_s(&pFile, szFileName, "rb");
+    fopen_su(&pFile, szFileName, "rb");
     if(!pFile) {
         memcpy(szFileName + strlen(szFileName) - 5, ".vmsn", 5);
-        fopen_s(&pFile, szFileName, "rb");
+        fopen_su(&pFile, szFileName, "rb");
     }
     if(!pFile) {
         lcprintf(ctxLC, "DEVICE: WARN: Unable to open VMware .vmss or .vmsn file - assuming 1:1 memory space.\n");
@@ -878,7 +878,7 @@ BOOL DeviceFile_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
         strncpy_s(ctx->szFileName, _countof(ctx->szFileName), ctxLC->Config.szDevice, _countof(ctxLC->Config.szDevice));
     }
     // open backing file:
-    if(fopen_s(&ctx->File[0].h, ctx->szFileName, (ctxLC->Config.fWritable ? "r+b" : "rb")) || !ctx->File[0].h) { goto fail; }
+    if(fopen_su(&ctx->File[0].h, ctx->szFileName, (ctxLC->Config.fWritable ? "r+b" : "rb")) || !ctx->File[0].h) { goto fail; }
     {
         // check if file is hibernation file, in which case delegate open to hibr device:
         _fseeki64(ctx->File[0].h, 0, SEEK_SET);
@@ -926,13 +926,13 @@ BOOL DeviceFile_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
         if(!DeviceFile_DumpInitialize(ctxLC)) { goto fail; }
     }
     // try upgrade to multi-threaded access:
-    if(!fopen_s(&ctx->File[1].h, ctx->szFileName, (ctxLC->Config.fWritable ? "r+b" : "rb"))) {
+    if(!fopen_su(&ctx->File[1].h, ctx->szFileName, (ctxLC->Config.fWritable ? "r+b" : "rb"))) {
         // 2nd file handle successfully opened - upgrade to multi-threaded access.
         ctxLC->fMultiThread = TRUE;
         ctx->fMultiThreaded = TRUE;
         InitializeCriticalSection(&ctx->File[1].Lock);
         for(i = 2; i < FILE_MAX_THREADS; i++) {
-            if(fopen_s(&ctx->File[i].h, ctx->szFileName, (ctxLC->Config.fWritable ? "r+b" : "rb"))) { break; }
+            if(fopen_su(&ctx->File[i].h, ctx->szFileName, (ctxLC->Config.fWritable ? "r+b" : "rb"))) { break; }
             InitializeCriticalSection(&ctx->File[i].Lock);
         }
     }

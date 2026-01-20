@@ -11,7 +11,7 @@ CFLAGS += -mmacosx-version-min=11.0
 LDFLAGS += -g -dynamiclib -mmacosx-version-min=11.0
 
 DEPS = leechcore.h
-OBJ = oscompatibility.o leechcore.o util.o memmap.o device_file.o device_fpga.o device_hibr.o device_pmem.o device_tmd.o device_usb3380.o device_vmm.o device_vmware.o leechrpcclient.o ob/ob_core.o ob/ob_map.o ob/ob_set.o ob/ob_bytequeue.o
+OBJ = oscompatibility.o leechcore.o charutil.o util.o memmap.o device_file.o device_fpga.o device_hibr.o device_pmem.o device_tmd.o device_usb3380.o device_vmm.o device_vmware.o leechrpcclient.o ob/ob_core.o ob/ob_map.o ob/ob_set.o ob/ob_bytequeue.o
 
 # ARCH SPECIFIC FLAGS:
 CFLAGS_X86_64  = $(CFLAGS) -arch x86_64

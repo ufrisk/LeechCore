@@ -349,6 +349,7 @@ copy "$(ProjectDir)\leechcore.h" "$(SolutionDir)\includes\" /y
     </Midl>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="charutil.c" />
     <ClCompile Include="device_file.c" />
     <ClCompile Include="device_fpga.c" />
     <ClCompile Include="device_hibr.c" />
@@ -370,6 +371,7 @@ copy "$(ProjectDir)\leechcore.h" "$(SolutionDir)\includes\" /y
     <ClCompile Include="util.c" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="charutil.h" />
     <ClInclude Include="leechcore.h" />
     <ClInclude Include="leechcore_device.h" />
     <ClInclude Include="leechcore_internal.h" />

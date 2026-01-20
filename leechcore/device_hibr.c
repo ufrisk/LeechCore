@@ -512,7 +512,7 @@ BOOL DeviceHIBR_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
         goto fail;
     }
     // open backing file:
-    if(fopen_s(&ctx->hFile, ctx->szFileName, "rb") || !ctx->hFile) { goto fail; }
+    if(fopen_su(&ctx->hFile, ctx->szFileName, "rb") || !ctx->hFile) { goto fail; }
     if(_fseeki64(ctx->hFile, 0, SEEK_END)) { goto fail; }       // seek to end of file
     ctx->cbFile = _ftelli64(ctx->hFile);                        // get current file pointer
     if(ctx->cbFile < 0x01000000) { goto fail; }                 // minimum allowed file size = 16MB
