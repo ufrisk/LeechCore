@@ -35,6 +35,19 @@ BOOL Util_GetPathExe(_Out_writes_(MAX_PATH) PCHAR szPath)
     return FALSE;
 }
 
+_Ret_maybenull_ HMODULE WINAPI LoadLibraryU(_In_ LPCSTR lpLibFileName)
+{
+    WCHAR wszLibFileName[MAX_PATH * 2];
+    if(CharUtil_UtoW(lpLibFileName, -1, (PBYTE)wszLibFileName, sizeof(wszLibFileName), NULL, NULL, CHARUTIL_FLAG_STR_BUFONLY)) {
+        if(CharUtil_StrContains(lpLibFileName, "\\", FALSE)) {
+            return LoadLibraryExW(wszLibFileName, NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
+        } else {
+            return LoadLibraryW(wszLibFileName);
+        }
+    }
+    return NULL;
+}
+
 errno_t fopen_su(FILE **pFile, const char *filename, const char *mode)
 {
     LPWSTR wszFileName = NULL, wszMode = NULL;
@@ -268,7 +281,7 @@ VOID BusySleep(_In_ DWORD us)
 // LoadLibrary / GetProcAddress facades (for FPGA functionality) below:
 // ----------------------------------------------------------------------------
 
-HMODULE LoadLibraryA(LPSTR lpFileName)
+HMODULE LoadLibraryU(LPSTR lpFileName)
 {
     HMODULE hModule;
     CHAR szFileName[2 * MAX_PATH] = { 0 };

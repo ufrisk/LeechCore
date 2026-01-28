@@ -7,6 +7,7 @@
 #include "leechcore_device.h"
 #include "leechcore_internal.h"
 #include "util.h"
+#include "charutil.h"
 
 //-----------------------------------------------------------------------------
 // DEFINES: HIBERNATION 'HIBR' FILE DEVICE
@@ -844,6 +845,41 @@ VOID DeviceFile_Close(_Inout_ PLC_CONTEXT ctxLC)
     }
 }
 
+/*
+* Warn if the memory dump file is opened from the application directory.
+* This is in itself not an issue, but it may indicate bad practice by the user.
+* If the user unzips dirty forensic material in the application directory it
+* may contain malicious executable files which LeechCore/MemProcFS/PCILeech
+* tries to load as plugins or drivers, hence this behavior is discouraged.
+* -- ctxLC
+* -- uszFilePath
+*/
+VOID DeviceFile_Open_WarnSameDir(_In_ PLC_CONTEXT ctxLC, _In_ LPSTR uszFileName)
+{
+    FILE *h = NULL;
+    BOOL fSameDir = FALSE;
+    CHAR uszLibPath[MAX_PATH];
+    CHAR uszFilePath[MAX_PATH];
+    LPSTR uszFileNameShort;
+    Util_GetPathLib(uszLibPath);
+    uszFileNameShort = CharUtil_PathSplitLastEx(uszFileName, uszFilePath, _countof(uszFilePath));
+    if(uszFileNameShort) {
+        CharUtil_PathSplitLastInPlace(uszLibPath);
+        fSameDir = CharUtil_StrEquals(uszFilePath, uszLibPath, TRUE);
+    } else {
+        // file without path - check if it exists in current directory:
+        strncat_s(uszLibPath, _countof(uszLibPath), uszFileName, _TRUNCATE);
+        fopen_su(&h, uszLibPath, "rb");
+        if(h) {
+            fclose(h);
+            fSameDir = TRUE;
+        }
+    }
+    if(fSameDir) {
+        lcprintf(ctxLC, "DEVICE: WARN: Memory dump file opened from the application directory. This is not recommended.\n");
+    }
+}
+
 #define DEVICE_FILE_PARAMETER_FILE                  "file"
 #define DEVICE_FILE_PARAMETER_WRITE                 "write"
 #define DEVICE_FILE_PARAMETER_VOLATILE              "volatile"
@@ -880,6 +916,7 @@ BOOL DeviceFile_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
     // open backing file:
     if(fopen_su(&ctx->File[0].h, ctx->szFileName, (ctxLC->Config.fWritable ? "r+b" : "rb")) || !ctx->File[0].h) { goto fail; }
     {
+        DeviceFile_Open_WarnSameDir(ctxLC, ctx->szFileName);
         // check if file is hibernation file, in which case delegate open to hibr device:
         _fseeki64(ctx->File[0].h, 0, SEEK_SET);
         fread(&dwFileMagic, 1, sizeof(DWORD), ctx->File[0].h);

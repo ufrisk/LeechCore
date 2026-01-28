@@ -23,6 +23,7 @@
 #define LINUX_NO_OPTIMIZE
 
 VOID BusySleep(_In_ DWORD us);
+_Ret_maybenull_ HMODULE WINAPI LoadLibraryU(_In_ LPCSTR lpLibFileName);
 errno_t fopen_su(FILE **pFile, const char *filename, const char *mode);
 
 #endif /* _WIN32 */
@@ -130,6 +131,7 @@ typedef int(*_CoreCrtNonSecureSearchSortCompareFunction)(void const *, void cons
 #define _Check_return_opt_
 #define _Frees_ptr_opt_
 #define _Maybenull_
+#define _Ret_maybenull_
 #define _Post_ptr_invalid_
 #define _Printf_format_string_
 #define _In_reads_(x)
@@ -254,7 +256,8 @@ BOOL __WinUsb_ReadWritePipe(
 #define WinUsb_ReadPipe(h, p, b, l, t, o)   (__WinUsb_ReadWritePipe(h, p, b, l, t, o))
 #define WinUsb_WritePipe(h, p, b, l, t, o)  (__WinUsb_ReadWritePipe(h, p, b, l, t, o))
 
-HMODULE LoadLibraryA(LPSTR lpFileName);
+#define LoadLibraryA LoadLibraryU
+HMODULE LoadLibraryU(LPSTR lpFileName);
 BOOL FreeLibrary(_In_ HMODULE hLibModule);
 FARPROC GetProcAddress(HMODULE hModule, LPSTR lpProcName);
 

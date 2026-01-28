@@ -209,16 +209,16 @@ EXPORTED_FUNCTION QWORD LcDeviceParameterGetNumeric(_In_ PLC_CONTEXT ctxLC, _In_
 _Success_(return)
 BOOL LcCreate_FetchDevice_FromExternalModule(_Inout_ PLC_CONTEXT ctx, _In_opt_ DWORD cszDevice, _In_opt_ LPSTR szDeviceAlt)
 {
-    CHAR szModule[2 * MAX_PATH] = { 0 };
-    Util_GetPathLib(szModule);
-    strcat_s(szModule, sizeof(szModule), "leechcore_device_");
+    CHAR uszModule[2 * MAX_PATH] = { 0 };
+    Util_GetPathLib(uszModule);
+    strcat_s(uszModule, sizeof(uszModule), "leechcore_device_");
     if(szDeviceAlt) {
-        strcat_s(szModule, sizeof(szModule), szDeviceAlt);
+        strcat_s(uszModule, sizeof(uszModule), szDeviceAlt);
     } else {
-        strncat_s(szModule, sizeof(szModule), ctx->Config.szDevice, cszDevice);
+        strncat_s(uszModule, sizeof(uszModule), ctx->Config.szDevice, cszDevice);
     }
-    strcat_s(szModule, sizeof(szModule), LC_LIBRARY_FILETYPE);
-    if((ctx->hDeviceModule = LoadLibraryA(szModule))) {
+    strcat_s(uszModule, sizeof(uszModule), LC_LIBRARY_FILETYPE);
+    if((ctx->hDeviceModule = LoadLibraryU(uszModule))) {
         if((ctx->pfnCreate = (BOOL(*)(PLC_CONTEXT, PPLC_CONFIG_ERRORINFO))GetProcAddress(ctx->hDeviceModule, "LcPluginCreate"))) {
             if(szDeviceAlt) {
                 strcpy_s(ctx->Config.szDeviceName, sizeof(ctx->Config.szDeviceName), szDeviceAlt);

@@ -4,30 +4,36 @@
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include "util.h"
+#include "charutil.h"
 
 /*
 * Retrieve the operating system path of the directory which is containing this:
 * .dll/.so file.
-* -- szPath
+* -- uszPath
 */
-VOID Util_GetPathLib(_Out_writes_(MAX_PATH) PCHAR szPath)
+VOID Util_GetPathLib(_Out_writes_(MAX_PATH) PCHAR uszPath)
 {
     SIZE_T i;
-    ZeroMemory(szPath, MAX_PATH);
+    ZeroMemory(uszPath, MAX_PATH);
 #ifdef _WIN32
-    HMODULE hModuleLeechCore;
-    hModuleLeechCore = LoadLibraryA("leechcore.dll");
-    GetModuleFileNameA(hModuleLeechCore, szPath, MAX_PATH - 4);
-    if(hModuleLeechCore) { FreeLibrary(hModuleLeechCore); }
+    HMODULE hModuleVmm = 0;
+    WCHAR wszPath[MAX_PATH] = { 0 };
+    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCWSTR)Util_GetPathLib, &hModuleVmm);
+    GetModuleFileNameW(hModuleVmm, wszPath, MAX_PATH - 4);
+    CharUtil_WtoU(wszPath, -1, (PBYTE)uszPath, MAX_PATH, NULL, NULL, CHARUTIL_FLAG_STR_BUFONLY | CHARUTIL_FLAG_TRUNCATE);
 #endif /* _WIN32 */
 #if defined(LINUX) || defined(MACOS)
     Dl_info Info = { 0 };
-    if(!dladdr((void *)Util_GetPathLib, &Info) || !Info.dli_fname) { return; }
-    strncpy(szPath, Info.dli_fname, MAX_PATH - 1);
+    if(!dladdr((void *)Util_GetPathLib, &Info) || !Info.dli_fname) {
+        GetModuleFileNameA(NULL, uszPath, MAX_PATH - 4);
+    } else {
+        strncpy(uszPath, Info.dli_fname, MAX_PATH - 1);
+    }
 #endif /* LINUX || MACOS */
-    for(i = strlen(szPath) - 1; i > 0; i--) {
-        if(szPath[i] == '/' || szPath[i] == '\\') {
-            szPath[i + 1] = '\0';
+    if(uszPath[0] == '\0') { return; }
+    for(i = strlen(uszPath) - 1; i > 0; i--) {
+        if(uszPath[i] == '/' || uszPath[i] == '\\') {
+            uszPath[i + 1] = '\0';
             return;
         }
     }
