@@ -16,7 +16,7 @@ For detailed information about individual memory acquisition methods, the API an
 
 Memory Acquisition Methods:
 ===========================
-### Software based memory aqusition methods:
+### Software based memory acquisition methods:
 
 Please find a summary of the supported software based memory acquisition methods listed below. Please note that the LeechAgent only provides a network connection to a remote LeechCore library. It's possible to use both hardware and software based memory acquisition once connected.
 
@@ -37,7 +37,7 @@ Please find a summary of the supported software based memory acquisition methods
 | [Hyper-V Saved State](https://github.com/ufrisk/LeechCore/wiki/Device_HyperV_SavedState) | File             | No  | No  | No  | Yes |
 | [LeechAgent*](https://github.com/ufrisk/LeechCore/wiki/Device_Remote)                    | Remote           |     |     | No  | No  |
 
-### Hardware based memory aqusition methods:
+### Hardware based memory acquisition methods:
 
 Please find a summary of the supported hardware based memory acquisition methods listed below. All hardware based memory acquisition methods are supported on both Windows and Linux.
 | Device                                                                                     | Type | Interface | Speed | 64-bit memory access | PCIe TLP access | Project<br>Sponsor |
@@ -46,6 +46,7 @@ Please find a summary of the supported hardware based memory acquisition methods
 | [GBOX](https://github.com/ufrisk/pcileech-fpga-dev/blob/master/GBOX)                       | [FPGA](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)        | OCuLink |  400MB/s | Yes | Yes | 💖 |
 | [LeetDMA](https://github.com/ufrisk/pcileech-fpga)                                         | [FPGA](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)          | USB-C | 190MB/s  | Yes | Yes | 💖 |
 | [CaptainDMA M2](https://github.com/ufrisk/pcileech-fpga)                                   | [FPGA](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)          | USB-C | 190MB/s  | Yes | Yes | 💖 |
+| [CaptainDMA&nbsp;M2&nbsp;100T](https://github.com/ufrisk/pcileech-fpga)                    | [FPGA](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)          | USB-C | 220MB/s  | Yes | Yes | 💖 |
 | [CaptainDMA 4.1th](https://github.com/ufrisk/pcileech-fpga)                                | [FPGA](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)          | USB-C | 190MB/s  | Yes | Yes | 💖 |
 | [CaptainDMA 75T](https://github.com/ufrisk/pcileech-fpga)                                  | [FPGA](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)          | USB-C | 200MB/s  | Yes | Yes | 💖 |
 | [CaptainDMA 100T](https://github.com/ufrisk/pcileech-fpga)                                 | [FPGA](https://github.com/ufrisk/LeechCore/wiki/Device_FPGA)          | USB-C | 220MB/s  | Yes | Yes | 💖 |
@@ -69,7 +70,7 @@ The LeechAgent listens on the port `tcp/28473` - please ensure network connectiv
 
 For more information please check the [LeechCore wiki](https://github.com/ufrisk/LeechCore/wiki) and the [blog entry](http://blog.frizk.net/2019/04/LeechAgent.html) about remote live memory capture with the LeechAgent.
 
-The videos below shows the process of installing the LeechAgent to a remote computer, connecting to it with MemProcFS to analyze and dump the memory while also connecting to it in parallel with PCILecch to submit a Python memory analysis script that make use of the MemProcFS API to analyze the remote CPU page tables for rwx-sections.
+The videos below shows the process of installing the LeechAgent to a remote computer, connecting to it with MemProcFS to analyze and dump the memory while also connecting to it in parallel with PCILeech to submit a Python memory analysis script that make use of the MemProcFS API to analyze the remote CPU page tables for rwx-sections.
 <p align="center"><img src="https://raw.githubusercontent.com/wiki/ufrisk/LeechCore/resources/agent-anim.gif"/></p>
 
 **Examples:**
@@ -86,13 +87,13 @@ Uninstall an existing, locally installed, LeechAgent. The agent service will be 
 Uninstall a LeechAgent from a remote system and delete the `Program Files\LeechAgent` folder.
 * `LeechAgent.exe -remoteuninstall <remotecomputer.contoso.com>`
 
-Start the LeechAgent in interactive mode only accepting connections from administative users over kerberos-secured connections. Remember to start as elevated administrator if clients accessing LeechAgent should load WinPMEM to access live memory.
+Start the LeechAgent in interactive mode only accepting connections from administrative users over kerberos-secured connections. Remember to start as elevated administrator if clients accessing LeechAgent should load WinPMEM to access live memory.
 * `LeechAgent.exe -interactive`
 
 Start the LeechAgent in interactive insecure mode - accepting connections from all clients with access to port `tcp/28473`. NB! unauthenticated clients may dump memory and submit Python scripts running as SYSTEM. Use with care for testing only!
 * `LeechAgent.exe -interactive -insecure`
 
-Start the LeechAgent in interactive mode with DumpIt LIVEKD to allow connecting clients to access live memory. Start as elevated administrator. Only accept connections from administative users over kerberos-secured connections. 
+Start the LeechAgent in interactive mode with DumpIt LIVEKD to allow connecting clients to access live memory. Start as elevated administrator. Only accept connections from administrative users over kerberos-secured connections. 
 * `DumpIt.exe /LIVEKD /A LeechAgent.exe /C -interactive`
 
 Start the LeechAgent in interactive mode with DumpIt LIVEKD to allow connecting clients to access live memory. Start as elevated administrator. Accept connections from all clients with access to port `tcp/28473` without any form of authentication.
@@ -219,7 +220,6 @@ v1.0-1.8
 * PCIe BAR information and user callback (easier implementation of custom devices).
 * ARM64 memory dump (.dmp) and VMWare Fusion (.vmem/.vmsn) support.
 * Improved handling of PCIe TLP user callback.
-</details>
 
 [v2.17](https://github.com/ufrisk/LeechCore/releases/tag/v2.17)
 * Bug fixes.
@@ -236,6 +236,7 @@ v1.0-1.8
 * Bug fixes.
 * Windows 11 24H2 hibernation file support.
 * ZDMA fast-write "lockless" support.
+* </details>
 
 [v2.20](https://github.com/ufrisk/LeechCore/releases/tag/v2.20)
 * macOS support
