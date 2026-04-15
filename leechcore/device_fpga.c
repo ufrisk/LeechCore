@@ -178,8 +178,9 @@ const DEVICE_PERFORMANCE PERFORMANCE_PROFILES[DEVICE_ID_MAX + 1] = {
     //     batches produce.
     //   - ASYNC_DELAY_{1,2} = 0: no host-NIC throttling needed when peer is a 100G FPGA on a
     //     dedicated switch port.
-    //   - PROBE_MAXPAGES 0x400 (1024): matches upstream default.
-    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "PCILeech KU5P 100G",    .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x400000, .MAX_SIZE_TX = 0x4000, .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0,   .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x400000, .ASYNC_DELAY_1 = 0, .ASYNC_DELAY_2 = 0, .FLAGS = 0 },
+    //   - PROBE_MAXPAGES 0x1000 (4096, 16 MB probe window): sized to match the MAX_SIZE_RX
+    //     credit window so large-memory-range probes issue in fewer iterations.
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "PCILeech KU5P 100G",    .PROBE_MAXPAGES = 0x1000, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x400000, .MAX_SIZE_TX = 0x4000, .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0,   .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x400000, .ASYNC_DELAY_1 = 0, .ASYNC_DELAY_2 = 0, .FLAGS = 0 },
 };
 
 // ------------------------------------------------------------------
@@ -772,12 +773,14 @@ SOCKET DeviceFPGA_UDP_Connect(_In_ DWORD dwIpv4Addr, _In_ WORD wUdpPort)
     int status;
     struct sockaddr_in sAddr;
     SOCKET Sock = 0;
-    // 8 MB SO_RCVBUF sized for 100G-class FPGAs: at 1+ GB/s sustained
-    // CplD rate, the old 512 KB buffer fills in <1 ms under burst, causing
-    // phantom page failures when the host app can't drain fast enough.
-    // Kernel silently caps at /proc/sys/net/core/rmem_max; requires
-    // `sudo sysctl -w net.core.rmem_max=33554432` (32 MB) on Linux.
-    int rcvbuf = 0x00800000;
+    // 32 MB SO_RCVBUF sized for 100G-class FPGAs: maxes out Linux's
+    // typical rmem_max ceiling.  At 1+ GB/s sustained CplD rate, the
+    // upstream 512 KB buffer fills in <1 ms under burst — phantom page
+    // failures ensued when the host app couldn't drain fast enough.
+    // Kernel silently caps at /proc/sys/net/core/rmem_max; on Linux
+    // run `sudo sysctl -w net.core.rmem_max=33554432` first.  Setting
+    // 32 MB here matches that cap — any value below it is slack.
+    int rcvbuf = 0x02000000;
 #ifdef _WIN32
     u_long mode = 1;  // 1 == non-blocking socket - Windows only ???
     WSADATA WsaData;
