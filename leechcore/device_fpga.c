@@ -166,12 +166,20 @@ const DEVICE_PERFORMANCE PERFORMANCE_PROFILES[DEVICE_ID_MAX + 1] = {
     { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "DRIVER_SUPPLIED",       .PROBE_MAXPAGES = 0,     .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0,       .MAX_SIZE_TX = 0,      .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0 ,  .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0,       .ASYNC_DELAY_1 = 0, .ASYNC_DELAY_2 = 0, .FLAGS = 0 },
     { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "DRIVER_SUPPLIED",       .PROBE_MAXPAGES = 0,     .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0,       .MAX_SIZE_TX = 0,      .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0 ,  .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0,       .ASYNC_DELAY_1 = 0, .ASYNC_DELAY_2 = 0, .FLAGS = 0 },
     { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "DRIVER_SUPPLIED",       .PROBE_MAXPAGES = 0,     .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0,       .MAX_SIZE_TX = 0,      .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0 ,  .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0,       .ASYNC_DELAY_1 = 0, .ASYNC_DELAY_2 = 0, .FLAGS = 0 },
-    // PCILeech KU5P 100G — rawudp device on Kintex UltraScale+ KU5P with 100G CMAC (QSFP28).  Tuned for the high-BW path:
-    //   - MAX_SIZE_TX grown 0x400 → 0x8000 so TLP requests get batched 32× per USB/UDP payload (matches FT2232H profile).
-    //   - MAX_SIZE_RX grown 0x1c000 → 0x40000 so completions have room for larger in-flight windows on 100G.
-    //   - ASYNC_MAX_READSIZE grown 0x10000 → 0x100000 so a 1 MB dump is one async batch instead of 16.
-    //   - ASYNC_DELAY_{1,2} dropped 5 → 0 — no host-NIC throttling needed when peer is a 100G FPGA on a dedicated switch port.
-    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "PCILeech KU5P 100G",    .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x30000, .MAX_SIZE_TX = 0x4000, .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0,   .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x80000, .ASYNC_DELAY_1 = 0, .ASYNC_DELAY_2 = 0, .FLAGS = 0 },
+    // PCILeech KU5P 100G — rawudp device on Kintex UltraScale+ KU5P with 100G CMAC (QSFP28).
+    // Sized for PCIe 10-bit Tag (1024 entries, 896 read slots) at >=100 Gbps target throughput:
+    //   - MAX_SIZE_RX 0x400000 (4 MB, 1024 page credits): max out the 10-bit tag window at any
+    //     reasonable RTT.  Below RTT=5 ms, tags saturate before credits at this size.
+    //   - MAX_SIZE_TX 0x4000 (16 KB): batches ~1000 MRd TLPs per sendto, fits cleanly in 2 jumbo
+    //     IP fragments @ MTU 9000 — balances syscall rate against per-packet IP-fragmentation cost.
+    //   - ASYNC_MAX_READSIZE 0x400000 (4 MB): 16 MB dump = 4 async batches, 1 GB dump = 256.
+    //     Paired with the SO_RCVBUF bump to 8 MB in DeviceFPGA_UDP_Connect (was 512 KB) which
+    //     prevents RX-kernel-queue overflow during the long completion bursts large async
+    //     batches produce.
+    //   - ASYNC_DELAY_{1,2} = 0: no host-NIC throttling needed when peer is a 100G FPGA on a
+    //     dedicated switch port.
+    //   - PROBE_MAXPAGES 0x400 (1024): matches upstream default.
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "PCILeech KU5P 100G",    .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x400000, .MAX_SIZE_TX = 0x4000, .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0,   .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x400000, .ASYNC_DELAY_1 = 0, .ASYNC_DELAY_2 = 0, .FLAGS = 0 },
 };
 
 // ------------------------------------------------------------------
@@ -764,7 +772,12 @@ SOCKET DeviceFPGA_UDP_Connect(_In_ DWORD dwIpv4Addr, _In_ WORD wUdpPort)
     int status;
     struct sockaddr_in sAddr;
     SOCKET Sock = 0;
-    int rcvbuf = 0x00080000;
+    // 8 MB SO_RCVBUF sized for 100G-class FPGAs: at 1+ GB/s sustained
+    // CplD rate, the old 512 KB buffer fills in <1 ms under burst, causing
+    // phantom page failures when the host app can't drain fast enough.
+    // Kernel silently caps at /proc/sys/net/core/rmem_max; requires
+    // `sudo sysctl -w net.core.rmem_max=33554432` (32 MB) on Linux.
+    int rcvbuf = 0x00800000;
 #ifdef _WIN32
     u_long mode = 1;  // 1 == non-blocking socket - Windows only ???
     WSADATA WsaData;
@@ -783,7 +796,6 @@ SOCKET DeviceFPGA_UDP_Connect(_In_ DWORD dwIpv4Addr, _In_ WORD wUdpPort)
             closesocket(Sock);
             return 0;
         }
-        rcvbuf = 0x00080000;
         setsockopt(Sock, SOL_SOCKET, SO_RCVBUF, (const char*)&rcvbuf, sizeof(int));
         return Sock;
     }
@@ -2962,7 +2974,9 @@ VOID DeviceFPGA_Async2_ReadScatter_DoWork(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_C
     }
 fail_timeout:
     // CLEAR ANY TAGS RESERVED FOR PRIMARY MEM CTX ON TIMEOUT FAILURE:
-    for(i = 0; i < 0x100; i++) {
+    // FPGA_EXT_TAG_MAX (0x400) covers the full 10-bit Tag window when
+    // extended tags are enabled; falls back to 0x100 for 8-bit mode.
+    for(i = 0; i < FPGA_EXT_TAG_MAX; i++) {
         pTag = ctx->async2.Tags + i;
         if(pTag->pMemContext == pMemCtxPrimary) {
             if(pTag->tp == FPGA_NEWASYNC2_TAG_TYPE_4K) {
