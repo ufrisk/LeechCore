@@ -136,7 +136,8 @@ typedef union tdFPGA_HANDLESOCKET {
 #define DEVICE_ID_DRIVER_SUPPLIED_5             0x16
 #define DEVICE_ID_DRIVER_SUPPLIED_6             0x17
 #define DEVICE_ID_DRIVER_SUPPLIED_7             0x18
-#define DEVICE_ID_MAX                           0x18
+#define DEVICE_ID_PCILEECH_KU5P_100G            0x19
+#define DEVICE_ID_MAX                           0x19
 
 const DEVICE_PERFORMANCE PERFORMANCE_PROFILES[DEVICE_ID_MAX + 1] = {
     { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "SP605 / FT601",         .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0x8000, .MAX_SIZE_RX = 0x1f000, .MAX_SIZE_TX = 0x2000, .DELAY_PROBE_READ = 500,  .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 175, .DELAY_READ = 400, .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x10000, .ASYNC_DELAY_1 = 5, .ASYNC_DELAY_2 = 5, .FLAGS = 0 },
@@ -165,6 +166,12 @@ const DEVICE_PERFORMANCE PERFORMANCE_PROFILES[DEVICE_ID_MAX + 1] = {
     { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "DRIVER_SUPPLIED",       .PROBE_MAXPAGES = 0,     .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0,       .MAX_SIZE_TX = 0,      .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0 ,  .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0,       .ASYNC_DELAY_1 = 0, .ASYNC_DELAY_2 = 0, .FLAGS = 0 },
     { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "DRIVER_SUPPLIED",       .PROBE_MAXPAGES = 0,     .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0,       .MAX_SIZE_TX = 0,      .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0 ,  .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0,       .ASYNC_DELAY_1 = 0, .ASYNC_DELAY_2 = 0, .FLAGS = 0 },
     { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "DRIVER_SUPPLIED",       .PROBE_MAXPAGES = 0,     .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0,       .MAX_SIZE_TX = 0,      .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0 ,  .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0,       .ASYNC_DELAY_1 = 0, .ASYNC_DELAY_2 = 0, .FLAGS = 0 },
+    // PCILeech KU5P 100G — rawudp device on Kintex UltraScale+ KU5P with 100G CMAC (QSFP28).  Tuned for the high-BW path:
+    //   - MAX_SIZE_TX grown 0x400 → 0x8000 so TLP requests get batched 32× per USB/UDP payload (matches FT2232H profile).
+    //   - MAX_SIZE_RX grown 0x1c000 → 0x40000 so completions have room for larger in-flight windows on 100G.
+    //   - ASYNC_MAX_READSIZE grown 0x10000 → 0x100000 so a 1 MB dump is one async batch instead of 16.
+    //   - ASYNC_DELAY_{1,2} dropped 5 → 0 — no host-NIC throttling needed when peer is a 100G FPGA on a dedicated switch port.
+    { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "PCILeech KU5P 100G",    .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x30000, .MAX_SIZE_TX = 0x4000, .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0,   .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x80000, .ASYNC_DELAY_1 = 0, .ASYNC_DELAY_2 = 0, .FLAGS = 0 },
 };
 
 /*
