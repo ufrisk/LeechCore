@@ -725,14 +725,72 @@ ULONG WINAPI DeviceFPGA_UDP_FT60x_FT_WritePipe(HANDLE ftHandle, UCHAR ucPipeID, 
 */
 ULONG WINAPI DeviceFPGA_UDP_FT60x_FT_ReadPipe(HANDLE ftHandle, UCHAR ucPipeID, PUCHAR pucBuffer, ULONG ulBufferLength, PULONG pulBytesTransferred, PVOID pOverlapped)
 {
-    int status;
     DWORD cbTx, cSleep = 0, cbRead, cbReadTotal = 0;
     BYTE pbTx[] = { 0x01, 0x00, 0x01, 0x00,  0x80, 0x02, 0x23, 0x77 };                  // cmd msg: inactivity timer enable - 1ms
     FPGA_HANDLESOCKET hs;
     hs.h = ftHandle;
     DeviceFPGA_UDP_FT60x_FT_WritePipe(ftHandle, 0, pbTx, sizeof(pbTx), &cbTx, NULL);    //          - previously configured by DeviceFPGA_GetDeviceID_FpgaVersion()
     *pulBytesTransferred = 0;
-    status = 1;
+#if defined(LINUX) && !defined(MACOS)
+    // Batched recvmmsg path.  Iov slots at fixed pucBuffer stride; after
+    // each call, compact packets back-to-back via memmove.  Keeps the
+    // zero-copy property of the original recvfrom loop (no scratch copy).
+    #define UDP_MMSG_BATCH 8
+    #define UDP_MMSG_SLOT  0x1000    // 4 KB — one max-CplD UDP payload
+    struct mmsghdr msgs[UDP_MMSG_BATCH];
+    struct iovec   iovs[UDP_MMSG_BATCH];
+    int n, i;
+    DWORD pktLen, write_off;
+    while(ulBufferLength) {
+        // Setup iovs pointing into pucBuffer at SLOT stride.  Only use
+        // as many slots as fit in the remaining ulBufferLength.
+        int slots_avail = min(UDP_MMSG_BATCH, (int)(ulBufferLength / UDP_MMSG_SLOT));
+        if(slots_avail < 1) { slots_avail = 1; }
+        for(i = 0; i < slots_avail; i++) {
+            iovs[i].iov_base = pucBuffer + (DWORD)i * UDP_MMSG_SLOT;
+            iovs[i].iov_len  = UDP_MMSG_SLOT;
+            msgs[i].msg_hdr.msg_name       = NULL;
+            msgs[i].msg_hdr.msg_namelen    = 0;
+            msgs[i].msg_hdr.msg_iov        = &iovs[i];
+            msgs[i].msg_hdr.msg_iovlen     = 1;
+            msgs[i].msg_hdr.msg_control    = NULL;
+            msgs[i].msg_hdr.msg_controllen = 0;
+            msgs[i].msg_hdr.msg_flags      = 0;
+            msgs[i].msg_len                = 0;
+        }
+        // 100 μs timeout: let kernel batch any packets that arrive in
+        // this window.  Bypasses O_NONBLOCK: recvmmsg with timeout blocks
+        // up to <timeout> waiting for at least one datagram.
+        struct timespec ts = {.tv_sec = 0, .tv_nsec = 100000};
+        n = recvmmsg(hs.Socket, msgs, slots_avail, MSG_WAITFORONE, &ts);
+        if(n < 1) {
+            if((cbReadTotal >= 32) && (*(PDWORD)(pucBuffer - 32) == 0xeffffff3) && (*(PDWORD)(pucBuffer - 28) == 0xdeceffff)) {
+                break;
+            }
+            if(n < 0 && errno != EAGAIN && errno != EWOULDBLOCK) { return 1; }
+            if(++cSleep < 10 * 50) {
+                if(cSleep < 5) { SwitchToThread(); } else { BusySleep(100); }
+                continue;
+            }
+            break;
+        }
+        cSleep = 0;
+        // Compact packets.  Slot i occupies [i*SLOT, i*SLOT + msg_len); we
+        // want them back-to-back.  memmove only when there's a gap.
+        write_off = msgs[0].msg_len;   // slot 0 is already in place
+        for(i = 1; i < n; i++) {
+            pktLen = msgs[i].msg_len;
+            if(write_off != (DWORD)i * UDP_MMSG_SLOT) {
+                memmove(pucBuffer + write_off, pucBuffer + (DWORD)i * UDP_MMSG_SLOT, pktLen);
+            }
+            write_off += pktLen;
+        }
+        pucBuffer      += write_off;
+        ulBufferLength -= write_off;
+        cbReadTotal    += write_off;
+    }
+#else
+    int status = 1;
     while(status && ulBufferLength) {
         status = recvfrom(hs.Socket, pucBuffer, ulBufferLength, 0, NULL, NULL);
         if(status == SOCKET_ERROR) {
@@ -758,6 +816,7 @@ ULONG WINAPI DeviceFPGA_UDP_FT60x_FT_ReadPipe(HANDLE ftHandle, UCHAR ucPipeID, P
         ulBufferLength -= cbRead;
         pucBuffer += cbRead;
     }
+#endif
     *pulBytesTransferred = cbReadTotal;
     return 0;
 }
