@@ -174,6 +174,24 @@ const DEVICE_PERFORMANCE PERFORMANCE_PROFILES[DEVICE_ID_MAX + 1] = {
     { .VERSION = DEVICE_PERFORMANCE_VERSION, .SZ_DEVICE_NAME = "PCILeech KU5P 100G",    .PROBE_MAXPAGES = 0x400, .RX_FLUSH_LIMIT = 0,      .MAX_SIZE_RX = 0x30000, .MAX_SIZE_TX = 0x4000, .DELAY_PROBE_READ = 0,    .DELAY_PROBE_WRITE = 0,   .DELAY_WRITE = 0,   .DELAY_READ = 0,   .RETRY_ON_ERROR = 0, .F_TINY = 0, .ASYNC_MAX_READSIZE = 0x80000, .ASYNC_DELAY_1 = 0, .ASYNC_DELAY_2 = 0, .FLAGS = 0 },
 };
 
+// ------------------------------------------------------------------
+// PCIe 10-bit Extended Tag support (PCI-SIG 3.1+).
+//
+// With the 10-bit-Tag Requester Enable bit set, a Requester can issue
+// MRd/MWr TLPs with tag values 0..1023 by placing the top two bits
+// into formerly-reserved header positions:
+//
+//     Tag[7:0]  = TLP header byte 6            (unchanged)
+//     Tag[8]    = TLP header byte 1 bit 7      (formerly _R2 reserved)
+//     Tag[9]    = TLP header byte 0 bit 7      (formerly reserved)
+//
+// TLP type identification must mask off byte 0 bit 7 before compare.
+// ------------------------------------------------------------------
+#define FPGA_EXT_TAG_ENABLE          1
+#define FPGA_EXT_TAG_MAX             0x400
+#define FPGA_EXT_TAG_READ_LIMIT      0x380    // reserve 0x380..0x3FF for writes
+#define TLP_TYPEFMT_MASK             0x7f
+
 /*
 * Per-thread context for FPGA_NEWASYNC2. This may be queued to be processed by other threads.
 */
@@ -215,12 +233,18 @@ typedef struct tdFPGA_NEWASYNC2_CONTEXT {
     OVERLAPPED oOverlapped;
     // below are only used for the new async (algo=0,1) mode:
     POB_MAP pmQueue;
-    BYTE iTag;
+    // iTag widened to WORD for 10-bit Extended Tag support (0..1023).
+    // When FPGA_EXT_TAG_ENABLE==0, upper 2 bits are zero and behavior
+    // collapses back to the old 8-bit range.
+    WORD iTag;
     DWORD cAvailTags;
     DWORD cbAvailCredits;
-    // valid entries are 0x00-0x6f, 0x80-0xef (for backwards compatibility).
-    // tags 0x70-7f, 0xf0-ff are reserved as write tags.
-    FPGA_NEWASYNC2_TAG_ENTRY Tags[0x100];
+    // Tag array sized for PCIe 10-bit Extended Tag Field (1024 entries).
+    // Valid read-tag range is 0x000..0x37F; 0x380..0x3FF reserved for
+    // writes (128 write tags, 896 read tags available).  When
+    // FPGA_EXT_TAG_ENABLE==0, only low 0x00..0xef are used, matching
+    // upstream's 224/32 split.
+    FPGA_NEWASYNC2_TAG_ENTRY Tags[FPGA_EXT_TAG_MAX];
 } FPGA_NEWASYNC2_CONTEXT, *PFPGA_NEWASYNC2_CONTEXT;
 
 typedef ULONG(WINAPI *PFN_LcSetPerformanceProfile)(PDEVICE_PERFORMANCE pDP, ULONG version, ULONG dwDeviceId);
@@ -2503,19 +2527,36 @@ VOID DeviceFPGA_Async2_Read_RxTlpSingle_MRdCpl(_In_ PLC_CONTEXT ctxLC, _In_ PDEV
     PTLP_HDR hdr = (PTLP_HDR)pb;
     PDWORD buf = (PDWORD)pb;
     WORD c, o, cbAdjust = 0;
+    WORD wTagFull;
+    BYTE bTypeFmtLow;
     PMEM_SCATTER pMEM;
     PFPGA_NEWASYNC2_TAG_ENTRY pTag;
     buf[0] = _byteswap_ulong(buf[0]);
     buf[1] = _byteswap_ulong(buf[1]);
     buf[2] = _byteswap_ulong(buf[2]);
     if(cb < ((DWORD)hdr->Length << 2) + 12) { return; }                         // Insufficient length
-    if((hdr->TypeFmt != TLP_CplD) && (hdr->TypeFmt != TLP_Cpl)) { return; }     // Not a completion
-    pTag = ctx->async2.Tags + hdrC->Tag;
+#if FPGA_EXT_TAG_ENABLE
+    // Mask T9 from TypeFmt (byte 0 bit 7) before comparing to the CplD/
+    // Cpl type constants.  When 10-bit-Tag is enabled, a completion with
+    // Tag >= 512 arrives with byte 0 bit 7 set — that's T9, not type.
+    bTypeFmtLow = hdr->TypeFmt & TLP_TYPEFMT_MASK;
+    if((bTypeFmtLow != TLP_CplD) && (bTypeFmtLow != TLP_Cpl)) { return; }
+    // Reconstruct full 10-bit Tag: {T9=byte0.bit7, T8=_R2, T[7:0]=hdrC->Tag}.
+    wTagFull = ((WORD)(hdr->TypeFmt >> 7) << 9)     // T9
+             | ((WORD)(hdr->_R2)         << 8)     // T8
+             |  (WORD)hdrC->Tag;
+#else
+    bTypeFmtLow = hdr->TypeFmt;
+    (void)bTypeFmtLow;
+    if((hdr->TypeFmt != TLP_CplD) && (hdr->TypeFmt != TLP_Cpl)) { return; }
+    wTagFull = hdrC->Tag;
+#endif
+    pTag = ctx->async2.Tags + wTagFull;
     pMEM = pTag->pMEM;
     // 4K COMPLETION:
     if(pTag->tp == FPGA_NEWASYNC2_TAG_TYPE_4K) {
         // Cpl: -> free MEM and tag
-        if(hdr->TypeFmt == TLP_Cpl) {
+        if(bTypeFmtLow == TLP_Cpl) {
             pTag->pMemContext->cMemCpl++;
             goto free_tag;
         }
@@ -2533,7 +2574,7 @@ VOID DeviceFPGA_Async2_Read_RxTlpSingle_MRdCpl(_In_ PLC_CONTEXT ctxLC, _In_ PDEV
     }
     // TINY COMPLETION:
     if(pTag->tp == FPGA_NEWASYNC2_TAG_TYPE_TINY) {
-        if(hdr->TypeFmt == TLP_Cpl) {
+        if(bTypeFmtLow == TLP_Cpl) {
             MEM_SCATTER_STACK_ADD(pMEM, 1, 0x10000ULL + pTag->cbTag);
             if(pMEM->cb == (MEM_SCATTER_STACK_PEEK(pMEM, 1) & 0x1fff)) {
                 pTag->pMemContext->cMemCpl++;
@@ -2683,12 +2724,15 @@ BOOL DeviceFPGA_Async2_Read_RxTlpFromBuffer(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE
 */
 VOID DeviceFPGA_WriteScatter(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cpMEMs, _Inout_ PPMEM_SCATTER ppMEMs);
 
-__forceinline BYTE DeviceFPGA_Async2_Read_TxTlp_NextTag(_In_ PDEVICE_CONTEXT_FPGA ctx)
+// 10-bit tag read-side allocator.  Cycles 0x000..FPGA_EXT_TAG_READ_LIMIT-1
+// (= 0x37F) returning the next free slot.  Top 0x80 slots (0x380..0x3FF)
+// are reserved for write tags and excluded from this allocator.
+__forceinline WORD DeviceFPGA_Async2_Read_TxTlp_NextTag(_In_ PDEVICE_CONTEXT_FPGA ctx)
 {
-    BYTE iTag = ctx->async2.iTag;
+    WORD iTag = ctx->async2.iTag;
     while(TRUE) {
         iTag++;
-        if(iTag == 0xEF) {
+        if(iTag >= FPGA_EXT_TAG_READ_LIMIT) {
             iTag = 0;
         }
         if(ctx->async2.Tags[iTag].tp == FPGA_NEWASYNC2_TAG_TYPE_NONE) {
@@ -2698,27 +2742,38 @@ __forceinline BYTE DeviceFPGA_Async2_Read_TxTlp_NextTag(_In_ PDEVICE_CONTEXT_FPG
     }
 }
 
-VOID DeviceFPGA_Async2_Read_TxTlpSingle_MrdTlp(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx, _In_ WORD wTlpDwLength, _In_ BYTE iTag, _In_ QWORD qwA)
+VOID DeviceFPGA_Async2_Read_TxTlpSingle_MrdTlp(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx, _In_ WORD wTlpDwLength, _In_ WORD iTag, _In_ QWORD qwA)
 {
     BOOL f32 = (qwA < 0x100000000);
     DWORD tx[4] = { 0 };
     PTLP_HDR_MRdWr64 hdrRd64 = (PTLP_HDR_MRdWr64)tx;
     PTLP_HDR_MRdWr32 hdrRd32 = (PTLP_HDR_MRdWr32)tx;
+#if FPGA_EXT_TAG_ENABLE
+    // Encode T9 into byte 0 bit 7 by OR-ing onto TypeFmt.  T8 goes into
+    // the formerly-reserved _R2 bitfield (byte 1 bit 7).
+    BYTE typefmt_t9 = (BYTE)((iTag >> 2) & 0x80);    // bit 7 if Tag[9]==1
+    BYTE r2_t8       = (BYTE)((iTag >> 8) & 1);
+#else
+    BYTE typefmt_t9 = 0;
+    BYTE r2_t8       = 0;
+#endif
     if(f32) {
-        hdrRd32->h.TypeFmt = TLP_MRd32;
+        hdrRd32->h.TypeFmt = TLP_MRd32 | typefmt_t9;
+        hdrRd32->h._R2     = r2_t8;
         if(ctx->fATS) { hdrRd32->h.AT = ctx->bAT; }
         hdrRd32->h.Length = wTlpDwLength;
         hdrRd32->RequesterID = ctx->wDeviceId;
-        hdrRd32->Tag = iTag;
+        hdrRd32->Tag = (BYTE)(iTag & 0xFF);
         hdrRd32->FirstBE = 0xf;
         hdrRd32->LastBE = (wTlpDwLength == 1) ? 0 : 0xf;
         hdrRd32->Address = (DWORD)(qwA);
     } else {
-        hdrRd64->h.TypeFmt = TLP_MRd64;
+        hdrRd64->h.TypeFmt = TLP_MRd64 | typefmt_t9;
+        hdrRd64->h._R2     = r2_t8;
         if(ctx->fATS) { hdrRd32->h.AT = ctx->bAT; }
         hdrRd64->h.Length = wTlpDwLength;
         hdrRd64->RequesterID = ctx->wDeviceId;
-        hdrRd64->Tag = iTag;
+        hdrRd64->Tag = (BYTE)(iTag & 0xFF);
         hdrRd64->FirstBE = 0xf;
         hdrRd64->LastBE = (wTlpDwLength == 1) ? 0 : 0xf;
         hdrRd64->AddressHigh = (DWORD)(qwA >> 32);
@@ -2733,7 +2788,7 @@ VOID DeviceFPGA_Async2_Read_TxTlpSingle_MrdTlp(_In_ PLC_CONTEXT ctxLC, _In_ PDEV
 
 VOID DeviceFPGA_Async2_Read_TxTlpSingle(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx, _In_ PFPGA_NEWASYNC2_MEM_CONTEXT pTX)
 {
-    BYTE iTag;
+    WORD iTag;
     DWORD o, cb, cdw;
     PFPGA_NEWASYNC2_TAG_ENTRY pTag;
     PMEM_SCATTER pMEM = pTX->ppMEMs[pTX->iMem];
@@ -3395,23 +3450,49 @@ VOID DeviceFPGA_ProbeMEM(_In_ PLC_CONTEXT ctxLC, _In_ QWORD pa, _In_ DWORD cPage
 _Success_(return) LINUX_NO_OPTIMIZE
 BOOL DeviceFPGA_WriteMEM_TXP(_In_ PLC_CONTEXT ctxLC, _Inout_ PDEVICE_CONTEXT_FPGA ctx, _In_ QWORD pa, _In_ BYTE bFirstBE, _In_ BYTE bLastBE, _In_ PBYTE pb, _In_ DWORD cb)
 {
+    // Write tag range.  In 8-bit mode: 0xe0..0xff (old layout).  In 10-bit
+    // mode: 0x3e0..0x3ff, which sits in the read-allocator's reserved
+    // 0x380..0x3ff slice and can't collide with read tags.
+#if FPGA_EXT_TAG_ENABLE
+    static WORD wTag = 0x3e0;
+    const WORD wTagBase = 0x3e0;
+    const WORD wTagEnd  = 0x400;
+    WORD wMyTag;
+#else
     static BYTE bTag = 0xe0;
+    const BYTE bTagBase = 0xe0;
+    WORD wMyTag;
+#endif
     DWORD txbuf[36], i, cbTlp;
     PBYTE pbTlp = (PBYTE)txbuf;
     PTLP_HDR_MRdWr32 hdrWr32 = (PTLP_HDR_MRdWr32)txbuf;
     PTLP_HDR_MRdWr64 hdrWr64 = (PTLP_HDR_MRdWr64)txbuf;
+#if FPGA_EXT_TAG_ENABLE
+    wTag++;
+    if(wTag >= wTagEnd) {
+        wTag = wTagBase;
+    }
+    wMyTag = wTag;
+    BYTE typefmt_t9 = (BYTE)((wMyTag >> 2) & 0x80);
+    BYTE r2_t8      = (BYTE)((wMyTag >> 8) & 1);
+#else
     bTag++;
     if(bTag == 0) {
-        bTag = 0xe0;
+        bTag = bTagBase;
     }
+    wMyTag = bTag;
+    BYTE typefmt_t9 = 0;
+    BYTE r2_t8      = 0;
+#endif
     memset(pbTlp, 0, 16);
     if(pa < 0x100000000) {
-        hdrWr32->h.TypeFmt = TLP_MWr32;
+        hdrWr32->h.TypeFmt = TLP_MWr32 | typefmt_t9;
+        hdrWr32->h._R2     = r2_t8;
         if(ctx->fATS) { hdrWr32->h.AT = ctx->bAT; }
         hdrWr32->h.Length = (WORD)(cb + 3) >> 2;
         hdrWr32->FirstBE = bFirstBE;
         hdrWr32->LastBE = bLastBE;
-        hdrWr32->Tag = bTag;
+        hdrWr32->Tag = (BYTE)(wMyTag & 0xFF);
         hdrWr32->RequesterID = ctx->wDeviceId;
         hdrWr32->Address = (DWORD)pa;
         for(i = 0; i < 3; i++) {
@@ -3420,12 +3501,13 @@ BOOL DeviceFPGA_WriteMEM_TXP(_In_ PLC_CONTEXT ctxLC, _Inout_ PDEVICE_CONTEXT_FPG
         memcpy(pbTlp + 12, pb, cb);
         cbTlp = (12 + cb + 3) & ~0x3;
     } else {
-        hdrWr64->h.TypeFmt = TLP_MWr64;
+        hdrWr64->h.TypeFmt = TLP_MWr64 | typefmt_t9;
+        hdrWr64->h._R2     = r2_t8;
         if(ctx->fATS) { hdrWr64->h.AT = ctx->bAT; }
         hdrWr64->h.Length = (WORD)(cb + 3) >> 2;
         hdrWr64->FirstBE = bFirstBE;
         hdrWr64->LastBE = bLastBE;
-        hdrWr64->Tag = bTag;
+        hdrWr64->Tag = (BYTE)(wMyTag & 0xFF);
         hdrWr64->RequesterID = ctx->wDeviceId;
         hdrWr64->AddressHigh = (DWORD)(pa >> 32);
         hdrWr64->AddressLow = (DWORD)pa;
@@ -3969,7 +4051,13 @@ BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
             // new async (algo=0, 1):
             if(!(ctx->async2.pmQueue = ObMap_New(NULL, OB_MAP_FLAGS_NOKEY))) { goto fail; }
             ctx->async2.cbAvailCredits = ctx->perf.MAX_SIZE_RX;
+#if FPGA_EXT_TAG_ENABLE
+            // PCIe 10-bit Extended Tag: 0x380 = 896 read tags available
+            // (0x000..0x37F); 128 slots reserved for write tags.
+            ctx->async2.cAvailTags = FPGA_EXT_TAG_READ_LIMIT;
+#else
             ctx->async2.cAvailTags = 0xe0;
+#endif
             ctx->rxbuf.cbMax = 0x01000000;
         }
     }
