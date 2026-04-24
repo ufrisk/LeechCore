@@ -2129,8 +2129,7 @@ VOID DeviceFPGA_SynchOldAsync_RxTlpAsynchronous(_In_ PLC_CONTEXT ctxLC, _In_ PDE
 
 /*
 * Recover FTDI/FT601 RX path if FT_ReadPipe/FT_GetOverlappedResult reports
-* FT_OTHER_ERROR. The normal TX path already recovers this by reopening the
-* FTDI handle; async RX must also reset pending overlapped state and discard
+* FT_OTHER_ERROR. Async RX must reset pending overlapped state and discard
 * any partial receive buffer before the next read attempt.
 */
 static BOOL DeviceFPGA_FTDI_RxRecover(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ DWORD status)
