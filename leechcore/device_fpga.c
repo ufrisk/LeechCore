@@ -2121,10 +2121,44 @@ VOID DeviceFPGA_Bar_RxTlp(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx,
 //-------------------------------------------------------------------------------
 
 #define FT_IO_PENDING               24
+#define FT_OTHER_ERROR              0x20
 #define TLP_RX_MAX_SIZE             (16+1024)
 #define TLP_RX_MAX_SIZE_IN_DWORDS   (TLP_RX_MAX_SIZE/sizeof(DWORD))
 
 VOID DeviceFPGA_SynchOldAsync_RxTlpAsynchronous(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx, _In_opt_ DWORD cbBytesToRead);
+
+/*
+* Recover FTDI/FT601 RX path if FT_ReadPipe/FT_GetOverlappedResult reports
+* FT_OTHER_ERROR. The normal TX path already recovers this by reopening the
+* FTDI handle; async RX must also reset pending overlapped state and discard
+* any partial receive buffer before the next read attempt.
+*/
+static BOOL DeviceFPGA_FTDI_RxRecover(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ DWORD status)
+{
+    BOOL fOverlapped = (ctx->async2.fEnabled || ctx->async2.fOldAsync) && ctx->dev.pfnFT_ReleaseOverlapped && ctx->dev.pfnFT_InitializeOverlapped;
+    if(status != FT_OTHER_ERROR) { return FALSE; }
+    if(ctx->dev.hFTDI && ctx->dev.pfnFT_AbortPipe) {
+        ctx->dev.pfnFT_AbortPipe(ctx->dev.hFTDI, 0x82);
+        ctx->dev.pfnFT_AbortPipe(ctx->dev.hFTDI, 0x02);
+    }
+    if(fOverlapped) {
+        if(ctx->dev.hFTDI) {
+            ctx->dev.pfnFT_ReleaseOverlapped(ctx->dev.hFTDI, &ctx->async2.oOverlapped);
+        }
+        ZeroMemory(&ctx->async2.oOverlapped, sizeof(ctx->async2.oOverlapped));
+    }
+    DeviceFPGA_ReInitializeFTDI(ctx);
+    if(fOverlapped && ctx->dev.hFTDI) {
+        ctx->dev.pfnFT_InitializeOverlapped(ctx->dev.hFTDI, &ctx->async2.oOverlapped);
+    }
+    if(ctx->dev.hFTDI && ctx->dev.pfnFT_AbortPipe) {
+        ctx->dev.pfnFT_AbortPipe(ctx->dev.hFTDI, 0x82);
+        ctx->dev.pfnFT_AbortPipe(ctx->dev.hFTDI, 0x02);
+    }
+    ctx->rxbuf.cb = 0;
+    ctx->rxbuf.o = 0;
+    return TRUE;
+}
 
 _Success_(return)
 BOOL DeviceFPGA_TxTlp(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx, _In_reads_(cbTlp) PBYTE pbTlp, _In_ DWORD cbTlp, _In_ BOOL fRdKeepalive, _In_ BOOL fFlush)
@@ -2160,7 +2194,7 @@ BOOL DeviceFPGA_TxTlp(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx, _In
     // transmit
     if((ctx->txbuf.cb >= ctx->perf.MAX_SIZE_TX) || (fFlush && ctx->txbuf.cb)) {
         status = ctx->dev.pfnFT_WritePipe(ctx->dev.hFTDI, 0x02, ctx->txbuf.pb, ctx->txbuf.cb, &cbTxed, NULL);
-        if(status == 0x20) {
+        if(status == FT_OTHER_ERROR) {
             DeviceFPGA_ReInitializeFTDI(ctx); // try recovery if possible.
             status = ctx->dev.pfnFT_WritePipe(ctx->dev.hFTDI, 0x02, ctx->txbuf.pb, ctx->txbuf.cb, &cbTxed, NULL);
         }
@@ -2211,7 +2245,7 @@ BOOL DeviceFPGA_TxTlp_FastWrite_NoLock(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONT
     // transmit
     if((ctx->txbuf_fastwrite.cb >= ctx->perf.MAX_SIZE_TX) || (fFlush && ctx->txbuf_fastwrite.cb)) {
         status = ctx->dev.pfnFT_WritePipe(ctx->dev.hFTDI, 0x02, ctx->txbuf_fastwrite.pb, ctx->txbuf_fastwrite.cb, &cbTxed, NULL);
-        if(status == 0x20) {
+        if(status == FT_OTHER_ERROR) {
             DeviceFPGA_ReInitializeFTDI(ctx); // try recovery if possible.
             status = ctx->dev.pfnFT_WritePipe(ctx->dev.hFTDI, 0x02, ctx->txbuf_fastwrite.pb, ctx->txbuf_fastwrite.cb, &cbTxed, NULL);
         }
@@ -2279,8 +2313,8 @@ VOID DeviceFPGA_Synch_RxTlpSynchronous(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONT
     while(TRUE) {
         // read data:
         status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, ctx->rxbuf.pb + ctx->rxbuf.cb, cbReadRxBuf - ctx->rxbuf.cb, &cbRx, NULL);
-        if(status == 0x20 && ctx->perf.RETRY_ON_ERROR) {
-            DeviceFPGA_ReInitializeFTDI(ctx); // try recovery if possible.
+        if(status == FT_OTHER_ERROR && ctx->perf.RETRY_ON_ERROR) {
+            DeviceFPGA_FTDI_RxRecover(ctx, status); // try recovery if possible.
             status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, ctx->rxbuf.pb + ctx->rxbuf.cb, ctx->rxbuf.cbMax - ctx->rxbuf.cb, &cbRx, NULL);
         }
         if(status) {
@@ -2853,6 +2887,7 @@ VOID DeviceFPGA_Async2_ReadScatter_DoWork(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_C
     cbReadInitialMax = min(cbMAX_READSIZE, pMemCtxPrimary->cMEM * 0x1800);
     status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, ctx->rxbuf.pb + ctx->rxbuf.cb, cbReadInitialMax, &cbRead, NULL);
     if(status && (status != FT_IO_PENDING)) {
+        DeviceFPGA_FTDI_RxRecover(ctx, status);
         return;
     }
     ctx->rxbuf.cb += cbRead;
@@ -2880,6 +2915,7 @@ VOID DeviceFPGA_Async2_ReadScatter_DoWork(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_C
         if(fAsync) {
             status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, ctx->rxbuf.pb + ctx->rxbuf.cb, cbMAX_READSIZE, &cbRead, &ctx->async2.oOverlapped);
             if(status && (status != FT_IO_PENDING)) {
+                DeviceFPGA_FTDI_RxRecover(ctx, status);
                 goto fail_overlapped;
             }
         }
@@ -2894,6 +2930,7 @@ VOID DeviceFPGA_Async2_ReadScatter_DoWork(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_C
             status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, ctx->rxbuf.pb + ctx->rxbuf.cb, cbReadInitialMax, &cbRead, NULL);
         }
         if(status) {
+            DeviceFPGA_FTDI_RxRecover(ctx, status);
             goto fail_overlapped;
         }
         ctx->rxbuf.cb += cbRead;
@@ -2931,6 +2968,7 @@ VOID DeviceFPGA_Async2_ReadOnlyFast_DoWork(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_
     // RX INITIAL / (LATENCY OPTIMIZED FOR SMALLER READS):
     status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, ctx->rxbuf.pb + ctx->rxbuf.cb, ctx->perf.ASYNC_MAX_READSIZE, &cbRead, NULL);
     if(status && (status != FT_IO_PENDING)) {
+        DeviceFPGA_FTDI_RxRecover(ctx, status);
         return;
     }
     ctx->rxbuf.cb += cbRead;
@@ -2953,6 +2991,7 @@ VOID DeviceFPGA_Async2_ReadOnlyFast_DoWork(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_
         if(fAsync) {
             status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, ctx->rxbuf.pb + ctx->rxbuf.cb, ctx->perf.ASYNC_MAX_READSIZE, &cbRead, &ctx->async2.oOverlapped);
             if(status && (status != FT_IO_PENDING)) {
+                DeviceFPGA_FTDI_RxRecover(ctx, status);
                 return;
             }
         }
@@ -2964,7 +3003,10 @@ VOID DeviceFPGA_Async2_ReadOnlyFast_DoWork(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_
         } else {
             status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, ctx->rxbuf.pb + ctx->rxbuf.cb, ctx->perf.ASYNC_MAX_READSIZE, &cbRead, NULL);
         }
-        if(status) { return; }
+        if(status) {
+            DeviceFPGA_FTDI_RxRecover(ctx, status);
+            return;
+        }
         ctx->rxbuf.cb += cbRead;
     }
 }
@@ -3132,7 +3174,10 @@ VOID DeviceFPGA_SynchOldAsync_RxTlpAsynchronous(_In_ PLC_CONTEXT ctxLC, _In_ PDE
     }
     BusySleep(25);
     status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, pbBuffer, cbReadMax, &cbRead, NULL);
-    if(status && (status != FT_IO_PENDING)) { return; }
+    if(status && (status != FT_IO_PENDING)) {
+        DeviceFPGA_FTDI_RxRecover(ctx, status);
+        return;
+    }
     while(TRUE) {
         cEmptyRead = ((cbRead == 0) || (cbRead == 0x14)) ? cEmptyRead + 1 : 0;
         if(cEmptyRead >= 0x30) { break; }
@@ -3141,6 +3186,7 @@ VOID DeviceFPGA_SynchOldAsync_RxTlpAsynchronous(_In_ PLC_CONTEXT ctxLC, _In_ PDE
         if(fAsync) {
             status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, pbBuffer + cbBuffer, cbReadMax, &cbRead, &ctx->async2.oOverlapped);
             if(status && (status != FT_IO_PENDING)) {
+                DeviceFPGA_FTDI_RxRecover(ctx, status);
                 break;
             }
             fAsyncInProgress = TRUE;
@@ -3165,6 +3211,9 @@ VOID DeviceFPGA_SynchOldAsync_RxTlpAsynchronous(_In_ PLC_CONTEXT ctxLC, _In_ PDE
             status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, pbBuffer + cbBuffer, cbReadMax, &cbRead, NULL);
         }
         if(status) {
+            if(DeviceFPGA_FTDI_RxRecover(ctx, status)) {
+                fAsyncInProgress = FALSE;
+            }
             break;
         }
     }
