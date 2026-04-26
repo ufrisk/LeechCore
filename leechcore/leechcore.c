@@ -1,4 +1,4 @@
-// leechcore.c : core implementation of the the LeechCore physical memory acquisition library.
+// leechcore.c : core implementation of the LeechCore physical memory acquisition library.
 //
 // (c) Ulf Frisk, 2020-2026
 // Author: Ulf Frisk, pcileech@frizk.net
