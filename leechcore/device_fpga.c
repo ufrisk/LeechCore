@@ -1797,6 +1797,22 @@ BOOL DeviceFPGA_GetDeviceID_FpgaVersionV4(_In_ PDEVICE_CONTEXT_FPGA ctx)
     DeviceFPGA_ConfigWrite(ctx, 0x0008, (PBYTE)&dwInactivityTimer, 4, FPGA_REG_CORE | FPGA_REG_READWRITE);
     // PCIe
     DeviceFPGA_ConfigRead(ctx, 0x0008, (PBYTE)&wbsDeviceId, 2, FPGA_REG_PCIE | FPGA_REG_READONLY);
+    // NexusForge fork: the FT601 PCIe config-read pipe returns stale zeros for the
+    // first several reads after a fresh open - BDF (0x08), MAGIC (0x00) and PL/PHY
+    // (0x0a) all read 0x0000 until it syncs (empirically within ~5 reads). Stock
+    // leechcore then reports "Unable to retrieve required Device PCIe ID" because
+    // the magic-gated hot-reset below only triggers when MAGIC==0x6745 - which is
+    // also 0 while the pipe is cold. Simply re-read the device-id to let the pipe
+    // warm up. Plain config reads only: NO FT601 re-init (that would re-cold the
+    // pipe) and NO hot-reset (the PCIe link is fine; only the first reads were
+    // stale). Connect-time only - does not touch the read/write data path.
+    {
+        DWORD cNfWarm = 0;
+        while(!wbsDeviceId && (cNfWarm < 64)) {
+            DeviceFPGA_ConfigRead(ctx, 0x0008, (PBYTE)&wbsDeviceId, 2, FPGA_REG_PCIE | FPGA_REG_READONLY);
+            cNfWarm++;
+        }
+    }
     if(!wbsDeviceId && DeviceFPGA_ConfigRead(ctx, 0x0000, (PBYTE)&wMagicPCIe, 2, FPGA_REG_PCIE | FPGA_REG_READWRITE) && (wMagicPCIe == 0x6745)) {
         // failed getting device id - assume device is connected -> try recover the bad link with hot-reset.
         DeviceFPGA_HotResetV4(ctx);
