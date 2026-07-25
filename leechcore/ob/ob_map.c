@@ -12,7 +12,7 @@
 // of the set with ObMap_Get/ObMap_GetNext may fail.
 // The ObMap is an object manager object and must be DECREF'ed when required.
 //
-// (c) Ulf Frisk, 2019-2025
+// (c) Ulf Frisk, 2019-2026
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include "ob.h"
@@ -535,6 +535,7 @@ QWORD ObMap_PeekKey(_In_opt_ POB_MAP pm)
 
 /*
 * Filter map objects into a generic context by using a user-supplied filter function.
+* NB! The callback is invoked while the map lock is held and must not call back into the same ObMap.
 * -- pm
 * -- ctx = optional context to pass on to the filter function.
 * -- pfnFilterCB
@@ -549,6 +550,7 @@ BOOL ObMap_Filter(_In_opt_ POB_MAP pm, _In_opt_ PVOID ctx, _In_opt_ OB_MAP_FILTE
 
 /*
 * Filter map objects into a POB_SET by using a user-supplied filter function.
+* NB! The callback is invoked while the map lock is held and must not call back into the same ObMap.
 * CALLER DECREF: return
 * -- pm
 * -- ctx = optional context to pass on to the filter function.
@@ -763,8 +765,8 @@ int _ObMap_SortEntryIndexByKey_CmpSort(_In_ POB_MAP_ENTRY e1, _In_ POB_MAP_ENTRY
 
 /*
 * Sort the ObMap entry index by a sort compare function.
-* NB! The items sorted by the sort function are const OB_MAP_ENTRY* objects
-*     which points to the underlying map object key/value.
+* NB! The items sorted by the sort function are const OB_MAP_ENTRY* objects which points to the underlying map object key/value.
+* NB! The callback is invoked while the map lock is held and must not call back into the same ObMap.
 * -- pm
 * -- pfnSort = sort function callback. const void* == const OB_MAP_ENTRY*
 * -- return
@@ -872,6 +874,21 @@ BOOL _ObMap_PushCopy(_In_ POB_MAP pm, _In_ QWORD qwKey, _In_ PVOID pvObject, _In
     return FALSE;
 }
 
+_Success_(return)
+BOOL _ObMap_PushAll(_In_ POB_MAP pm, _In_ POB_MAP pmSrc)
+{
+    DWORD i;
+    POB_MAP_ENTRY pe;
+    if(!pmSrc || (pm == pmSrc) || (pm->fObjectsOb != pmSrc->fObjectsOb) || pm->fObjectsLocalFree || pmSrc->fObjectsLocalFree) { return FALSE; }
+    AcquireSRWLockShared(&pmSrc->LockSRW);
+    for(i = 1; i < pmSrc->c; i++) {
+        pe = _ObMap_GetFromIndex(pmSrc, i);
+        _ObMap_Push(pm, pe->k, pe->v);
+    }
+    ReleaseSRWLockShared(&pmSrc->LockSRW);
+    return TRUE;
+}
+
 /*
 * Push / Insert into the ObMap.
 * -- pm
@@ -900,6 +917,19 @@ _Success_(return)
 BOOL ObMap_PushCopy(_In_opt_ POB_MAP pm, _In_ QWORD qwKey, _In_ PVOID pvObject, _In_ SIZE_T cbObject)
 {
     OB_MAP_CALL_SYNCHRONIZED_IMPLEMENTATION_WRITE(pm, BOOL, FALSE, _ObMap_PushCopy(pm, qwKey, pvObject, cbObject))
+}
+
+/*
+* Push / Insert all objects in pmSrc to pmDst using the same key and value.
+* NB! only valid for OB_MAP_FLAGS_OBJECT_OB and OB_MAP_FLAGS_OBJECT_VOID maps.
+* -- pmDst
+* -- pmSrc
+* -- return = TRUE on success, FALSE otherwise.
+*/
+_Success_(return)
+BOOL ObMap_PushAll(_In_opt_ POB_MAP pmDst, _In_ POB_MAP pmSrc)
+{
+    OB_MAP_CALL_SYNCHRONIZED_IMPLEMENTATION_WRITE(pmDst, BOOL, FALSE, _ObMap_PushAll(pmDst, pmSrc))
 }
 
 /*

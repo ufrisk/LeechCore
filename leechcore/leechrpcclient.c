@@ -608,6 +608,7 @@ BOOL LeechRPC_SetOption(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _In_ QWORD q
 // struct definitions from vmmdll to verify / fixup vfs related commands
 //
 #define __VFS_FILELISTBLOB_VERSION          0xf88f0001
+#define __VFS_CONSOLE_RSP_VERSION           0xf00f0001
 
 typedef struct td__VFS_FILELISTBLOB_ENTRY {
     ULONG64 ouszName;                       // byte offset to string from VMMDLL_VFS_FILELISTBLOB.uszMultiText
@@ -628,6 +629,14 @@ typedef struct td__VFS_FILELISTBLOB {
     __VFS_FILELISTBLOB_ENTRY FileEntry[0];
 } __VFS_FILELISTBLOB, *P__VFS_FILELISTBLOB;
 
+typedef struct td__VFS_CONSOLE_RSP {
+    DWORD dwVersion;
+    DWORD cbStruct;
+    QWORD qwStdOut;
+    QWORD qwStdErr;
+    BYTE pbBuffer[0];
+} __VFS_CONSOLE_RSP, *P__VFS_CONSOLE_RSP;
+
 /*
 * Verify incoming vfs (virtual file system) data from untrusted remote system
 * for basic syntax. This to ensure the remote, potentially infected system,
@@ -641,7 +650,19 @@ BOOL LeechRPC_Command_VerifyUntrustedVfsRsp(_In_ ULONG64 fCMD, _In_ PLEECHRPC_MS
 {
     PLC_CMD_AGENT_VFS_RSP pRsp;
     P__VFS_FILELISTBLOB pVfs;
+    P__VFS_CONSOLE_RSP pConsole;
     DWORD i;
+    // console responses use a separate, raw response structure:
+    if(fCMD == LC_CMD_AGENT_VFS_CONSOLE) {
+        if(!pMsgRsp->cb) { return TRUE; }
+        if(pMsgRsp->cb < sizeof(__VFS_CONSOLE_RSP) + 1) { return FALSE; }
+        pConsole = (P__VFS_CONSOLE_RSP)pMsgRsp->pb;
+        if((pConsole->dwVersion != __VFS_CONSOLE_RSP_VERSION) || (pConsole->cbStruct != pMsgRsp->cb)) { return FALSE; }
+        if(!pConsole->qwStdOut && !pConsole->qwStdErr) { return FALSE; }
+        if(pConsole->qwStdOut && ((pConsole->qwStdOut < sizeof(__VFS_CONSOLE_RSP)) || (pConsole->qwStdOut >= pConsole->cbStruct) || !memchr(pMsgRsp->pb + pConsole->qwStdOut, 0, (SIZE_T)(pConsole->cbStruct - pConsole->qwStdOut)))) { return FALSE; }
+        if(pConsole->qwStdErr && ((pConsole->qwStdErr < sizeof(__VFS_CONSOLE_RSP)) || (pConsole->qwStdErr >= pConsole->cbStruct) || !memchr(pMsgRsp->pb + pConsole->qwStdErr, 0, (SIZE_T)(pConsole->cbStruct - pConsole->qwStdErr)))) { return FALSE; }
+        return TRUE;
+    }
     // 1: general
     if(pMsgRsp->cb < sizeof(LC_CMD_AGENT_VFS_RSP)) { return FALSE; }
     pRsp = (PLC_CMD_AGENT_VFS_RSP)pMsgRsp->pb;
@@ -696,7 +717,7 @@ BOOL LeechRPC_Command(
     }
     // 2: transmit & get result
     result = LeechRPC_SubmitCommand(ctxLC, (PLEECHRPC_MSG_HDR)pMsgReq, LEECHRPC_MSGTYPE_COMMAND_RSP, (PPLEECHRPC_MSG_HDR)&pMsgRsp);
-    if(result && ((fCMD == LC_CMD_AGENT_VFS_LIST) || (fCMD == LC_CMD_AGENT_VFS_READ) || (fCMD == LC_CMD_AGENT_VFS_WRITE))) {
+    if(result && ((fCMD == LC_CMD_AGENT_VFS_LIST) || (fCMD == LC_CMD_AGENT_VFS_READ) || (fCMD == LC_CMD_AGENT_VFS_WRITE) || (fCMD == LC_CMD_AGENT_VFS_CONSOLE))) {
         result = LeechRPC_Command_VerifyUntrustedVfsRsp(fCMD, pMsgRsp);
     }
     if(result) {

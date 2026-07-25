@@ -9,7 +9,7 @@
 // iterations of the set with ObSet_Get/ObSet_GetNext may fail.
 // The ObSet is an object manager object and must be DECREF'ed when required.
 //
-// (c) Ulf Frisk, 2019-2025
+// (c) Ulf Frisk, 2019-2026
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #include "ob.h"
@@ -464,6 +464,7 @@ _Success_(return)
 BOOL _ObSet_PushSet(_In_ POB_SET pvs, _In_opt_ POB_SET pvsSrc)
 {
     DWORD iValue;
+    if(pvs == pvsSrc) { return FALSE; }
     if(pvsSrc) {
         AcquireSRWLockShared(&pvsSrc->LockSRW);
         for(iValue = pvsSrc->c - 1; iValue; iValue--) {

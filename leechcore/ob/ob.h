@@ -1,6 +1,6 @@
 // ob.h : definitions related to the object manager and object manager collections.
 //
-// (c) Ulf Frisk, 2018-2024
+// (c) Ulf Frisk, 2018-2026
 // Author: Ulf Frisk, pcileech@frizk.net
 //
 #ifndef __OB_H__
@@ -464,6 +464,16 @@ _Success_(return)
 BOOL ObMap_PushCopy(_In_opt_ POB_MAP pm, _In_ QWORD qwKey, _In_ PVOID pvObject, _In_ SIZE_T cbObject);
 
 /*
+* Push / Insert all objects in pmSrc to pmDst using the same key and value.
+* NB! only valid for OB_MAP_FLAGS_OBJECT_OB and OB_MAP_FLAGS_OBJECT_VOID maps.
+* -- pmDst
+* -- pmSrc
+* -- return = TRUE on success, FALSE otherwise.
+*/
+_Success_(return)
+BOOL ObMap_PushAll(_In_opt_ POB_MAP pmDst, _In_ POB_MAP pmSrc);
+
+/*
 * Remove the "last" object.
 * CALLER DECREF(if OB): return
 * -- pm
@@ -642,6 +652,7 @@ VOID ObMap_FilterSet_FilterAllKey(_In_opt_ PVOID ctx, _In_ POB_SET ps, _In_ QWOR
 
 /*
 * Filter map objects into a generic context by using a user-supplied filter function.
+* NB! The callback is invoked while the map lock is held and must not call back into the same ObMap.
 * -- pm
 * -- ctx = optional context to pass on to the filter function.
 * -- pfnFilterCB = filter callback function. NULL = fail.
@@ -652,6 +663,7 @@ BOOL ObMap_Filter(_In_opt_ POB_MAP pm, _In_opt_ PVOID ctx, _In_opt_ OB_MAP_FILTE
 
 /*
 * Filter map objects into a POB_SET by using a user-supplied filter function.
+* NB! The callback is invoked while the map lock is held and must not call back into the same ObMap.
 * CALLER DECREF: return
 * -- pm
 * -- ctx = optional context to pass on to the filter function.
@@ -679,6 +691,7 @@ typedef int(*OB_MAP_SORT_COMPARE_FUNCTION)(_In_ POB_MAP_ENTRY e1, _In_ POB_MAP_E
 * Sort the ObMap entry index by a sort compare function.
 * NB! The items sorted by the sort function are const OB_MAP_ENTRY* objects
 *     which points to the underlying map object key/value.
+* NB! The callback is invoked while the map lock is held and must not call back into the same ObMap.
 * -- pm
 * -- pfnSort = sort function callback. const void* == const OB_MAP_ENTRY*
 * -- return
@@ -740,7 +753,7 @@ typedef BOOL(*OB_CACHEMAP_VALIDENTRY_PFN_CB)(
 * -- H
 * -- cMaxEntries = max entries in the cache, if more entries are added the
 *       least recently accessed item will be removed from the cache map.
-* -- pfnValidEntry = validation callback function (if any).
+* -- pfnValidEntry = optional validation callback function (if any). NB! Must never call back into the ObCacheMap as this may cause a deadlock.
 * -- flags = defined by OB_CACHEMAP_FLAGS_*
 * -- return
 */
@@ -842,6 +855,10 @@ typedef struct tdOB_STRMAP *POB_STRMAP;
 // incompatible with OB_STRMAP_FLAGS_STR_ASSIGN_TEMPORARY option.
 #define OB_STRMAP_FLAGS_STR_ASSIGN_OFFSET      0x04
 
+// Read UNICODE OBJECT data from another process than SYSTEM (4).
+// PID is specified in flags high 32-bits.
+#define OB_STRMAP_FLAGS_WITH_PROCESS_PID       0x08
+
 //
 // STRMAP BELOW:
 //
@@ -929,7 +946,7 @@ _Success_(return)
 BOOL ObStrMap_PushPtrWW(_In_opt_ POB_STRMAP psm, _In_opt_ LPCWSTR wsz, _Out_opt_ LPWSTR *pwszDst, _Out_opt_ PDWORD pcbwDst);
 
 /*
-* Push / Insert into the ObStrMap. Result pointer is dependant on fWideChar flag.
+* Push / Insert into the ObStrMap. Result pointer is dependent on fWideChar flag.
 * -- psm
 * -- usz
 * -- puszDst = ptr to utf-8 _OR_ wide string depending on fWideChar
