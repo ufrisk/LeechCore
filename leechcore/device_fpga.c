@@ -2871,12 +2871,17 @@ BOOL DeviceFPGA_Synch_RxTlpSynchronous(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONT
 {
     DWORD status;
     BOOL fRetry = FALSE, fTransportError = FALSE;
-    DWORD i = 0, j, cdwTlp = 0, cbReadRxBuf;
+    DWORD i = 0, j, cbReadRxBuf;
     BYTE pbTlp[TLP_RX_MAX_SIZE];
     PDWORD pdwTlp = (PDWORD)pbTlp;
     DWORD dwStatus, *pdwData, cbRx;
+    DEVICE_FPGA_SESSION_TLP_FRAME_STATE TlpFrame = { 0 };
+    DEVICE_FPGA_SESSION_TLP_FRAME_ACTION FrameAction;
     DEVICE_FPGA_SESSION_WAIT_RESULT ReadResult;
     if(!ctx->fTransportUsable) { return TRUE; }
+    TlpFrame.fRequireFirst =
+        (ctx->wFpgaVersionMajor > 4) ||
+        ((ctx->wFpgaVersionMajor == 4) && (ctx->wFpgaVersionMinor >= 13));
     // larger read buffer slows down FT_ReadPipe so set it fairly tight if possible.
     ctx->rxbuf.cb = 0;
     cbReadRxBuf = ctx->dev.f2232h ? ctx->rxbuf.cbMax :
@@ -2934,26 +2939,30 @@ BOOL DeviceFPGA_Synch_RxTlpSynchronous(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONT
                 continue;
             }
             for(j = 0; j < 7; j++) {
-                if((dwStatus & 0x03) == 0x00) { // PCIe TLP
-                    pdwTlp[cdwTlp] = *pdwData;
-                    cdwTlp++;
-                    if(cdwTlp >= TLP_RX_MAX_SIZE / sizeof(DWORD)) { return fTransportError; }
+                FrameAction = DeviceFPGA_Session_TlpFrameStep(
+                    &TlpFrame,
+                    (BYTE)dwStatus,
+                    TLP_RX_MAX_SIZE_IN_DWORDS);
+                if((FrameAction == DEVICE_FPGA_SESSION_TLP_FRAME_APPEND) ||
+                   (FrameAction == DEVICE_FPGA_SESSION_TLP_FRAME_COMPLETE) ||
+                   (FrameAction == DEVICE_FPGA_SESSION_TLP_FRAME_RESTART)) {
+                    pdwTlp[TlpFrame.cdwTlp - 1] = *pdwData;
                 }
-                if((dwStatus & 0x07) == 0x04) { // PCIe TLP and LAST
-                    if((cdwTlp >= 3) && (cdwTlp <= TLP_RX_MAX_SIZE_IN_DWORDS)) {
-                        if(ctxLC->fPrintf[LC_PRINTF_VVV]) {
-                            TLP_Print(ctxLC, pbTlp, cdwTlp << 2, FALSE);
-                        }
-                        if(ctx->tlp_callback.pBqRx) {
-                            DeviceFPGA_RxTlp_QueueUserCallback(ctx, (SIZE_T)cdwTlp << 2, pbTlp);
-                        }
-                        if(ctx->hRxTlpCallbackFn) {
-                            ctx->hRxTlpCallbackFn(ctx->pMRdBufferX, pbTlp, cdwTlp << 2);
-                        }
-                    } else {
-                        lcprintf(ctxLC, "Device Info: FPGA: Bad PCIe TLP received! Should not happen!\n");
+                if(FrameAction == DEVICE_FPGA_SESSION_TLP_FRAME_RESTART) {
+                    lcprintfvv(ctxLC, "Device Info: FPGA: TLP framing resynchronized at FIRST marker.\n");
+                } else if(FrameAction == DEVICE_FPGA_SESSION_TLP_FRAME_MALFORMED) {
+                    lcprintf(ctxLC, "Device Info: FPGA: Bad PCIe TLP received! Should not happen!\n");
+                } else if(FrameAction == DEVICE_FPGA_SESSION_TLP_FRAME_COMPLETE) {
+                    if(ctxLC->fPrintf[LC_PRINTF_VVV]) {
+                        TLP_Print(ctxLC, pbTlp, TlpFrame.cdwTlp << 2, FALSE);
                     }
-                    cdwTlp = 0;
+                    if(ctx->tlp_callback.pBqRx) {
+                        DeviceFPGA_RxTlp_QueueUserCallback(ctx, (SIZE_T)TlpFrame.cdwTlp << 2, pbTlp);
+                    }
+                    if(ctx->hRxTlpCallbackFn) {
+                        ctx->hRxTlpCallbackFn(ctx->pMRdBufferX, pbTlp, TlpFrame.cdwTlp << 2);
+                    }
+                    TlpFrame.cdwTlp = 0;
                 }
                 pdwData++;
                 dwStatus >>= 4;
@@ -2961,7 +2970,7 @@ BOOL DeviceFPGA_Synch_RxTlpSynchronous(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONT
             i += 8 * 4;
         }
         // return upon (successful) finish!
-        if((cdwTlp == 0) || fRetry || (ctx->rxbuf.cbMax - ctx->rxbuf.cb < 0x400)) {
+        if((TlpFrame.cdwTlp == 0) || fRetry || (ctx->rxbuf.cbMax - ctx->rxbuf.cb < 0x400)) {
             return fTransportError;
         }
         // read retry should be attempted (in case of partial tlp received at the end)
@@ -3471,7 +3480,12 @@ DWORD DeviceFPGA_Async2_Read_RxTlpSingle(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CO
 {
     BYTE pbTlp[TLP_RX_MAX_SIZE];
     PDWORD pdwTlp = (PDWORD)pbTlp;
-    DWORD i = 0, j, dwStatus, cdwTlp = 0, iStartWord;
+    DWORD i = 0, j, dwStatus, iStartWord;
+    DEVICE_FPGA_SESSION_TLP_FRAME_STATE TlpFrame = { 0 };
+    DEVICE_FPGA_SESSION_TLP_FRAME_ACTION FrameAction;
+    TlpFrame.fRequireFirst =
+        (ctx->wFpgaVersionMajor > 4) ||
+        ((ctx->wFpgaVersionMajor == 4) && (ctx->wFpgaVersionMinor >= 13));
     // skip over initial ftdi workaround dummy fillers / non valid octa-dwords
     while((i < cdwData) && ((pdwData[i] & 0xf0000000) != 0xe0000000)) {
         i++;
@@ -3490,27 +3504,45 @@ DWORD DeviceFPGA_Async2_Read_RxTlpSingle(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CO
             continue;
         }
         for(j = 0; j < 7; j++, i++) {
-            if((dwStatus & 0x03) == 0x00) { // PCIe TLP
-                if(cdwTlp >= TLP_RX_MAX_SIZE / sizeof(DWORD)) {
-                    // TODO: malformed TLP
-                    pdwData[iStartWord] = pdwData[iStartWord] | (0xffffffff >> (28 - (j << 2)));
-                    return iStartWord | 0x80000000;
-                }
-                pdwTlp[cdwTlp++] = pdwData[i];
+#ifdef LINUX
+            /*
+             * Completion payload DWORDs normally remain inside a frame with no
+             * status flags. Keep FIRST/LAST/error handling in the shared state
+             * machine, but avoid its branches for this dominant Linux hot path.
+             */
+            if(TlpFrame.fInTlp &&
+               !(dwStatus & 0x0f) &&
+               (TlpFrame.cdwTlp < TLP_RX_MAX_SIZE_IN_DWORDS)) {
+                pdwTlp[TlpFrame.cdwTlp++] = pdwData[i];
+                dwStatus >>= 4;
+                continue;
             }
-            if((dwStatus & 0x07) == 0x04) { // PCIe TLP and LAST
-                if((cdwTlp < 3) || (cdwTlp > TLP_RX_MAX_SIZE_IN_DWORDS)) {
-                    printf("Device Info: FPGA: Bad PCIe TLP received! Should not happen!\n");
-                    pdwData[iStartWord] = pdwData[iStartWord] | (0xffffffff >> (28 - (j << 2)));
-                    return iStartWord | 0x80000000;
+#endif /* LINUX */
+            FrameAction = DeviceFPGA_Session_TlpFrameStep(
+                &TlpFrame,
+                (BYTE)dwStatus,
+                TLP_RX_MAX_SIZE_IN_DWORDS);
+            if(FrameAction == DEVICE_FPGA_SESSION_TLP_FRAME_IGNORE) {
+                if((dwStatus & 0x0b) == 0x00) {
+                    pdwData[iStartWord] |= 1U << (j << 2);
                 }
+            } else if(FrameAction == DEVICE_FPGA_SESSION_TLP_FRAME_MALFORMED) {
+                printf("Device Info: FPGA: Bad PCIe TLP received! Should not happen!\n");
+                pdwData[iStartWord] = pdwData[iStartWord] | (0xffffffff >> (28 - (j << 2)));
+                return iStartWord | 0x80000000;
+            } else {
+                pdwTlp[TlpFrame.cdwTlp - 1] = pdwData[i];
+            }
+            if(FrameAction == DEVICE_FPGA_SESSION_TLP_FRAME_RESTART) {
+                lcprintfvv(ctxLC, "Device Info: FPGA: TLP framing resynchronized at FIRST marker.\n");
+            } else if(FrameAction == DEVICE_FPGA_SESSION_TLP_FRAME_COMPLETE) {
                 if(ctxLC->fPrintf[LC_PRINTF_VVV]) {
-                    TLP_Print(ctxLC, pbTlp, cdwTlp << 2, FALSE);
+                    TLP_Print(ctxLC, pbTlp, TlpFrame.cdwTlp << 2, FALSE);
                 }
                 if(ctx->tlp_callback.pBqRx) {
-                    DeviceFPGA_RxTlp_QueueUserCallback(ctx, (SIZE_T)cdwTlp << 2, pbTlp);
+                    DeviceFPGA_RxTlp_QueueUserCallback(ctx, (SIZE_T)TlpFrame.cdwTlp << 2, pbTlp);
                 }
-                DeviceFPGA_Async2_Read_RxTlpSingle_MRdCpl(ctxLC, ctx, pbTlp, cdwTlp << 2);
+                DeviceFPGA_Async2_Read_RxTlpSingle_MRdCpl(ctxLC, ctx, pbTlp, TlpFrame.cdwTlp << 2);
                 pdwData[iStartWord] = pdwData[iStartWord] | (0xffffffff >> (28 - (j << 2)));
                 return iStartWord | 0x80000000;
             }
@@ -4226,7 +4258,12 @@ DWORD DeviceFPGA_SynchOldAsync_Tlp(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_
 {
     BYTE pbTlp[TLP_RX_MAX_SIZE];
     PDWORD pdwTlp = (PDWORD)pbTlp;
-    DWORD i = 0, j, dwStatus, cdwTlp = 0, iStartWord;
+    DWORD i = 0, j, dwStatus, iStartWord;
+    DEVICE_FPGA_SESSION_TLP_FRAME_STATE TlpFrame = { 0 };
+    DEVICE_FPGA_SESSION_TLP_FRAME_ACTION FrameAction;
+    TlpFrame.fRequireFirst =
+        (ctx->wFpgaVersionMajor > 4) ||
+        ((ctx->wFpgaVersionMajor == 4) && (ctx->wFpgaVersionMinor >= 13));
     // skip over initial ftdi workaround dummy fillers / non valid octa-dwords
     while((i < cdwData) && ((pdwData[i] == 0x55556666) || ((pdwData[i] & 0xf0000000) != 0xe0000000))) {
         i++;
@@ -4240,28 +4277,32 @@ DWORD DeviceFPGA_SynchOldAsync_Tlp(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_
             continue;
         }
         for(j = 0; j < 7; j++, i++) {
-            if((dwStatus & 0x03) == 0x00) { // PCIe TLP
-                if(cdwTlp >= TLP_RX_MAX_SIZE / sizeof(DWORD)) {
-                    // TODO: malformed TLP
-                    pdwData[iStartWord] = pdwData[iStartWord] | (0xffffffff >> (28 - (j << 2)));
-                    return iStartWord;
+            FrameAction = DeviceFPGA_Session_TlpFrameStep(
+                &TlpFrame,
+                (BYTE)dwStatus,
+                TLP_RX_MAX_SIZE_IN_DWORDS);
+            if(FrameAction == DEVICE_FPGA_SESSION_TLP_FRAME_IGNORE) {
+                if((dwStatus & 0x0b) == 0x00) {
+                    pdwData[iStartWord] |= 1U << (j << 2);
                 }
-                pdwTlp[cdwTlp++] = pdwData[i];
+            } else if(FrameAction == DEVICE_FPGA_SESSION_TLP_FRAME_MALFORMED) {
+                printf("Device Info: FPGA: Bad PCIe TLP received! Should not happen!\n");
+                pdwData[iStartWord] = pdwData[iStartWord] | (0xffffffff >> (28 - (j << 2)));
+                return iStartWord;
+            } else {
+                pdwTlp[TlpFrame.cdwTlp - 1] = pdwData[i];
             }
-            if((dwStatus & 0x07) == 0x04) { // PCIe TLP and LAST
-                if(cdwTlp < 3) {
-                    printf("Device Info: FPGA: Bad PCIe TLP received! Should not happen!\n");
-                    pdwData[iStartWord] = pdwData[iStartWord] | (0xffffffff >> (28 - (j << 2)));
-                    return iStartWord;
-                }
+            if(FrameAction == DEVICE_FPGA_SESSION_TLP_FRAME_RESTART) {
+                lcprintfvv(ctxLC, "Device Info: FPGA: TLP framing resynchronized at FIRST marker.\n");
+            } else if(FrameAction == DEVICE_FPGA_SESSION_TLP_FRAME_COMPLETE) {
                 if(ctxLC->fPrintf[LC_PRINTF_VVV]) {
-                    TLP_Print(ctxLC, pbTlp, cdwTlp << 2, FALSE);
+                    TLP_Print(ctxLC, pbTlp, TlpFrame.cdwTlp << 2, FALSE);
                 }
                 if(ctx->tlp_callback.pBqRx) {
-                    DeviceFPGA_RxTlp_QueueUserCallback(ctx, (SIZE_T)cdwTlp << 2, pbTlp);
+                    DeviceFPGA_RxTlp_QueueUserCallback(ctx, (SIZE_T)TlpFrame.cdwTlp << 2, pbTlp);
                 }
                 if(ctx->hRxTlpCallbackFn) {
-                    ctx->hRxTlpCallbackFn(ctx->pMRdBufferX, pbTlp, cdwTlp << 2);
+                    ctx->hRxTlpCallbackFn(ctx->pMRdBufferX, pbTlp, TlpFrame.cdwTlp << 2);
                 }
                 pdwData[iStartWord] = pdwData[iStartWord] | (0xffffffff >> (28 - (j << 2)));
                 return iStartWord;

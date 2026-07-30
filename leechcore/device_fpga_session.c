@@ -16,6 +16,55 @@ static DWORD DeviceFPGA_Session_ReadDWORD(_In_reads_(sizeof(DWORD)) PBYTE pb)
     return dw;
 }
 
+#ifndef LINUX
+DEVICE_FPGA_SESSION_TLP_FRAME_ACTION DeviceFPGA_Session_TlpFrameStep(
+    _Inout_ PDEVICE_FPGA_SESSION_TLP_FRAME_STATE pState,
+    _In_ BYTE bStatus,
+    _In_ DWORD cdwMax
+)
+{
+    DEVICE_FPGA_SESSION_TLP_FRAME_ACTION Action;
+    if(!pState || !cdwMax) {
+        return DEVICE_FPGA_SESSION_TLP_FRAME_MALFORMED;
+    }
+    bStatus &= 0x0f;
+    if(bStatus & 0x03) {
+        return DEVICE_FPGA_SESSION_TLP_FRAME_IGNORE;
+    }
+    if(bStatus & 0x08) {
+        Action = pState->fInTlp ?
+            DEVICE_FPGA_SESSION_TLP_FRAME_RESTART :
+            DEVICE_FPGA_SESSION_TLP_FRAME_APPEND;
+        pState->fInTlp = TRUE;
+        pState->cdwTlp = 0;
+    } else {
+        if(!pState->fInTlp) {
+            if(pState->fRequireFirst) {
+                return DEVICE_FPGA_SESSION_TLP_FRAME_IGNORE;
+            }
+            pState->fInTlp = TRUE;
+            pState->cdwTlp = 0;
+        }
+        Action = DEVICE_FPGA_SESSION_TLP_FRAME_APPEND;
+    }
+    if(pState->cdwTlp >= cdwMax) {
+        pState->fInTlp = FALSE;
+        pState->cdwTlp = 0;
+        return DEVICE_FPGA_SESSION_TLP_FRAME_MALFORMED;
+    }
+    pState->cdwTlp++;
+    if(bStatus & 0x04) {
+        pState->fInTlp = FALSE;
+        if(pState->cdwTlp < 3) {
+            pState->cdwTlp = 0;
+            return DEVICE_FPGA_SESSION_TLP_FRAME_MALFORMED;
+        }
+        return DEVICE_FPGA_SESSION_TLP_FRAME_COMPLETE;
+    }
+    return Action;
+}
+#endif /* LINUX */
+
 DEVICE_FPGA_SESSION_WAIT_RESULT DeviceFPGA_Session_WaitOverlapped(
     _In_ HANDLE hFTDI,
     _In_ LPOVERLAPPED pOverlapped,

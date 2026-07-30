@@ -273,6 +273,89 @@ static VOID TestV3IdentityAcceptsExplicitZeroFpgaId(VOID)
     ASSERT_IDENTITY(Identity, 4, 19, 0);
 }
 
+static VOID TestTlpFrameIgnoresContinuationUntilFirst(VOID)
+{
+    DEVICE_FPGA_SESSION_TLP_FRAME_STATE State = { TRUE, FALSE, 0 };
+    ASSERT_EQ(
+        DeviceFPGA_Session_TlpFrameStep(&State, 0x00, 260),
+        DEVICE_FPGA_SESSION_TLP_FRAME_IGNORE);
+    ASSERT_FALSE(State.fInTlp);
+    ASSERT_EQ(State.cdwTlp, 0);
+    ASSERT_EQ(
+        DeviceFPGA_Session_TlpFrameStep(&State, 0x04, 260),
+        DEVICE_FPGA_SESSION_TLP_FRAME_IGNORE);
+    ASSERT_FALSE(State.fInTlp);
+    ASSERT_EQ(State.cdwTlp, 0);
+}
+
+static VOID TestTlpFrameCompletesAfterExplicitFirst(VOID)
+{
+    DEVICE_FPGA_SESSION_TLP_FRAME_STATE State = { TRUE, FALSE, 0 };
+    ASSERT_EQ(
+        DeviceFPGA_Session_TlpFrameStep(&State, 0x08, 260),
+        DEVICE_FPGA_SESSION_TLP_FRAME_APPEND);
+    ASSERT_EQ(
+        DeviceFPGA_Session_TlpFrameStep(&State, 0x00, 260),
+        DEVICE_FPGA_SESSION_TLP_FRAME_APPEND);
+    ASSERT_EQ(
+        DeviceFPGA_Session_TlpFrameStep(&State, 0x04, 260),
+        DEVICE_FPGA_SESSION_TLP_FRAME_COMPLETE);
+    ASSERT_FALSE(State.fInTlp);
+    ASSERT_EQ(State.cdwTlp, 3);
+}
+
+static VOID TestTlpFrameRestartsAtNewFirst(VOID)
+{
+    DEVICE_FPGA_SESSION_TLP_FRAME_STATE State = { TRUE, FALSE, 0 };
+    ASSERT_EQ(
+        DeviceFPGA_Session_TlpFrameStep(&State, 0x08, 260),
+        DEVICE_FPGA_SESSION_TLP_FRAME_APPEND);
+    ASSERT_EQ(
+        DeviceFPGA_Session_TlpFrameStep(&State, 0x00, 260),
+        DEVICE_FPGA_SESSION_TLP_FRAME_APPEND);
+    ASSERT_EQ(
+        DeviceFPGA_Session_TlpFrameStep(&State, 0x08, 260),
+        DEVICE_FPGA_SESSION_TLP_FRAME_RESTART);
+    ASSERT_TRUE(State.fInTlp);
+    ASSERT_EQ(State.cdwTlp, 1);
+}
+
+static VOID TestTlpFrameRejectsShortAndOversizePackets(VOID)
+{
+    DEVICE_FPGA_SESSION_TLP_FRAME_STATE State = { TRUE, FALSE, 0 };
+    ASSERT_EQ(
+        DeviceFPGA_Session_TlpFrameStep(&State, 0x0c, 260),
+        DEVICE_FPGA_SESSION_TLP_FRAME_MALFORMED);
+    ASSERT_FALSE(State.fInTlp);
+    ASSERT_EQ(State.cdwTlp, 0);
+    ASSERT_EQ(
+        DeviceFPGA_Session_TlpFrameStep(&State, 0x08, 1),
+        DEVICE_FPGA_SESSION_TLP_FRAME_APPEND);
+    ASSERT_EQ(
+        DeviceFPGA_Session_TlpFrameStep(&State, 0x00, 1),
+        DEVICE_FPGA_SESSION_TLP_FRAME_MALFORMED);
+    ASSERT_FALSE(State.fInTlp);
+    ASSERT_EQ(State.cdwTlp, 0);
+}
+
+static VOID TestTlpFrameAcceptsLegacyStreamWithoutFirst(VOID)
+{
+    DEVICE_FPGA_SESSION_TLP_FRAME_STATE State = { FALSE, FALSE, 0 };
+    ASSERT_EQ(
+        DeviceFPGA_Session_TlpFrameStep(&State, 0x00, 260),
+        DEVICE_FPGA_SESSION_TLP_FRAME_APPEND);
+    ASSERT_TRUE(State.fInTlp);
+    ASSERT_EQ(State.cdwTlp, 1);
+    ASSERT_EQ(
+        DeviceFPGA_Session_TlpFrameStep(&State, 0x00, 260),
+        DEVICE_FPGA_SESSION_TLP_FRAME_APPEND);
+    ASSERT_EQ(
+        DeviceFPGA_Session_TlpFrameStep(&State, 0x04, 260),
+        DEVICE_FPGA_SESSION_TLP_FRAME_COMPLETE);
+    ASSERT_FALSE(State.fInTlp);
+    ASSERT_EQ(State.cdwTlp, 3);
+}
+
 typedef struct tdWAIT_SCRIPT {
     ULONG pStatus[8];
     ULONG pTransferred[8];
@@ -1446,15 +1529,20 @@ int main(void)
     TestV3IdentityRequiresEveryIdentityCommand();
     TestV3IdentityPublishesCompleteReply();
     TestV3IdentityAcceptsExplicitZeroFpgaId();
-    TestWaitUsesEventWithoutPolling();
-    TestWaitFallsBackToPollingAfterEarlyEvent();
-    TestWaitCanBypassSignaledEventForPolling();
-    TestWaitEventTimeoutDoesNotPoll();
+    TestTlpFrameIgnoresContinuationUntilFirst();
+    TestTlpFrameCompletesAfterExplicitFirst();
+    TestTlpFrameRestartsAtNewFirst();
+    TestTlpFrameRejectsShortAndOversizePackets();
+    TestTlpFrameAcceptsLegacyStreamWithoutFirst();
     TestBoundedReadReturnsImmediateCompletion();
     TestBoundedReadWaitsForPendingCompletion();
     TestBoundedReadPendingForeverTimesOut();
     TestBoundedReadReturnsSubmissionErrorWithoutPolling();
     TestBoundedReadRejectsInvalidArguments();
+    TestWaitUsesEventWithoutPolling();
+    TestWaitFallsBackToPollingAfterEarlyEvent();
+    TestWaitCanBypassSignaledEventForPolling();
+    TestWaitEventTimeoutDoesNotPoll();
     TestWaitCompletesWithoutBlockingDriverCall();
     TestWaitPendingForeverTimesOutAtDeadline();
     TestWaitReturnsDriverErrorWithoutRetry();
@@ -1480,6 +1568,6 @@ int main(void)
         printf("%d test assertion(s) failed.\n", g_cFailures);
         return 1;
     }
-    printf("PASS: 42 FPGA session protocol cases.\n");
+    printf("PASS: 47 FPGA session protocol cases.\n");
     return 0;
 }
