@@ -896,8 +896,6 @@ ftdi_retry_old:
             }
             goto fail;
         }
-        ctx->dev.pfnFT_AbortPipe(ctx->dev.hFTDI, 0x02);
-        ctx->dev.pfnFT_AbortPipe(ctx->dev.hFTDI, 0x82);
         pfnFT_SetSuspendTimeout(ctx->dev.hFTDI, 0);
         // Check FTDI chip configuration and update if required
         status = pfnFT_GetChipConfiguration(ctx->dev.hFTDI, &oCfgOld);
