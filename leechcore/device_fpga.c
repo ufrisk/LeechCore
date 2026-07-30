@@ -14,16 +14,13 @@
 #include "leechcore_device.h"
 #include "leechcore_internal.h"
 #include "oscompatibility.h"
+#include "device_fpga_session.h"
 #include "util.h"
 #include "ob/ob.h"
 
 //-------------------------------------------------------------------------------
 // FPGA defines below.
 //-------------------------------------------------------------------------------
-
-#define FPGA_CMD_VERSION_MAJOR          0x01
-#define FPGA_CMD_DEVICE_ID              0x03
-#define FPGA_CMD_VERSION_MINOR          0x05
 
 #define FPGA_REG_CORE                 0x0003
 #define FPGA_REG_PCIE                 0x0001
@@ -1213,10 +1210,9 @@ VOID DeviceFPGA_Close(_Inout_ PLC_CONTEXT ctxLC)
 _Success_(return)
 BOOL DeviceFPGA_ConfigRead(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ WORD wBaseAddr, _Out_writes_(cb) PBYTE pb, _In_ WORD cb, _In_ WORD flags)
 {
-    BOOL f, fReturn = FALSE;
+    BOOL fReturn = FALSE;
     PBYTE pbRxTx = NULL;
-    DWORD i, j, status, dwStatus, dwData, cbRxTx = 0;
-    PDWORD pdwData;
+    DWORD status, cbRxTx = 0;
     WORD wAddr;
     if(!cb || (wBaseAddr + cb > 0x1000)) { goto fail; }
     if(!(pbRxTx = LocalAlloc(LMEM_ZEROINIT, 0x20000))) { goto fail; }
@@ -1241,35 +1237,7 @@ BOOL DeviceFPGA_ConfigRead(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ WORD wBaseAddr, _
     // READ and interpret result
     status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, pbRxTx, 0x20000, &cbRxTx, NULL);
     if(status) { goto fail; }
-    ZeroMemory(pb, cb);
-    for(i = 0; i < cbRxTx; i += 32) {
-        while(*(PDWORD)(pbRxTx + i) == 0x55556666) { // skip over ftdi workaround dummy fillers
-            i += 4;
-            if(i + 32 > cbRxTx) { goto fail; }
-        }
-        dwStatus = *(PDWORD)(pbRxTx + i);
-        pdwData = (PDWORD)(pbRxTx + i + 4);
-        if((dwStatus & 0xf0000000) != 0xe0000000) { continue; }
-        for(j = 0; j < 7; j++) {
-            f = (dwStatus & 0x0f) == (flags & 0x03);
-            dwData = *pdwData;
-            pdwData++;                              // move ptr to next data
-            dwStatus >>= 4;                         // move to next status
-            if(!f) { continue; }                    // status src flags does not match source
-            wAddr = _byteswap_ushort((WORD)dwData);
-            wAddr -= (flags & 0xC000) + wBaseAddr;  // adjust for base address and read-write config memory
-            if(wAddr == 0xffff) {   // 1st unaligned byte
-                *pb = (dwData >> 24) & 0xff;
-            }
-            if(wAddr >= cb) { continue; }           // address read is out of range
-            if(wAddr == cb - 1) {   // last byte
-                *(PBYTE)(pb + wAddr) = (dwData >> 16) & 0xff;
-            } else {                // normal two-bytes
-                *(PWORD)(pb + wAddr) = (dwData >> 16) & 0xffff;
-            }
-        }
-    }
-    fReturn = TRUE;
+    fReturn = DeviceFPGA_Session_ParseConfigReply(pbRxTx, cbRxTx, wBaseAddr, pb, cb, flags);
 fail:
     LocalFree(pbRxTx);
     return fReturn;
@@ -1787,14 +1755,34 @@ VOID DeviceFPGA_HotResetV4(_In_ PDEVICE_CONTEXT_FPGA ctx)
 }
 
 _Success_(return)
+static BOOL DeviceFPGA_GetDeviceID_FpgaVersionV4_ConfigRead(
+    _In_ PVOID pvContext,
+    _In_ WORD wBaseAddr,
+    _Out_writes_(cb) PBYTE pb,
+    _In_ WORD cb,
+    _In_ WORD flags
+)
+{
+    return DeviceFPGA_ConfigRead((PDEVICE_CONTEXT_FPGA)pvContext, wBaseAddr, pb, cb, flags);
+}
+
+_Success_(return)
 BOOL DeviceFPGA_GetDeviceID_FpgaVersionV4(_In_ PDEVICE_CONTEXT_FPGA ctx)
 {
+    DEVICE_FPGA_IDENTITY Identity;
     WORD wbsDeviceId = 0, wMagicPCIe = 0;
     DWORD dwInactivityTimer = 0x000186a0;       // set inactivity timer to 1ms ( 0x0186a0 * 100MHz ) [only later activated on UDP bitstreams]
     DWORD cNfWarm = 0;
-    if(!DeviceFPGA_ConfigRead(ctx, 0x0008, (PBYTE)&ctx->wFpgaVersionMajor, 1, FPGA_REG_CORE | FPGA_REG_READONLY) || ctx->wFpgaVersionMajor < 4) { return FALSE; }
-    DeviceFPGA_ConfigRead(ctx, 0x0009, (PBYTE)&ctx->wFpgaVersionMinor, 1, FPGA_REG_CORE | FPGA_REG_READONLY);
-    DeviceFPGA_ConfigRead(ctx, 0x000a, (PBYTE)&ctx->wFpgaID, 1, FPGA_REG_CORE | FPGA_REG_READONLY);
+    if(!DeviceFPGA_Session_ReadV4Identity(
+        ctx,
+        DeviceFPGA_GetDeviceID_FpgaVersionV4_ConfigRead,
+        FPGA_REG_CORE | FPGA_REG_READONLY,
+        &Identity)) {
+        return FALSE;
+    }
+    ctx->wFpgaVersionMajor = Identity.wVersionMajor;
+    ctx->wFpgaVersionMinor = Identity.wVersionMinor;
+    ctx->wFpgaID = Identity.wFpgaID;
     DeviceFPGA_ConfigWrite(ctx, 0x0008, (PBYTE)&dwInactivityTimer, 4, FPGA_REG_CORE | FPGA_REG_READWRITE);
     // PCIe
     while(!wbsDeviceId && (cNfWarm++ < 4)) {
@@ -1810,71 +1798,47 @@ BOOL DeviceFPGA_GetDeviceID_FpgaVersionV4(_In_ PDEVICE_CONTEXT_FPGA ctx)
     return TRUE;
 }
 
-VOID DeviceFPGA_GetDeviceID_FpgaVersionV3(_In_ PDEVICE_CONTEXT_FPGA ctx)
+_Success_(return)
+BOOL DeviceFPGA_GetDeviceID_FpgaVersionV3(_In_ PDEVICE_CONTEXT_FPGA ctx)
 {
     DWORD status;
-    DWORD cbTX, cbRX, i, j;
+    DWORD cbTX, cbRX;
     BYTE pbRX[0x1000];
-    DWORD dwStatus, dwData, cdwCfg = 0;
-PDWORD pdwData;
-BYTE pbTX[] = {
-    // cfg status: (pcie bus,dev,fn id)
-    0x00, 0x00, 0x00, 0x00,  0x00, 0x00, 0x01, 0x77,
-    // cmd msg: FPGA bitstream version (major)
-    0x00, 0x00, 0x00, 0x00,  0x01, 0x00, 0x03, 0x77,
-    // cmd msg: FPGA bitstream version (minor)
-    0x00, 0x00, 0x00, 0x00,  0x05, 0x00, 0x03, 0x77,
-    // cmd msg: FPGA bitstream device id
-    0x00, 0x00, 0x00, 0x00,  0x03, 0x00, 0x03, 0x77
-};
-// Write and read data from device.
-status = ctx->dev.pfnFT_WritePipe(ctx->dev.hFTDI, 0x02, pbTX, sizeof(pbTX), &cbTX, NULL);
-if(status) { return; }
-Sleep(10);
-status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, pbRX, sizeof(pbRX), &cbRX, NULL);
-if(status) { return; }
-// Interpret read data
-for(i = 0; i < cbRX; i += 32) {
-    while(*(PDWORD)(pbRX + i) == 0x55556666) { // skip over ftdi workaround dummy fillers
-        i += 4;
-        if(i + 32 > cbRX) { return; }
+    WORD wPcieDeviceId;
+    DEVICE_FPGA_IDENTITY Identity;
+    BYTE pbTX[] = {
+        // cfg status: (pcie bus,dev,fn id)
+        0x00, 0x00, 0x00, 0x00,  0x00, 0x00, 0x01, 0x77,
+        // cmd msg: FPGA bitstream version (major)
+        0x00, 0x00, 0x00, 0x00,  0x01, 0x00, 0x03, 0x77,
+        // cmd msg: FPGA bitstream version (minor)
+        0x00, 0x00, 0x00, 0x00,  0x05, 0x00, 0x03, 0x77,
+        // cmd msg: FPGA bitstream device id
+        0x00, 0x00, 0x00, 0x00,  0x03, 0x00, 0x03, 0x77
+    };
+    // Write and read data from device.
+    status = ctx->dev.pfnFT_WritePipe(ctx->dev.hFTDI, 0x02, pbTX, sizeof(pbTX), &cbTX, NULL);
+    if(status) { return FALSE; }
+    Sleep(10);
+    status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, pbRX, sizeof(pbRX), &cbRX, NULL);
+    if(status) { return FALSE; }
+    if(!DeviceFPGA_Session_ParseV3Identity(pbRX, cbRX, &Identity, &wPcieDeviceId)) {
+        return FALSE;
     }
-    dwStatus = *(PDWORD)(pbRX + i);
-    pdwData = (PDWORD)(pbRX + i + 4);
-    if((dwStatus & 0xf0000000) != 0xe0000000) { continue; }
-    for(j = 0; j < 7; j++) {
-        dwData = *pdwData;
-        if((dwStatus & 0x03) == 0x03) { // CMD REPLY (or filler)
-            switch(dwData >> 24) {
-                case FPGA_CMD_VERSION_MAJOR:
-                    ctx->wFpgaVersionMajor = (WORD)dwData;
-                    break;
-                case FPGA_CMD_VERSION_MINOR:
-                    ctx->wFpgaVersionMinor = (WORD)dwData;
-                    break;
-                case FPGA_CMD_DEVICE_ID:
-                    ctx->wFpgaID = (WORD)dwData;
-                    break;
-            }
-        }
-        if((dwStatus & 0x03) == 0x01) { // PCIe CFG REPLY
-            if(((++cdwCfg % 2) == 0) && (WORD)dwData) {    // DeviceID: (pcie bus,dev,fn id)
-                ctx->wDeviceId = (WORD)dwData;
-            }
-        }
-        pdwData++;
-        dwStatus >>= 4;
-    }
-}
-ctx->phySupported = (ctx->wFpgaVersionMajor >= 3) ? DeviceFPGA_GetSetPHYv3(ctx, FALSE) : FALSE;
+    ctx->wFpgaVersionMajor = Identity.wVersionMajor;
+    ctx->wFpgaVersionMinor = Identity.wVersionMinor;
+    ctx->wFpgaID = Identity.wFpgaID;
+    ctx->wDeviceId = wPcieDeviceId;
+    ctx->phySupported = (ctx->wFpgaVersionMajor >= 3) ? DeviceFPGA_GetSetPHYv3(ctx, FALSE) : FALSE;
+    return TRUE;
 }
 
-VOID DeviceFPGA_GetDeviceID_FpgaVersion(_In_ PDEVICE_CONTEXT_FPGA ctx)
+_Success_(return)
+BOOL DeviceFPGA_GetDeviceID_FpgaVersion(_In_ PDEVICE_CONTEXT_FPGA ctx)
 {
     DeviceFPGA_GetDeviceId_FpgaVersion_ClearPipe(ctx);
-    if(!DeviceFPGA_GetDeviceID_FpgaVersionV4(ctx)) {
-        DeviceFPGA_GetDeviceID_FpgaVersionV3(ctx);
-    }
+    if(DeviceFPGA_GetDeviceID_FpgaVersionV4(ctx)) { return TRUE; }
+    return DeviceFPGA_GetDeviceID_FpgaVersionV3(ctx);
 }
 
 VOID DeviceFPGA_SetPerformanceProfile(_Inout_ PDEVICE_CONTEXT_FPGA ctx)
@@ -3971,8 +3935,7 @@ BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
     ctx->fRestartDevice = (1 == LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_RESTART_DEVICE));
     ctx->bAT = (BYTE)LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_ATS);
     ctx->fATS = ((ctx->bAT >= 1) && (ctx->bAT <= 3));
-    DeviceFPGA_GetDeviceID_FpgaVersion(ctx);
-    if(!ctx->wFpgaVersionMajor) {
+    if(!DeviceFPGA_GetDeviceID_FpgaVersion(ctx) || !ctx->wFpgaVersionMajor) {
         szDeviceError = "Unable to connect to FPGA device";
         goto fail;
     }

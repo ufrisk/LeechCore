@@ -27,6 +27,9 @@
     <ClCompile Include="device_fpga.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="device_fpga_session.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="device_pmem.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -111,6 +114,9 @@
       <Filter>Header Files\ob</Filter>
     </ClInclude>
     <ClInclude Include="charutil.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="device_fpga_session.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
