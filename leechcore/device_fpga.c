@@ -324,39 +324,25 @@ typedef struct tdDEVICE_CONTEXT_FPGA {
 
 static BOOL DeviceFPGA_OpenFTDIHandle(_Inout_ PDEVICE_CONTEXT_FPGA ctx);
 
-static BOOL DeviceFPGA_TransportIOAllowed(
-    _In_ PDEVICE_CONTEXT_FPGA ctx
-)
+static BOOL DeviceFPGA_TransportIOAllowed(_In_ PDEVICE_CONTEXT_FPGA ctx)
 {
     if(ctx->fCustomDriver) {
         return ctx->fTransportUsable || ctx->fTransportSetup;
     }
-    return
-        !ctx->fFT601 ||
-        ctx->fTransportUsable ||
-        ctx->fTransportSetup ||
-        ctx->fTransportRecoveryInProgress;
+    return !ctx->fFT601 || ctx->fTransportUsable || ctx->fTransportSetup || ctx->fTransportRecoveryInProgress;
 }
 
-static VOID DeviceFPGA_RecordReadOutcome(
-    _Inout_ PDEVICE_CONTEXT_FPGA ctx,
-    _In_ LC_READ_PAGE_RESULT result,
-    _In_ BOOL fRetryPass)
+static VOID DeviceFPGA_RecordReadOutcome(_Inout_ PDEVICE_CONTEXT_FPGA ctx, _In_ LC_READ_PAGE_RESULT result, _In_ BOOL fRetryPass)
 {
     AcquireSRWLockExclusive(&ctx->ReadCountersLock);
     FpgaReadPolicy_RecordPass(&ctx->ReadCounters, result, fRetryPass);
     ReleaseSRWLockExclusive(&ctx->ReadCountersLock);
 }
 
-static VOID DeviceFPGA_RecordRetryReplacement(
-    _Inout_ PDEVICE_CONTEXT_FPGA ctx,
-    _In_ DWORD cRetry)
+static VOID DeviceFPGA_RecordRetryReplacement(_Inout_ PDEVICE_CONTEXT_FPGA ctx, _In_ DWORD cRetry)
 {
     AcquireSRWLockExclusive(&ctx->ReadCountersLock);
-    ctx->ReadCounters.cRetryExhausted =
-        (ctx->ReadCounters.cRetryExhausted > cRetry)
-            ? ctx->ReadCounters.cRetryExhausted - cRetry
-            : 0;
+    ctx->ReadCounters.cRetryExhausted = (ctx->ReadCounters.cRetryExhausted > cRetry) ? ctx->ReadCounters.cRetryExhausted - cRetry : 0;
     ReleaseSRWLockExclusive(&ctx->ReadCountersLock);
 }
 
@@ -642,22 +628,19 @@ VOID TLP_CallbackMRdProbe(_Inout_ PFPGA_PROBE_CALLBACK pProbe, _In_ PBYTE pb, _I
     buf[1] = _byteswap_ulong(buf[1]);
     buf[2] = _byteswap_ulong(buf[2]);
     if((hdr->TypeFmt != TLP_CplD) && (hdr->TypeFmt != TLP_Cpl)) { return; }
-    if(!FpgaReadTagMap_Resolve(&pProbe->TagMap, hdrC->Tag, &iPage) ||
-        (iPage >= pProbe->cPages)) {
+    if(!FpgaReadTagMap_Resolve(&pProbe->TagMap, hdrC->Tag, &iPage) || (iPage >= pProbe->cPages)) {
         return;
     }
     observed = FpgaReadPolicy_ClassifyCompletion(hdr->TypeFmt == TLP_CplD, hdrC->Status);
     if(hdr->TypeFmt == TLP_CplD) {
         if((cb != 16) || (hdr->Length != 1) || (hdrC->ByteCount != 4) ||
-            (hdrC->LowerAddress != ((pProbe->qwBase + ((QWORD)iPage << 12)) & 0x7f)) ||
-            (observed != LC_READ_PAGE_RESULT_SUCCESS)) {
+            (hdrC->LowerAddress != ((pProbe->qwBase + ((QWORD)iPage << 12)) & 0x7f)) || (observed != LC_READ_PAGE_RESULT_SUCCESS)) {
             observed = LC_READ_PAGE_RESULT_PROTOCOL_ERROR;
         }
     } else if((cb != 12) || hdr->Length) {
         observed = LC_READ_PAGE_RESULT_PROTOCOL_ERROR;
     }
-    FpgaReadPolicy_Observe(pProbe->pStates + iPage, observed,
-        (observed == LC_READ_PAGE_RESULT_SUCCESS) ? 4 : 0);
+    FpgaReadPolicy_Observe(pProbe->pStates + iPage, observed, (observed == LC_READ_PAGE_RESULT_SUCCESS) ? 4 : 0);
     if(observed == LC_READ_PAGE_RESULT_SUCCESS) {
         pProbe->pbResultMap[iPage] = 1;
     }
@@ -994,13 +977,7 @@ ftdi_retry_old:
     pfnFT_GetChipConfiguration = (ULONG(WINAPI*)(HANDLE, PVOID))GetProcAddress(ctx->dev.hModule, "FT_GetChipConfiguration");
     pfnFT_SetChipConfiguration = (ULONG(WINAPI*)(HANDLE, PVOID))GetProcAddress(ctx->dev.hModule, "FT_SetChipConfiguration");
     pfnFT_SetSuspendTimeout = (ULONG(WINAPI*)(HANDLE, ULONG))GetProcAddress(ctx->dev.hModule, "FT_SetSuspendTimeout");
-    if(!ctx->dev.pfnFT_Create ||
-       !ctx->dev.pfnFT_ReadPipe ||
-       !ctx->dev.pfnFT_WritePipe ||
-       (fFT601 &&
-        (!ctx->dev.pfnFT_Close ||
-         !ctx->dev.pfnFT_AbortPipe ||
-         !ctx->dev.pfnFT_SetPipeTimeout))) {
+    if(!ctx->dev.pfnFT_Create || !ctx->dev.pfnFT_ReadPipe || !ctx->dev.pfnFT_WritePipe || (fFT601 && (!ctx->dev.pfnFT_Close || !ctx->dev.pfnFT_AbortPipe))) {
         szErrorReason = ctx->dev.pfnFT_ReadPipe ?
             "Unable to retrieve required functions from device driver dll/so/dylib." :
             "Unable to retrieve required functions from "DEVICE_FPGA_FT601_LIBRARY;
@@ -1013,9 +990,7 @@ ftdi_retry_old:
             fFailFTD3XXWU = fUseFTD3XXWU;
 #endif /* _WIN32 */
             if(!szErrorReason) {
-                szErrorReason = ctx->fOpenPipeTimeoutFailure ?
-                    "Unable to configure FT601 pipe timeouts" :
-                    "Unable to connect to FPGA device";
+                szErrorReason = ctx->fOpenPipeTimeoutFailure ? "Unable to configure FT601 pipe timeouts" : "Unable to connect to FPGA device";
             }
             goto fail;
         }
@@ -1059,13 +1034,7 @@ ftdi_retry_old:
             return DeviceFPGA_InitializeFT601(ctx, TRUE, FALSE);
         }
     }
-    ctx->async2.fOverlappedInitialized =
-        ctx->dev.pfnFT_GetOverlappedResult &&
-        ctx->dev.pfnFT_InitializeOverlapped &&
-        ctx->dev.pfnFT_ReleaseOverlapped &&
-        !ctx->dev.pfnFT_InitializeOverlapped(
-            ctx->dev.hFTDI,
-            &ctx->async2.oOverlapped);
+    ctx->async2.fOverlappedInitialized = ctx->dev.pfnFT_GetOverlappedResult && ctx->dev.pfnFT_InitializeOverlapped && ctx->dev.pfnFT_ReleaseOverlapped && !ctx->dev.pfnFT_InitializeOverlapped(ctx->dev.hFTDI, &ctx->async2.oOverlapped);
     ctx->async2.fEnabled = ctx->async2.fOverlappedInitialized;
     ctx->dev.fInitialized = TRUE;
     DeviceFPGA_Initialize_LinuxMultiHandle_LockAcquire(ctx->qwDeviceIndex);
@@ -1284,10 +1253,7 @@ static BOOL DeviceFPGA_OpenFTDIHandle(_Inout_ PDEVICE_CONTEXT_FPGA ctx)
     DWORD status;
     ctx->fOpenPipeTimeoutFailure = FALSE;
     if(!ctx->dev.pfnFT_Create || ctx->dev.hFTDI) { return FALSE; }
-    status = ctx->dev.pfnFT_Create(
-        (PVOID)ctx->qwDeviceIndex,
-        0x10 /*FT_OPEN_BY_INDEX*/,
-        &hFTDI);
+    status = ctx->dev.pfnFT_Create((PVOID)ctx->qwDeviceIndex, 0x10 /*FT_OPEN_BY_INDEX*/, &hFTDI);
     if(status || !hFTDI) {
         if(hFTDI && ctx->dev.pfnFT_Close) {
             ctx->dev.pfnFT_Close(hFTDI);
@@ -1322,15 +1288,13 @@ VOID DeviceFPGA_Close(_Inout_ PLC_CONTEXT ctxLC)
     PDEVICE_CONTEXT_FPGA ctx = (PDEVICE_CONTEXT_FPGA)ctxLC->hDevice;
     FPGA_READ_COUNTERS ReadCounters;
     if(!ctx) { return; }
-    if(ctx->cTransportTimeout ||
-       ctx->cTransportRecoverySuccess ||
-       ctx->cTransportRecoveryFailure) {
-        lcprintfv(
-            ctxLC,
+    if(ctx->cTransportTimeout || ctx->cTransportRecoverySuccess || ctx->cTransportRecoveryFailure) {
+        lcprintfv(ctxLC,
             "Device Info: FPGA: FT601 transport [timeouts=%llu,recovered=%llu,failed=%llu]\n",
             ctx->cTransportTimeout,
             ctx->cTransportRecoverySuccess,
-            ctx->cTransportRecoveryFailure);
+            ctx->cTransportRecoveryFailure
+        );
     }
     AcquireSRWLockExclusive(&ctx->ReadCountersLock);
     ReadCounters = ctx->ReadCounters;
@@ -1360,11 +1324,10 @@ VOID DeviceFPGA_Close(_Inout_ PLC_CONTEXT ctxLC)
             ctx->dev.pfnFT_ReleaseOverlapped,
             NULL,
             NULL,
-            NULL);
+            NULL
+        );
         ctx->async2.fOverlappedInitialized = FALSE;
-        ZeroMemory(
-            &ctx->async2.oOverlapped,
-            sizeof(ctx->async2.oOverlapped));
+        ZeroMemory(&ctx->async2.oOverlapped, sizeof(ctx->async2.oOverlapped));
     }
 #ifdef WIN32
     __try {
@@ -1374,8 +1337,7 @@ VOID DeviceFPGA_Close(_Inout_ PLC_CONTEXT ctxLC)
             ctx->dev.hFTDI = NULL;
         }
         if(ctx->dev.fInitialized) {
-            DeviceFPGA_Initialize_LinuxMultiHandle_LockRelease(
-                ctx->qwDeviceIndex);
+            DeviceFPGA_Initialize_LinuxMultiHandle_LockRelease(ctx->qwDeviceIndex);
             ctx->dev.fInitialized = FALSE;
         }
 #ifdef WIN32
@@ -1961,13 +1923,7 @@ VOID DeviceFPGA_HotResetV4(_In_ PDEVICE_CONTEXT_FPGA ctx)
 }
 
 _Success_(return)
-static BOOL DeviceFPGA_GetDeviceID_FpgaVersionV4_ConfigRead(
-    _In_ PVOID pvContext,
-    _In_ WORD wBaseAddr,
-    _Out_writes_(cb) PBYTE pb,
-    _In_ WORD cb,
-    _In_ WORD flags
-)
+static BOOL DeviceFPGA_GetDeviceID_FpgaVersionV4_ConfigRead(_In_ PVOID pvContext, _In_ WORD wBaseAddr, _Out_writes_(cb) PBYTE pb, _In_ WORD cb, _In_ WORD flags)
 {
     return DeviceFPGA_ConfigRead((PDEVICE_CONTEXT_FPGA)pvContext, wBaseAddr, pb, cb, flags);
 }
@@ -2323,10 +2279,9 @@ typedef struct tdDEVICE_FPGA_FTDI_RECOVERY_CONTEXT {
 
 static BOOL DeviceFPGA_FTDI_RecoveryQuiesce(_Inout_ PVOID pvContext)
 {
+    PDEVICE_FPGA_FTDI_RECOVERY_CONTEXT pRecovery = (PDEVICE_FPGA_FTDI_RECOVERY_CONTEXT)pvContext;
     BOOL fResult = TRUE;
     DWORD status;
-    PDEVICE_FPGA_FTDI_RECOVERY_CONTEXT pRecovery =
-        (PDEVICE_FPGA_FTDI_RECOVERY_CONTEXT)pvContext;
     PDEVICE_CONTEXT_FPGA ctx = pRecovery->ctx;
     if(!ctx->dev.hFTDI) { return TRUE; }
     if(ctx->async2.fOverlappedInitialized) {
@@ -2340,16 +2295,10 @@ static BOOL DeviceFPGA_FTDI_RecoveryQuiesce(_Inout_ PVOID pvContext)
             NULL,
             NULL);
         ctx->async2.fOverlappedInitialized = FALSE;
-        ZeroMemory(
-            &ctx->async2.oOverlapped,
-            sizeof(ctx->async2.oOverlapped));
+        ZeroMemory(&ctx->async2.oOverlapped, sizeof(ctx->async2.oOverlapped));
     } else if(ctx->dev.pfnFT_AbortPipe) {
-        fResult &= ctx->dev.pfnFT_AbortPipe(
-            ctx->dev.hFTDI,
-            0x82) == DEVICE_FPGA_SESSION_FT_OK;
-        fResult &= ctx->dev.pfnFT_AbortPipe(
-            ctx->dev.hFTDI,
-            0x02) == DEVICE_FPGA_SESSION_FT_OK;
+        fResult &= ctx->dev.pfnFT_AbortPipe(ctx->dev.hFTDI, 0x82) == DEVICE_FPGA_SESSION_FT_OK;
+        fResult &= ctx->dev.pfnFT_AbortPipe(ctx->dev.hFTDI, 0x02) == DEVICE_FPGA_SESSION_FT_OK;
     } else {
         fResult = FALSE;
     }
@@ -2363,37 +2312,26 @@ static BOOL DeviceFPGA_FTDI_RecoveryQuiesce(_Inout_ PVOID pvContext)
 
 static BOOL DeviceFPGA_FTDI_RecoveryReopen(_Inout_ PVOID pvContext)
 {
-    PDEVICE_FPGA_FTDI_RECOVERY_CONTEXT pRecovery =
-        (PDEVICE_FPGA_FTDI_RECOVERY_CONTEXT)pvContext;
+    PDEVICE_FPGA_FTDI_RECOVERY_CONTEXT pRecovery = (PDEVICE_FPGA_FTDI_RECOVERY_CONTEXT)pvContext;
     Sleep(250);
     return DeviceFPGA_OpenFTDIHandle(pRecovery->ctx);
 }
 
-static BOOL DeviceFPGA_FTDI_RecoveryInitializeOverlapped(
-    _Inout_ PVOID pvContext
-)
+static BOOL DeviceFPGA_FTDI_RecoveryInitializeOverlapped(_Inout_ PVOID pvContext)
 {
-    DWORD status;
-    PDEVICE_FPGA_FTDI_RECOVERY_CONTEXT pRecovery =
-        (PDEVICE_FPGA_FTDI_RECOVERY_CONTEXT)pvContext;
+    PDEVICE_FPGA_FTDI_RECOVERY_CONTEXT pRecovery = (PDEVICE_FPGA_FTDI_RECOVERY_CONTEXT)pvContext;
     PDEVICE_CONTEXT_FPGA ctx = pRecovery->ctx;
-    if(!ctx->dev.pfnFT_InitializeOverlapped ||
-       !ctx->dev.pfnFT_GetOverlappedResult ||
-       !ctx->dev.pfnFT_ReleaseOverlapped) {
+    DWORD status;
+    if(!ctx->dev.pfnFT_InitializeOverlapped || !ctx->dev.pfnFT_GetOverlappedResult || !ctx->dev.pfnFT_ReleaseOverlapped) {
         return FALSE;
     }
     ZeroMemory(&ctx->async2.oOverlapped, sizeof(ctx->async2.oOverlapped));
-    status = ctx->dev.pfnFT_InitializeOverlapped(
-        ctx->dev.hFTDI,
-        &ctx->async2.oOverlapped);
-    ctx->async2.fOverlappedInitialized =
-        status == DEVICE_FPGA_SESSION_FT_OK;
+    status = ctx->dev.pfnFT_InitializeOverlapped(ctx->dev.hFTDI, &ctx->async2.oOverlapped);
+    ctx->async2.fOverlappedInitialized = status == DEVICE_FPGA_SESSION_FT_OK;
     return ctx->async2.fOverlappedInitialized;
 }
 
-static VOID DeviceFPGA_FTDI_InvalidateTransportState(
-    _Inout_ PDEVICE_CONTEXT_FPGA ctx
-)
+static VOID DeviceFPGA_FTDI_InvalidateTransportState(_Inout_ PDEVICE_CONTEXT_FPGA ctx)
 {
     ctx->rxbuf.cb = 0;
     ctx->rxbuf.o = 0;
@@ -2408,23 +2346,15 @@ static VOID DeviceFPGA_FTDI_InvalidateTransportState(
 
 static VOID DeviceFPGA_FTDI_RecoveryInvalidate(_Inout_ PVOID pvContext)
 {
-    PDEVICE_FPGA_FTDI_RECOVERY_CONTEXT pRecovery =
-        (PDEVICE_FPGA_FTDI_RECOVERY_CONTEXT)pvContext;
+    PDEVICE_FPGA_FTDI_RECOVERY_CONTEXT pRecovery = (PDEVICE_FPGA_FTDI_RECOVERY_CONTEXT)pvContext;
     DeviceFPGA_FTDI_InvalidateTransportState(pRecovery->ctx);
 }
 
-static BOOL DeviceFPGA_FTDI_RecoveryDrainRead(
-    _Inout_ PVOID pvContext,
-    _Out_writes_(cbBuffer) PBYTE pbBuffer,
-    _In_ DWORD cbBuffer,
-    _In_ DWORD dwTimeoutMs,
-    _Out_ PDWORD pcbRead
-)
+static BOOL DeviceFPGA_FTDI_RecoveryDrainRead(_Inout_ PVOID pvContext, _Out_writes_(cbBuffer) PBYTE pbBuffer, _In_ DWORD cbBuffer, _In_ DWORD dwTimeoutMs, _Out_ PDWORD pcbRead)
 {
-    DEVICE_FPGA_SESSION_WAIT_RESULT Result;
-    PDEVICE_FPGA_FTDI_RECOVERY_CONTEXT pRecovery =
-        (PDEVICE_FPGA_FTDI_RECOVERY_CONTEXT)pvContext;
+    PDEVICE_FPGA_FTDI_RECOVERY_CONTEXT pRecovery = (PDEVICE_FPGA_FTDI_RECOVERY_CONTEXT)pvContext;
     PDEVICE_CONTEXT_FPGA ctx = pRecovery->ctx;
+    DEVICE_FPGA_SESSION_WAIT_RESULT Result;
     *pcbRead = 0;
     if(!DeviceFPGA_FTDI_CanReadPipeBounded(ctx)) {
         return FALSE;
@@ -2433,7 +2363,8 @@ static BOOL DeviceFPGA_FTDI_RecoveryDrainRead(
         ctx,
         pbBuffer,
         cbBuffer,
-        min(dwTimeoutMs, DEVICE_FPGA_SESSION_WAIT_TIMEOUT_MS));
+        min(dwTimeoutMs, DEVICE_FPGA_SESSION_WAIT_TIMEOUT_MS)
+    );
     if(Result.outcome == DEVICE_FPGA_SESSION_WAIT_COMPLETED) {
         *pcbRead = Result.cbTransferred;
         return TRUE;
@@ -2443,9 +2374,8 @@ static BOOL DeviceFPGA_FTDI_RecoveryDrainRead(
 
 static BOOL DeviceFPGA_FTDI_RecoveryDrain(_Inout_ PVOID pvContext)
 {
+    PDEVICE_FPGA_FTDI_RECOVERY_CONTEXT pRecovery = (PDEVICE_FPGA_FTDI_RECOVERY_CONTEXT)pvContext;
     PBYTE pbBuffer;
-    PDEVICE_FPGA_FTDI_RECOVERY_CONTEXT pRecovery =
-        (PDEVICE_FPGA_FTDI_RECOVERY_CONTEXT)pvContext;
     pbBuffer = LocalAlloc(0, DEVICE_FPGA_RECOVERY_DRAIN_READ_SIZE);
     if(!pbBuffer) {
         pRecovery->DrainOutcome = DEVICE_FPGA_SESSION_DRAIN_READ_ERROR;
@@ -2467,36 +2397,17 @@ static BOOL DeviceFPGA_FTDI_RecoveryDrain(_Inout_ PVOID pvContext)
     return pRecovery->DrainOutcome == DEVICE_FPGA_SESSION_DRAIN_CLEAN;
 }
 
-static BOOL DeviceFPGA_FTDI_RecoveryConfigRead(
-    _In_ PVOID pvContext,
-    _In_ WORD wBaseAddr,
-    _Out_writes_(cb) PBYTE pb,
-    _In_ WORD cb,
-    _In_ WORD flags
-)
+static BOOL DeviceFPGA_FTDI_RecoveryConfigRead(_In_ PVOID pvContext, _In_ WORD wBaseAddr, _Out_writes_(cb) PBYTE pb, _In_ WORD cb, _In_ WORD flags)
 {
-    PDEVICE_FPGA_FTDI_RECOVERY_CONTEXT pRecovery =
-        (PDEVICE_FPGA_FTDI_RECOVERY_CONTEXT)pvContext;
-    return DeviceFPGA_ConfigRead(
-        pRecovery->ctx,
-        wBaseAddr,
-        pb,
-        cb,
-        flags);
+    PDEVICE_FPGA_FTDI_RECOVERY_CONTEXT pRecovery = (PDEVICE_FPGA_FTDI_RECOVERY_CONTEXT)pvContext;
+    return DeviceFPGA_ConfigRead(pRecovery->ctx, wBaseAddr, pb, cb, flags);
 }
 
-static BOOL DeviceFPGA_FTDI_RecoveryValidateIdentity(
-    _Inout_ PVOID pvContext
-)
+static BOOL DeviceFPGA_FTDI_RecoveryValidateIdentity(_Inout_ PVOID pvContext)
 {
+    PDEVICE_FPGA_FTDI_RECOVERY_CONTEXT pRecovery = (PDEVICE_FPGA_FTDI_RECOVERY_CONTEXT)pvContext;
     DEVICE_FPGA_IDENTITY Identity;
-    PDEVICE_FPGA_FTDI_RECOVERY_CONTEXT pRecovery =
-        (PDEVICE_FPGA_FTDI_RECOVERY_CONTEXT)pvContext;
-    if(!DeviceFPGA_Session_ReadV4Identity(
-        pRecovery,
-        DeviceFPGA_FTDI_RecoveryConfigRead,
-        FPGA_REG_CORE | FPGA_REG_READONLY,
-        &Identity)) {
+    if(!DeviceFPGA_Session_ReadV4Identity(pRecovery, DeviceFPGA_FTDI_RecoveryConfigRead, FPGA_REG_CORE | FPGA_REG_READONLY, &Identity)) {
         return FALSE;
     }
     return
@@ -2505,12 +2416,7 @@ static BOOL DeviceFPGA_FTDI_RecoveryValidateIdentity(
         (Identity.wFpgaID == pRecovery->Identity.wFpgaID);
 }
 
-static BOOL DeviceFPGA_FTDI_RxRecover(
-    _In_ PLC_CONTEXT ctxLC,
-    _Inout_ PDEVICE_CONTEXT_FPGA ctx,
-    _In_ DWORD status,
-    _In_ BOOL fTimedOut
-)
+static BOOL DeviceFPGA_FTDI_RxRecover(_In_ PLC_CONTEXT ctxLC, _Inout_ PDEVICE_CONTEXT_FPGA ctx, _In_ DWORD status, _In_ BOOL fTimedOut)
 {
     DEVICE_FPGA_SESSION_RECOVERY_STAGE Stage;
     const char *szDrainReason;
@@ -2536,10 +2442,7 @@ static BOOL DeviceFPGA_FTDI_RxRecover(
         ctx->cTransportTimeout++;
         lcprintfv(ctxLC, "Device Info: FPGA: FT601 active wait timed out\n");
     } else {
-        lcprintfv(
-            ctxLC,
-            "Device Info: FPGA: FT601 D3XX status error 0x%08x\n",
-            status);
+        lcprintfv(ctxLC, "Device Info: FPGA: FT601 D3XX status error 0x%08x\n", status);
     }
     Recovery.ctx = ctx;
     Recovery.Identity.wVersionMajor = ctx->wFpgaVersionMajor;
@@ -2580,10 +2483,7 @@ static BOOL DeviceFPGA_FTDI_RxRecover(
                     szDrainReason = "read";
                     break;
             }
-            lcprintfv(
-                ctxLC,
-                "Device Info: FPGA: FT601 stale drain failed (%s)\n",
-                szDrainReason);
+            lcprintfv(ctxLC, "Device Info: FPGA: FT601 stale drain failed (%s)\n", szDrainReason);
             break;
         case DEVICE_FPGA_SESSION_RECOVERY_IDENTITY_FAILED:
             lcprintfv(ctxLC, "Device Info: FPGA: FT601 identity validation failed\n");
@@ -2600,18 +2500,13 @@ static QWORD DeviceFPGA_FTDI_GetTickCount(_In_ PVOID pvContext)
     return GetTickCount64();
 }
 
-static VOID DeviceFPGA_FTDI_Sleep(
-    _In_ PVOID pvContext,
-    _In_ DWORD dwMilliseconds
-)
+static VOID DeviceFPGA_FTDI_Sleep(_In_ PVOID pvContext, _In_ DWORD dwMilliseconds)
 {
     UNREFERENCED_PARAMETER(pvContext);
     Sleep(dwMilliseconds);
 }
 
-static BOOL DeviceFPGA_FTDI_CanReadPipeBounded(
-    _In_ PDEVICE_CONTEXT_FPGA ctx
-)
+static BOOL DeviceFPGA_FTDI_CanReadPipeBounded(_In_ PDEVICE_CONTEXT_FPGA ctx)
 {
     return
         ctx->fFT601 &&
@@ -2622,36 +2517,20 @@ static BOOL DeviceFPGA_FTDI_CanReadPipeBounded(
         ctx->dev.pfnFT_GetOverlappedResult;
 }
 
-static VOID DeviceFPGA_FTDI_EnableAdaptivePollingWait(
-    _In_ PLC_CONTEXT ctxLC,
-    _Inout_ PDEVICE_CONTEXT_FPGA ctx,
-    _In_ DWORD cRetry
-)
+static VOID DeviceFPGA_FTDI_EnableAdaptivePollingWait(_In_ PLC_CONTEXT ctxLC, _Inout_ PDEVICE_CONTEXT_FPGA ctx, _In_ DWORD cRetry)
 {
-    if(!FpgaReadPolicy_ShouldEnableAdaptivePolling(cRetry) ||
-       ctx->fAdaptivePollingWait ||
-       !DeviceFPGA_FTDI_CanReadPipeBounded(ctx)) {
+    if(!FpgaReadPolicy_ShouldEnableAdaptivePolling(cRetry) || ctx->fAdaptivePollingWait || !DeviceFPGA_FTDI_CanReadPipeBounded(ctx)) {
         return;
     }
     EnterCriticalSection(&ctx->Lock);
-    if(!ctx->fAdaptivePollingWait &&
-       FpgaReadPolicy_ShouldEnableAdaptivePolling(cRetry) &&
-       DeviceFPGA_FTDI_CanReadPipeBounded(ctx)) {
+    if(!ctx->fAdaptivePollingWait && FpgaReadPolicy_ShouldEnableAdaptivePolling(cRetry) && DeviceFPGA_FTDI_CanReadPipeBounded(ctx)) {
         ctx->fAdaptivePollingWait = TRUE;
-        lcprintfv(
-            ctxLC,
-            "Device Info: FPGA: switching FT601 receive waits to bounded polling after %u retryable pages\n",
-            cRetry);
+        lcprintfv(ctxLC, "Device Info: FPGA: switching FT601 receive waits to bounded polling after %u retryable pages\n", cRetry);
     }
     LeaveCriticalSection(&ctx->Lock);
 }
 
-static DEVICE_FPGA_SESSION_WAIT_RESULT DeviceFPGA_FTDI_ReadPipeBounded(
-    _In_ PDEVICE_CONTEXT_FPGA ctx,
-    _Out_writes_(cbBuffer) PBYTE pbBuffer,
-    _In_ DWORD cbBuffer,
-    _In_ DWORD dwTimeoutMs
-)
+static DEVICE_FPGA_SESSION_WAIT_RESULT DeviceFPGA_FTDI_ReadPipeBounded(_In_ PDEVICE_CONTEXT_FPGA ctx, _Out_writes_(cbBuffer) PBYTE pbBuffer, _In_ DWORD cbBuffer, _In_ DWORD dwTimeoutMs)
 {
     return DeviceFPGA_Session_ReadPipeBounded(
         ctx->dev.hFTDI,
@@ -2669,10 +2548,7 @@ static DEVICE_FPGA_SESSION_WAIT_RESULT DeviceFPGA_FTDI_ReadPipeBounded(
         DeviceFPGA_FTDI_Sleep);
 }
 
-static DEVICE_FPGA_SESSION_WAIT_RESULT DeviceFPGA_FTDI_WaitActiveRead(
-    _In_ PDEVICE_CONTEXT_FPGA ctx,
-    _Out_ PULONG pcbRead
-)
+static DEVICE_FPGA_SESSION_WAIT_RESULT DeviceFPGA_FTDI_WaitActiveRead(_In_ PDEVICE_CONTEXT_FPGA ctx, _Out_ PULONG pcbRead)
 {
     DEVICE_FPGA_SESSION_WAIT_RESULT Result;
     *pcbRead = 0;
@@ -2754,10 +2630,7 @@ BOOL DeviceFPGA_TxTlp_FastWrite_NoLock(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONT
     DWORD cbTx, cbTxed = 0;
     if(cbTlp & 0x3) { return FALSE; }
     if(cbTlp > 4 * 4 + 128) { return FALSE; }
-    fNativeFT601 =
-        ctx->fFT601 &&
-        !ctx->fCustomDriver &&
-        !ctx->dev.f2232h;
+    fNativeFT601 = ctx->fFT601 && !ctx->fCustomDriver && !ctx->dev.f2232h;
     AcquireSRWLockExclusive(&ctx->txbuf_fastwrite.LockSRW);
     if(!ctx->fTransportUsable) {
         ctx->txbuf_fastwrite.cb = 0;
@@ -2808,11 +2681,7 @@ BOOL DeviceFPGA_TxTlp_FastWrite_NoLock(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONT
             if(fNativeFT601) {
                 EnterCriticalSection(&ctx->Lock);
                 if(ctx->dwTransportGeneration == dwTransportGeneration) {
-                    DeviceFPGA_FTDI_RxRecover(
-                        ctxLC,
-                        ctx,
-                        status,
-                        FALSE);
+                    DeviceFPGA_FTDI_RxRecover(ctxLC, ctx, status, FALSE);
                 }
                 LeaveCriticalSection(&ctx->Lock);
             }
@@ -2868,7 +2737,7 @@ VOID DeviceFPGA_RxTlp_QueueUserCallback(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ SIZE
 BOOL DeviceFPGA_Synch_RxTlpSynchronous(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx, _In_opt_ DWORD dwBytesToRead)
 {
     DWORD status;
-    BOOL fRetry = FALSE, fTransportError = FALSE;
+    BOOL fRetry = FALSE, fTimedOut, fTransportError = FALSE;
     DWORD i = 0, j, cbReadRxBuf;
     BYTE pbTlp[TLP_RX_MAX_SIZE];
     PDWORD pdwTlp = (PDWORD)pbTlp;
@@ -2877,9 +2746,7 @@ BOOL DeviceFPGA_Synch_RxTlpSynchronous(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONT
     DEVICE_FPGA_SESSION_TLP_FRAME_ACTION FrameAction;
     DEVICE_FPGA_SESSION_WAIT_RESULT ReadResult;
     if(!ctx->fTransportUsable) { return TRUE; }
-    TlpFrame.fRequireFirst =
-        (ctx->wFpgaVersionMajor > 4) ||
-        ((ctx->wFpgaVersionMajor == 4) && (ctx->wFpgaVersionMinor >= 13));
+    TlpFrame.fRequireFirst = (ctx->wFpgaVersionMajor > 4) || ((ctx->wFpgaVersionMajor == 4) && (ctx->wFpgaVersionMinor >= 13));
     // larger read buffer slows down FT_ReadPipe so set it fairly tight if possible.
     ctx->rxbuf.cb = 0;
     cbReadRxBuf = ctx->dev.f2232h ? ctx->rxbuf.cbMax :
@@ -2892,27 +2759,18 @@ BOOL DeviceFPGA_Synch_RxTlpSynchronous(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONT
                 ctx,
                 ctx->rxbuf.pb + ctx->rxbuf.cb,
                 cbReadRxBuf - ctx->rxbuf.cb,
-                DEVICE_FPGA_SESSION_WAIT_TIMEOUT_MS);
+                DEVICE_FPGA_SESSION_WAIT_TIMEOUT_MS
+            );
             status = ReadResult.status;
             cbRx = ReadResult.cbTransferred;
             if(ReadResult.outcome != DEVICE_FPGA_SESSION_WAIT_COMPLETED) {
                 fTransportError = TRUE;
-                DeviceFPGA_FTDI_RxRecover(
-                    ctxLC,
-                    ctx,
-                    status,
-                    ReadResult.outcome ==
-                        DEVICE_FPGA_SESSION_WAIT_TIMED_OUT);
+                fTimedOut = ReadResult.outcome == DEVICE_FPGA_SESSION_WAIT_TIMED_OUT;
+                DeviceFPGA_FTDI_RxRecover(ctxLC, ctx, status, fTimedOut);
                 return TRUE;
             }
         } else {
-            status = ctx->dev.pfnFT_ReadPipe(
-                ctx->dev.hFTDI,
-                0x82,
-                ctx->rxbuf.pb + ctx->rxbuf.cb,
-                cbReadRxBuf - ctx->rxbuf.cb,
-                &cbRx,
-                NULL);
+            status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, ctx->rxbuf.pb + ctx->rxbuf.cb, cbReadRxBuf - ctx->rxbuf.cb, &cbRx, NULL);
             if(status) {
                 fTransportError = TRUE;
                 DeviceFPGA_FTDI_RxRecover(ctxLC, ctx, status, FALSE);
@@ -2937,13 +2795,8 @@ BOOL DeviceFPGA_Synch_RxTlpSynchronous(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONT
                 continue;
             }
             for(j = 0; j < 7; j++) {
-                FrameAction = DeviceFPGA_Session_TlpFrameStep(
-                    &TlpFrame,
-                    (BYTE)dwStatus,
-                    TLP_RX_MAX_SIZE_IN_DWORDS);
-                if((FrameAction == DEVICE_FPGA_SESSION_TLP_FRAME_APPEND) ||
-                   (FrameAction == DEVICE_FPGA_SESSION_TLP_FRAME_COMPLETE) ||
-                   (FrameAction == DEVICE_FPGA_SESSION_TLP_FRAME_RESTART)) {
+                FrameAction = DeviceFPGA_Session_TlpFrameStep(&TlpFrame, (BYTE)dwStatus, TLP_RX_MAX_SIZE_IN_DWORDS);
+                if((FrameAction == DEVICE_FPGA_SESSION_TLP_FRAME_APPEND) || (FrameAction == DEVICE_FPGA_SESSION_TLP_FRAME_COMPLETE) || (FrameAction == DEVICE_FPGA_SESSION_TLP_FRAME_RESTART)) {
                     pdwTlp[TlpFrame.cdwTlp - 1] = *pdwData;
                 }
                 if(FrameAction == DEVICE_FPGA_SESSION_TLP_FRAME_RESTART) {
@@ -2986,11 +2839,7 @@ static BOOL DeviceFPGA_Synch_IsValidRead(_In_ PMEM_SCATTER pMEM)
         MEM_SCATTER_ADDR_ISVALID(pMEM);
 }
 
-VOID DeviceFPGA_Synch_ReadScatter_Impl(
-    _In_ PLC_CONTEXT ctxLC,
-    _In_ DWORD cMEMs,
-    _Inout_ PPMEM_SCATTER ppMEMs,
-    _Inout_ PFPGA_READ_PAGE_STATE pStates)
+VOID DeviceFPGA_Synch_ReadScatter_Impl(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _Inout_ PPMEM_SCATTER ppMEMs, _Inout_ PFPGA_READ_PAGE_STATE pStates)
 {
     PDEVICE_CONTEXT_FPGA ctx = (PDEVICE_CONTEXT_FPGA)ctxLC->hDevice;
     TLP_CALLBACK_BUF_MRd_SCATTER rxbuf;
@@ -3008,23 +2857,11 @@ VOID DeviceFPGA_Synch_ReadScatter_Impl(
     // TX queued RAW TLPs (if any) from other threads and flush:
     if(ObByteQueue_Size(ctx->tlp_callback.pBqTx)) {
         while(ObByteQueue_Pop(ctx->tlp_callback.pBqTx, NULL, sizeof(pbTlpRaw), pbTlpRaw, &cbTlpRaw)) {
-            if(!DeviceFPGA_TxTlp(
-                ctxLC,
-                ctx,
-                pbTlpRaw,
-                (DWORD)cbTlpRaw,
-                FALSE,
-                FALSE)) {
+            if(!DeviceFPGA_TxTlp(ctxLC, ctx, pbTlpRaw, (DWORD)cbTlpRaw, FALSE, FALSE)) {
                 return;
             }
         }
-        if(!DeviceFPGA_TxTlp(
-            ctxLC,
-            ctx,
-            NULL,
-            0,
-            TRUE,
-            TRUE)) {
+        if(!DeviceFPGA_TxTlp(ctxLC, ctx, NULL, 0, TRUE, TRUE)) {
             return;
         }
     }
@@ -3134,19 +2971,13 @@ VOID DeviceFPGA_Synch_ReadScatter_Impl(
 }
 
 _Success_(return)
-BOOL DeviceFPGA_Synch_ReadScatter_Attempt(
-    _In_ PLC_CONTEXT ctxLC,
-    _In_ DWORD cMEMs,
-    _Inout_ PPMEM_SCATTER ppMEMs,
-    _Out_writes_(cMEMs) PLC_READ_PAGE_RESULT pResults,
-    _In_ BOOL fRetryPass)
+BOOL DeviceFPGA_Synch_ReadScatter_Attempt(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _Inout_ PPMEM_SCATTER ppMEMs, _Out_writes_(cMEMs) PLC_READ_PAGE_RESULT pResults, _In_ BOOL fRetryPass)
 {
     PDEVICE_CONTEXT_FPGA ctx = (PDEVICE_CONTEXT_FPGA)ctxLC->hDevice;
     DWORD i;
     PMEM_SCATTER pMEM;
     PFPGA_READ_PAGE_STATE pStates;
-    if(!pResults || !ppMEMs ||
-        ((SIZE_T)cMEMs > ((SIZE_T)-1) / sizeof(FPGA_READ_PAGE_STATE))) {
+    if(!pResults || !ppMEMs || ((SIZE_T)cMEMs > ((SIZE_T)-1) / sizeof(FPGA_READ_PAGE_STATE))) {
         return FALSE;
     }
     for(i = 0; i < cMEMs; i++) {
@@ -3161,25 +2992,27 @@ BOOL DeviceFPGA_Synch_ReadScatter_Attempt(
     }
     for(i = 0; i < cMEMs; i++) {
         pMEM = ppMEMs[i];
-        if(pMEM && pMEM->f) {
-            pResults[i] = LC_READ_PAGE_RESULT_SUCCESS;
-        } else if(DeviceFPGA_Synch_IsValidRead(pMEM) &&
-            (pMEM->iStack < MEM_SCATTER_STACK_SIZE)) {
-            FpgaReadPolicy_PageBegin(pStates + i, pMEM->cb);
-            pStates[i].fRetried = fRetryPass;
-            MEM_SCATTER_STACK_PUSH(pMEM, 0);
+        if(pMEM) {
+            if(pMEM->f) {
+                pResults[i] = LC_READ_PAGE_RESULT_SUCCESS;
+            } else if(DeviceFPGA_Synch_IsValidRead(pMEM) && (pMEM->iStack < MEM_SCATTER_STACK_SIZE)) {
+                FpgaReadPolicy_PageBegin(pStates + i, pMEM->cb);
+                pStates[i].fRetried = fRetryPass;
+                MEM_SCATTER_STACK_PUSH(pMEM, 0);
+            }
         }
     }
     DeviceFPGA_Synch_ReadScatter_Impl(ctxLC, cMEMs, ppMEMs, pStates);
     for(i = 0; i < cMEMs; i++) {
         pMEM = ppMEMs[i];
-        if(pStates[i].cbExpected) {
+        if(pMEM && pStates[i].cbExpected) {
             if(MEM_SCATTER_STACK_POP(pMEM) != pStates[i].cbReceived) {
                 FpgaReadPolicy_Observe(pStates + i, LC_READ_PAGE_RESULT_PROTOCOL_ERROR, 0);
             }
             pResults[i] = FpgaReadPolicy_Finalize(pStates + i);
             DeviceFPGA_RecordReadOutcome(ctx, pResults[i], fRetryPass);
-            pMEM->f = (pResults[i] == LC_READ_PAGE_RESULT_SUCCESS) ||
+            pMEM->f =
+                (pResults[i] == LC_READ_PAGE_RESULT_SUCCESS) ||
                 (pResults[i] == LC_READ_PAGE_RESULT_SUCCESS_AFTER_RETRY);
         }
     }
@@ -3188,11 +3021,7 @@ BOOL DeviceFPGA_Synch_ReadScatter_Attempt(
 }
 
 _Success_(return)
-BOOL DeviceFPGA_Synch_ReadScatterEx(
-    _In_ PLC_CONTEXT ctxLC,
-    _In_ DWORD cMEMs,
-    _Inout_ PPMEM_SCATTER ppMEMs,
-    _Out_writes_(cMEMs) PLC_READ_PAGE_RESULT pResults)
+BOOL DeviceFPGA_Synch_ReadScatterEx(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _Inout_ PPMEM_SCATTER ppMEMs, _Out_writes_(cMEMs) PLC_READ_PAGE_RESULT pResults)
 {
     PDEVICE_CONTEXT_FPGA ctx = (PDEVICE_CONTEXT_FPGA)ctxLC->hDevice;
     DWORD i, cRetry, cRetryPass, cRetryPassMax;
@@ -3216,17 +3045,10 @@ BOOL DeviceFPGA_Synch_ReadScatterEx(
     }
     cRetryPassMax = ctx->fAdaptivePollingWait ? 2 : 1;
     for(cRetryPass = 0; cRetryPass < cRetryPassMax; cRetryPass++) {
-        cRetry = FpgaReadPolicy_BuildRetryList(
-            cMEMs,
-            pResults,
-            cMEMs,
-            pRetryIndices);
+        cRetry = FpgaReadPolicy_BuildRetryList(cMEMs, pResults, cMEMs, pRetryIndices);
         if(!cRetry) { break; }
         if(!ctx->fAdaptivePollingWait) {
-            DeviceFPGA_FTDI_EnableAdaptivePollingWait(
-                ctxLC,
-                ctx,
-                cRetry);
+            DeviceFPGA_FTDI_EnableAdaptivePollingWait(ctxLC, ctx, cRetry);
         }
         if(ctx->fAdaptivePollingWait) {
             cRetryPassMax = 2;
@@ -3234,12 +3056,7 @@ BOOL DeviceFPGA_Synch_ReadScatterEx(
         for(i = 0; i < cRetry; i++) {
             ppRetryMEMs[i] = ppMEMs[pRetryIndices[i]];
         }
-        if(!DeviceFPGA_Synch_ReadScatter_Attempt(
-            ctxLC,
-            cRetry,
-            ppRetryMEMs,
-            pRetryResults,
-            TRUE)) {
+        if(!DeviceFPGA_Synch_ReadScatter_Attempt(ctxLC, cRetry, ppRetryMEMs, pRetryResults, TRUE)) {
             break;
         }
         if(cRetryPass) {
@@ -3247,13 +3064,10 @@ BOOL DeviceFPGA_Synch_ReadScatterEx(
         }
         for(i = 0; i < cRetry; i++) {
             DWORD iOriginal = pRetryIndices[i];
-            pResults[iOriginal] = FpgaReadPolicy_MergeRetryResult(
-                pResults[iOriginal],
-                pRetryResults[i]);
-            ppMEMs[iOriginal]->f =
+            pResults[iOriginal] = FpgaReadPolicy_MergeRetryResult(pResults[iOriginal], pRetryResults[i]);
+            ppMEMs[iOriginal]->f = 
                 (pResults[iOriginal] == LC_READ_PAGE_RESULT_SUCCESS) ||
-                (pResults[iOriginal] ==
-                    LC_READ_PAGE_RESULT_SUCCESS_AFTER_RETRY);
+                (pResults[iOriginal] == LC_READ_PAGE_RESULT_SUCCESS_AFTER_RETRY);
         }
     }
 finish:
@@ -3316,10 +3130,7 @@ static BOOL DeviceFPGA_Async2_TagRetire(_In_ PDEVICE_CONTEXT_FPGA ctx, _Inout_ P
     return TRUE;
 }
 
-static VOID DeviceFPGA_Async2_AbortTags(
-    _In_ PDEVICE_CONTEXT_FPGA ctx,
-    _In_opt_ PFPGA_NEWASYNC2_MEM_CONTEXT pMemContext,
-    _In_ BOOL fTransportError)
+static VOID DeviceFPGA_Async2_AbortTags(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_opt_ PFPGA_NEWASYNC2_MEM_CONTEXT pMemContext, _In_ BOOL fTransportError)
 {
     DWORD i;
     PFPGA_NEWASYNC2_TAG_ENTRY pTag;
@@ -3391,8 +3202,7 @@ VOID DeviceFPGA_Async2_Read_RxTlpSingle_MRdCpl(_In_ PLC_CONTEXT ctxLC, _In_ PDEV
         DeviceFPGA_Async2_TagRetire(ctx, pTag);
         return;
     }
-    if((cb != ((DWORD)hdr->Length << 2) + 12) ||
-        (observed != LC_READ_PAGE_RESULT_SUCCESS)) {
+    if((cb != ((DWORD)hdr->Length << 2) + 12) || (observed != LC_READ_PAGE_RESULT_SUCCESS)) {
         FpgaReadPolicy_Observe(pTag->pState, LC_READ_PAGE_RESULT_PROTOCOL_ERROR, 0);
         return;
     }
@@ -3516,10 +3326,7 @@ DWORD DeviceFPGA_Async2_Read_RxTlpSingle(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CO
                 continue;
             }
 #endif /* LINUX */
-            FrameAction = DeviceFPGA_Session_TlpFrameStep(
-                &TlpFrame,
-                (BYTE)dwStatus,
-                TLP_RX_MAX_SIZE_IN_DWORDS);
+            FrameAction = DeviceFPGA_Session_TlpFrameStep(&TlpFrame, (BYTE)dwStatus, TLP_RX_MAX_SIZE_IN_DWORDS);
             if(FrameAction == DEVICE_FPGA_SESSION_TLP_FRAME_IGNORE) {
                 if((dwStatus & 0x0b) == 0x00) {
                     pdwData[iStartWord] |= 1U << (j << 2);
@@ -3733,23 +3540,11 @@ PFPGA_NEWASYNC2_MEM_CONTEXT DeviceFPGA_Async2_Read_TxTlp(_In_ PLC_CONTEXT ctxLC,
     // TX queued RAW TLPs (if any) from other threads and flush:
     if(ObByteQueue_Size(ctx->tlp_callback.pBqTx)) {
         while(ObByteQueue_Pop(ctx->tlp_callback.pBqTx, NULL, sizeof(pbTlpRaw), pbTlpRaw, &cbTlpRaw)) {
-            if(!DeviceFPGA_TxTlp(
-                ctxLC,
-                ctx,
-                pbTlpRaw,
-                (DWORD)cbTlpRaw,
-                FALSE,
-                FALSE)) {
+            if(!DeviceFPGA_TxTlp(ctxLC, ctx, pbTlpRaw, (DWORD)cbTlpRaw, FALSE, FALSE)) {
                 return pTX;
             }
         }
-        if(!DeviceFPGA_TxTlp(
-            ctxLC,
-            ctx,
-            NULL,
-            0,
-            TRUE,
-            TRUE)) {
+        if(!DeviceFPGA_TxTlp(ctxLC, ctx, NULL, 0, TRUE, TRUE)) {
             return pTX;
         }
     }
@@ -3771,8 +3566,7 @@ PFPGA_NEWASYNC2_MEM_CONTEXT DeviceFPGA_Async2_Read_TxTlp(_In_ PLC_CONTEXT ctxLC,
     while(pTX->iMem < pTX->cMEM) {
         // Skip already completed/invalid MEMs:
         pMEM = pTX->ppMEMs[pTX->iMem];
-        if(!DeviceFPGA_Async2_IsValidRead(pMEM) || !pTX->pStates ||
-            !pTX->pStates[pTX->iMem].cbExpected) {
+        if(!DeviceFPGA_Async2_IsValidRead(pMEM) || !pTX->pStates || !pTX->pStates[pTX->iMem].cbExpected) {
             pTX->cMemCpl++;
             pTX->iMem++;
             continue;
@@ -3791,8 +3585,7 @@ PFPGA_NEWASYNC2_MEM_CONTEXT DeviceFPGA_Async2_Read_TxTlp(_In_ PLC_CONTEXT ctxLC,
         }
         // TX single TLP:
         DeviceFPGA_Async2_Read_TxTlpSingle(ctxLC, ctx, pTX);
-        if(!ctx->fTransportUsable ||
-           (ctx->dwTransportGeneration != dwTransportGeneration)) {
+        if(!ctx->fTransportUsable || (ctx->dwTransportGeneration != dwTransportGeneration)) {
             return pTX;
         }
         pTX->iMem++;
@@ -3835,20 +3628,14 @@ VOID DeviceFPGA_Async2_ReadScatter_DoWork(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_C
     ctx->async2.fTransportError = FALSE;
     // TX PRIMARY and start OVERLAPPED read:
     pMemCtxTX = DeviceFPGA_Async2_Read_TxTlp(ctxLC, ctx, pMemCtxPrimary, TRUE);
-    if(ctx->async2.fTransportError ||
-       !ctx->fTransportUsable ||
-       (ctx->dwTransportGeneration != dwTransportGeneration)) {
+    if(ctx->async2.fTransportError || !ctx->fTransportUsable || (ctx->dwTransportGeneration != dwTransportGeneration)) {
         goto fail_transport;
     }
     // RX INITIAL / (LATENCY OPTIMIZED FOR SMALLER READS):
     BusySleep(ctx->perf.ASYNC_DELAY_1);
     cbReadInitialMax = min(cbMAX_READSIZE, pMemCtxPrimary->cMEM * 0x1800);
     if(DeviceFPGA_FTDI_CanReadPipeBounded(ctx)) {
-        WaitResult = DeviceFPGA_FTDI_ReadPipeBounded(
-            ctx,
-            ctx->rxbuf.pb + ctx->rxbuf.cb,
-            cbReadInitialMax,
-            DEVICE_FPGA_SESSION_WAIT_TIMEOUT_MS);
+        WaitResult = DeviceFPGA_FTDI_ReadPipeBounded(ctx, ctx->rxbuf.pb + ctx->rxbuf.cb, cbReadInitialMax, DEVICE_FPGA_SESSION_WAIT_TIMEOUT_MS);
         status = WaitResult.status;
         cbRead = WaitResult.cbTransferred;
         if(WaitResult.outcome != DEVICE_FPGA_SESSION_WAIT_COMPLETED) {
@@ -3857,8 +3644,8 @@ VOID DeviceFPGA_Async2_ReadScatter_DoWork(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_C
                 ctxLC,
                 ctx,
                 status,
-                WaitResult.outcome ==
-                    DEVICE_FPGA_SESSION_WAIT_TIMED_OUT);
+                WaitResult.outcome == DEVICE_FPGA_SESSION_WAIT_TIMED_OUT
+            );
             goto fail_transport;
         }
     } else {
@@ -3924,8 +3711,8 @@ VOID DeviceFPGA_Async2_ReadScatter_DoWork(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_C
                     ctxLC,
                     ctx,
                     status,
-                    WaitResult.outcome ==
-                        DEVICE_FPGA_SESSION_WAIT_TIMED_OUT);
+                    WaitResult.outcome == DEVICE_FPGA_SESSION_WAIT_TIMED_OUT
+                );
                 goto fail_transport;
             }
         } else {
@@ -3960,30 +3747,15 @@ VOID DeviceFPGA_Async2_ReadOnlyFast_DoWork(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_
     if(!ctx->fTransportUsable) { return; }
     // RX INITIAL / (LATENCY OPTIMIZED FOR SMALLER READS):
     if(DeviceFPGA_FTDI_CanReadPipeBounded(ctx)) {
-        WaitResult = DeviceFPGA_FTDI_ReadPipeBounded(
-            ctx,
-            ctx->rxbuf.pb + ctx->rxbuf.cb,
-            ctx->perf.ASYNC_MAX_READSIZE,
-            DEVICE_FPGA_SESSION_WAIT_TIMEOUT_MS);
+        WaitResult = DeviceFPGA_FTDI_ReadPipeBounded(ctx, ctx->rxbuf.pb + ctx->rxbuf.cb, ctx->perf.ASYNC_MAX_READSIZE, DEVICE_FPGA_SESSION_WAIT_TIMEOUT_MS);
         status = WaitResult.status;
         cbRead = WaitResult.cbTransferred;
         if(WaitResult.outcome != DEVICE_FPGA_SESSION_WAIT_COMPLETED) {
-            DeviceFPGA_FTDI_RxRecover(
-                ctxLC,
-                ctx,
-                status,
-                WaitResult.outcome ==
-                    DEVICE_FPGA_SESSION_WAIT_TIMED_OUT);
+            DeviceFPGA_FTDI_RxRecover(ctxLC, ctx, status, WaitResult.outcome == DEVICE_FPGA_SESSION_WAIT_TIMED_OUT);
             return;
         }
     } else {
-        status = ctx->dev.pfnFT_ReadPipe(
-            ctx->dev.hFTDI,
-            0x82,
-            ctx->rxbuf.pb + ctx->rxbuf.cb,
-            ctx->perf.ASYNC_MAX_READSIZE,
-            &cbRead,
-            NULL);
+        status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, ctx->rxbuf.pb + ctx->rxbuf.cb, ctx->perf.ASYNC_MAX_READSIZE, &cbRead, NULL);
         if(status && (status != FT_IO_PENDING)) {
             DeviceFPGA_FTDI_RxRecover(ctxLC, ctx, status, FALSE);
             return;
@@ -4020,12 +3792,7 @@ VOID DeviceFPGA_Async2_ReadOnlyFast_DoWork(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_
             WaitResult = DeviceFPGA_FTDI_WaitActiveRead(ctx, &cbRead);
             status = WaitResult.status;
             if(WaitResult.outcome != DEVICE_FPGA_SESSION_WAIT_COMPLETED) {
-                DeviceFPGA_FTDI_RxRecover(
-                    ctxLC,
-                    ctx,
-                    status,
-                    WaitResult.outcome ==
-                        DEVICE_FPGA_SESSION_WAIT_TIMED_OUT);
+                DeviceFPGA_FTDI_RxRecover(ctxLC, ctx, status, WaitResult.outcome == DEVICE_FPGA_SESSION_WAIT_TIMED_OUT);
                 return;
             }
         } else {
@@ -4041,20 +3808,14 @@ VOID DeviceFPGA_Async2_ReadOnlyFast_DoWork(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_
 
 
 _Success_(return)
-BOOL DeviceFPGA_Async2_ReadScatter_Attempt(
-    _In_ PLC_CONTEXT ctxLC,
-    _In_ DWORD cMEMs,
-    _Inout_ PPMEM_SCATTER ppMEMs,
-    _Out_writes_(cMEMs) PLC_READ_PAGE_RESULT pResults,
-    _In_ BOOL fRetryPass)
+BOOL DeviceFPGA_Async2_ReadScatter_Attempt(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _Inout_ PPMEM_SCATTER ppMEMs, _Out_writes_(cMEMs) PLC_READ_PAGE_RESULT pResults, _In_ BOOL fRetryPass)
 {
     PDEVICE_CONTEXT_FPGA ctx = (PDEVICE_CONTEXT_FPGA)ctxLC->hDevice;
     FPGA_NEWASYNC2_MEM_CONTEXT MemCtx = { 0 };
     DWORD i;
     PMEM_SCATTER pMEM;
     PFPGA_READ_PAGE_STATE pStates;
-    if(!pResults || !ppMEMs ||
-        ((SIZE_T)cMEMs > ((SIZE_T)-1) / sizeof(FPGA_READ_PAGE_STATE))) {
+    if(!pResults || !ppMEMs || ((SIZE_T)cMEMs > ((SIZE_T)-1) / sizeof(FPGA_READ_PAGE_STATE))) {
         return FALSE;
     }
     for(i = 0; i < cMEMs; i++) {
@@ -4072,8 +3833,7 @@ BOOL DeviceFPGA_Async2_ReadScatter_Attempt(
         pMEM = ppMEMs[i];
         if(pMEM && pMEM->f) {
             pResults[i] = LC_READ_PAGE_RESULT_SUCCESS;
-        } else if(DeviceFPGA_Async2_IsValidRead(pMEM) &&
-            (pMEM->iStack < MEM_SCATTER_STACK_SIZE)) {
+        } else if(DeviceFPGA_Async2_IsValidRead(pMEM) && (pMEM->iStack < MEM_SCATTER_STACK_SIZE)) {
             FpgaReadPolicy_PageBegin(pStates + i, pMEM->cb);
             pStates[i].fRetried = fRetryPass;
             MEM_SCATTER_STACK_PUSH(pMEM, 0);
@@ -4117,11 +3877,7 @@ BOOL DeviceFPGA_Async2_ReadScatter_Attempt(
 }
 
 _Success_(return)
-BOOL DeviceFPGA_Async2_ReadScatterEx(
-    _In_ PLC_CONTEXT ctxLC,
-    _In_ DWORD cMEMs,
-    _Inout_ PPMEM_SCATTER ppMEMs,
-    _Out_writes_(cMEMs) PLC_READ_PAGE_RESULT pResults)
+BOOL DeviceFPGA_Async2_ReadScatterEx(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _Inout_ PPMEM_SCATTER ppMEMs, _Out_writes_(cMEMs) PLC_READ_PAGE_RESULT pResults)
 {
     PDEVICE_CONTEXT_FPGA ctx = (PDEVICE_CONTEXT_FPGA)ctxLC->hDevice;
     DWORD i, cRetry, cRetryPass, cRetryPassMax;
@@ -4145,17 +3901,10 @@ BOOL DeviceFPGA_Async2_ReadScatterEx(
     }
     cRetryPassMax = ctx->fAdaptivePollingWait ? 2 : 1;
     for(cRetryPass = 0; cRetryPass < cRetryPassMax; cRetryPass++) {
-        cRetry = FpgaReadPolicy_BuildRetryList(
-            cMEMs,
-            pResults,
-            cMEMs,
-            pRetryIndices);
+        cRetry = FpgaReadPolicy_BuildRetryList(cMEMs, pResults, cMEMs, pRetryIndices);
         if(!cRetry) { break; }
         if(!ctx->fAdaptivePollingWait) {
-            DeviceFPGA_FTDI_EnableAdaptivePollingWait(
-                ctxLC,
-                ctx,
-                cRetry);
+            DeviceFPGA_FTDI_EnableAdaptivePollingWait(ctxLC, ctx, cRetry);
         }
         if(ctx->fAdaptivePollingWait) {
             cRetryPassMax = 2;
@@ -4163,12 +3912,7 @@ BOOL DeviceFPGA_Async2_ReadScatterEx(
         for(i = 0; i < cRetry; i++) {
             ppRetryMEMs[i] = ppMEMs[pRetryIndices[i]];
         }
-        if(!DeviceFPGA_Async2_ReadScatter_Attempt(
-            ctxLC,
-            cRetry,
-            ppRetryMEMs,
-            pRetryResults,
-            TRUE)) {
+        if(!DeviceFPGA_Async2_ReadScatter_Attempt(ctxLC, cRetry, ppRetryMEMs, pRetryResults, TRUE)) {
             break;
         }
         if(cRetryPass) {
@@ -4176,13 +3920,10 @@ BOOL DeviceFPGA_Async2_ReadScatterEx(
         }
         for(i = 0; i < cRetry; i++) {
             DWORD iOriginal = pRetryIndices[i];
-            pResults[iOriginal] = FpgaReadPolicy_MergeRetryResult(
-                pResults[iOriginal],
-                pRetryResults[i]);
+            pResults[iOriginal] = FpgaReadPolicy_MergeRetryResult(pResults[iOriginal], pRetryResults[i]);
             ppMEMs[iOriginal]->f =
                 (pResults[iOriginal] == LC_READ_PAGE_RESULT_SUCCESS) ||
-                (pResults[iOriginal] ==
-                    LC_READ_PAGE_RESULT_SUCCESS_AFTER_RETRY);
+                (pResults[iOriginal] == LC_READ_PAGE_RESULT_SUCCESS_AFTER_RETRY);
         }
     }
 finish:
@@ -4259,9 +4000,7 @@ DWORD DeviceFPGA_SynchOldAsync_Tlp(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_
     DWORD i = 0, j, dwStatus, iStartWord;
     DEVICE_FPGA_SESSION_TLP_FRAME_STATE TlpFrame = { 0 };
     DEVICE_FPGA_SESSION_TLP_FRAME_ACTION FrameAction;
-    TlpFrame.fRequireFirst =
-        (ctx->wFpgaVersionMajor > 4) ||
-        ((ctx->wFpgaVersionMajor == 4) && (ctx->wFpgaVersionMinor >= 13));
+    TlpFrame.fRequireFirst = (ctx->wFpgaVersionMajor > 4) || ((ctx->wFpgaVersionMajor == 4) && (ctx->wFpgaVersionMinor >= 13));
     // skip over initial ftdi workaround dummy fillers / non valid octa-dwords
     while((i < cdwData) && ((pdwData[i] == 0x55556666) || ((pdwData[i] & 0xf0000000) != 0xe0000000))) {
         i++;
@@ -4275,10 +4014,7 @@ DWORD DeviceFPGA_SynchOldAsync_Tlp(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_
             continue;
         }
         for(j = 0; j < 7; j++, i++) {
-            FrameAction = DeviceFPGA_Session_TlpFrameStep(
-                &TlpFrame,
-                (BYTE)dwStatus,
-                TLP_RX_MAX_SIZE_IN_DWORDS);
+            FrameAction = DeviceFPGA_Session_TlpFrameStep(&TlpFrame, (BYTE)dwStatus, TLP_RX_MAX_SIZE_IN_DWORDS);
             if(FrameAction == DEVICE_FPGA_SESSION_TLP_FRAME_IGNORE) {
                 if((dwStatus & 0x0b) == 0x00) {
                     pdwData[iStartWord] |= 1U << (j << 2);
@@ -4325,10 +4061,8 @@ BOOL DeviceFPGA_SynchOldAsync_RxTlpAsynchronous(_In_ PLC_CONTEXT ctxLC, _In_ PDE
     DWORD cbBuffer = 0, oBuffer = 0, cEmptyRead = 0;
     PBYTE pbBuffer = NULL;
     BOOL fAsyncInProgress = FALSE;
-    BOOL fAsync =
-        DeviceFPGA_FTDI_CanReadPipeBounded(ctx) ||
-        (cbBytesToRead > 0x4000);
-    BOOL fTransportError = FALSE;
+    BOOL fAsync = DeviceFPGA_FTDI_CanReadPipeBounded(ctx) || (cbBytesToRead > 0x4000);
+    BOOL fTimedOut, fCancelled, fTransportError = FALSE;
     DEVICE_FPGA_SESSION_WAIT_RESULT WaitResult;
     PTLP_CALLBACK_BUF_MRd_SCATTER prxbuf = ctx->pMRdBufferX;
     if(!ctx->fTransportUsable) { return TRUE; }
@@ -4342,31 +4076,17 @@ BOOL DeviceFPGA_SynchOldAsync_RxTlpAsynchronous(_In_ PLC_CONTEXT ctxLC, _In_ PDE
     }
     BusySleep(25);
     if(DeviceFPGA_FTDI_CanReadPipeBounded(ctx)) {
-        WaitResult = DeviceFPGA_FTDI_ReadPipeBounded(
-            ctx,
-            pbBuffer,
-            cbReadMax,
-            DEVICE_FPGA_SESSION_WAIT_TIMEOUT_MS);
+        WaitResult = DeviceFPGA_FTDI_ReadPipeBounded(ctx, pbBuffer, cbReadMax, DEVICE_FPGA_SESSION_WAIT_TIMEOUT_MS);
         status = WaitResult.status;
         cbRead = WaitResult.cbTransferred;
         if(WaitResult.outcome != DEVICE_FPGA_SESSION_WAIT_COMPLETED) {
             fTransportError = TRUE;
-            DeviceFPGA_FTDI_RxRecover(
-                ctxLC,
-                ctx,
-                status,
-                WaitResult.outcome ==
-                    DEVICE_FPGA_SESSION_WAIT_TIMED_OUT);
+            fTimedOut = WaitResult.outcome == DEVICE_FPGA_SESSION_WAIT_TIMED_OUT;
+            DeviceFPGA_FTDI_RxRecover(ctxLC, ctx, status, fTimedOut);
             return fTransportError;
         }
     } else {
-        status = ctx->dev.pfnFT_ReadPipe(
-            ctx->dev.hFTDI,
-            0x82,
-            pbBuffer,
-            cbReadMax,
-            &cbRead,
-            NULL);
+        status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, pbBuffer, cbReadMax, &cbRead, NULL);
         if(status && (status != FT_IO_PENDING)) {
             fTransportError = TRUE;
             DeviceFPGA_FTDI_RxRecover(ctxLC, ctx, status, FALSE);
@@ -4405,12 +4125,8 @@ BOOL DeviceFPGA_SynchOldAsync_RxTlpAsynchronous(_In_ PLC_CONTEXT ctxLC, _In_ PDE
             status = WaitResult.status;
             if(WaitResult.outcome != DEVICE_FPGA_SESSION_WAIT_COMPLETED) {
                 fTransportError = TRUE;
-                DeviceFPGA_FTDI_RxRecover(
-                    ctxLC,
-                    ctx,
-                    status,
-                    WaitResult.outcome ==
-                        DEVICE_FPGA_SESSION_WAIT_TIMED_OUT);
+                fTimedOut = WaitResult.outcome == DEVICE_FPGA_SESSION_WAIT_TIMED_OUT;
+                DeviceFPGA_FTDI_RxRecover(ctxLC, ctx, status, fTimedOut);
                 fAsyncInProgress = FALSE;
                 break;
             }
@@ -4426,31 +4142,26 @@ BOOL DeviceFPGA_SynchOldAsync_RxTlpAsynchronous(_In_ PLC_CONTEXT ctxLC, _In_ PDE
         }
     }
     if(fAsyncInProgress && ctx->async2.fOverlappedInitialized) {
-        BOOL fCancelled = DeviceFPGA_Session_CloseOverlapped(
-            ctx->dev.hFTDI,
-            &ctx->async2.oOverlapped,
-            ctx->dev.pfnFT_AbortPipe,
-            ctx->dev.pfnFT_GetOverlappedResult,
-            ctx->dev.pfnFT_ReleaseOverlapped,
-            NULL,
-            NULL,
-            NULL);
-        ctx->async2.fOverlappedInitialized = FALSE;
-        ZeroMemory(
-            &ctx->async2.oOverlapped,
-            sizeof(ctx->async2.oOverlapped));
-        if(fCancelled &&
-           !ctx->dev.pfnFT_InitializeOverlapped(
+        WaitResult = DeviceFPGA_FTDI_WaitActiveRead(ctx, &cbRead);
+        if(WaitResult.outcome != DEVICE_FPGA_SESSION_WAIT_COMPLETED) {
+            fCancelled = DeviceFPGA_Session_CloseOverlapped(
                 ctx->dev.hFTDI,
-                &ctx->async2.oOverlapped)) {
-            ctx->async2.fOverlappedInitialized = TRUE;
-        } else if(ctx->fFT601) {
-            fTransportError = TRUE;
-            DeviceFPGA_FTDI_RxRecover(
-                ctxLC,
-                ctx,
-                FT_OTHER_ERROR,
-                FALSE);
+                &ctx->async2.oOverlapped,
+                ctx->dev.pfnFT_AbortPipe,
+                ctx->dev.pfnFT_GetOverlappedResult,
+                ctx->dev.pfnFT_ReleaseOverlapped,
+                NULL,
+                NULL,
+                NULL
+            );
+            ctx->async2.fOverlappedInitialized = FALSE;
+            ZeroMemory(&ctx->async2.oOverlapped, sizeof(ctx->async2.oOverlapped));
+            if(fCancelled && !ctx->dev.pfnFT_InitializeOverlapped(ctx->dev.hFTDI, &ctx->async2.oOverlapped)) {
+                ctx->async2.fOverlappedInitialized = TRUE;
+            } else if(ctx->fFT601) {
+                fTransportError = TRUE;
+                DeviceFPGA_FTDI_RxRecover(ctxLC, ctx, FT_OTHER_ERROR, FALSE);
+            }
         }
     }
     return fTransportError;
@@ -4572,11 +4283,7 @@ fail:
 //-------------------------------------------------------------------------------
 
 _Success_(return)
-BOOL DeviceFPGA_ReadScatterEx_DoLock(
-    _In_ PLC_CONTEXT ctxLC,
-    _In_ DWORD cMEMs,
-    _Inout_ PPMEM_SCATTER ppMEMs,
-    _Out_writes_(cMEMs) PLC_READ_PAGE_RESULT pResults)
+BOOL DeviceFPGA_ReadScatterEx_DoLock(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _Inout_ PPMEM_SCATTER ppMEMs, _Out_writes_(cMEMs) PLC_READ_PAGE_RESULT pResults)
 {
     PDEVICE_CONTEXT_FPGA ctx = (PDEVICE_CONTEXT_FPGA)ctxLC->hDevice;
     BOOL fResult;
@@ -4591,19 +4298,12 @@ BOOL DeviceFPGA_ReadScatterEx_DoLock(
     }
 }
 
-VOID DeviceFPGA_ReadScatter_DoLock(
-    _In_ PLC_CONTEXT ctxLC,
-    _In_ DWORD cMEMs,
-    _Inout_ PPMEM_SCATTER ppMEMs)
+VOID DeviceFPGA_ReadScatter_DoLock(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _Inout_ PPMEM_SCATTER ppMEMs)
 {
     PDEVICE_CONTEXT_FPGA ctx = (PDEVICE_CONTEXT_FPGA)ctxLC->hDevice;
     if(!ctx->wDeviceId) { return; }
     if(ctx->async2.fEnabled) {
-        DeviceFPGA_Async2_ReadScatter(
-            ctxLC,
-            cMEMs,
-            ppMEMs,
-            ctx->perf.RETRY_ON_ERROR);
+        DeviceFPGA_Async2_ReadScatter(ctxLC, cMEMs, ppMEMs, ctx->perf.RETRY_ON_ERROR);
     } else {
         EnterCriticalSection(&ctx->Lock);
         DeviceFPGA_Synch_ReadScatter(ctxLC, cMEMs, ppMEMs);
@@ -4612,15 +4312,7 @@ VOID DeviceFPGA_ReadScatter_DoLock(
 }
 
 _Success_(return)
-BOOL DeviceFPGA_ProbeMEM_Attempt(
-    _In_ PLC_CONTEXT ctxLC,
-    _In_ QWORD qwAddr,
-    _In_ DWORD cPages,
-    _Inout_updates_bytes_(cPages) PBYTE pbResultMap,
-    _In_ DWORD cSelected,
-    _In_reads_(cSelected) PDWORD pSelected,
-    _Out_writes_(cPages) PLC_READ_PAGE_RESULT pResults,
-    _In_ BOOL fRetryPass)
+BOOL DeviceFPGA_ProbeMEM_Attempt(_In_ PLC_CONTEXT ctxLC, _In_ QWORD qwAddr, _In_ DWORD cPages, _Inout_updates_bytes_(cPages) PBYTE pbResultMap, _In_ DWORD cSelected, _In_reads_(cSelected) PDWORD pSelected, _Out_writes_(cPages) PLC_READ_PAGE_RESULT pResults, _In_ BOOL fRetryPass)
 {
     PDEVICE_CONTEXT_FPGA ctx = (PDEVICE_CONTEXT_FPGA)ctxLC->hDevice;
     FPGA_PROBE_CALLBACK Probe = { 0 };
@@ -4631,14 +4323,11 @@ BOOL DeviceFPGA_ProbeMEM_Attempt(
     BOOL is32, isFlush, fBatchTransportError;
     PTLP_HDR_MRdWr64 hdrRd64 = (PTLP_HDR_MRdWr64)tx;
     PTLP_HDR_MRdWr32 hdrRd32 = (PTLP_HDR_MRdWr32)tx;
-    if(!pResults || !pSelected || !pbResultMap ||
-        ((SIZE_T)cPages > ((SIZE_T)-1) / sizeof(FPGA_READ_PAGE_STATE))) {
+    if(!pResults || !pSelected || !pbResultMap || ((SIZE_T)cPages > ((SIZE_T)-1) / sizeof(FPGA_READ_PAGE_STATE))) {
         return FALSE;
     }
     for(i = 0; i < cPages; i++) {
-        pResults[i] = pbResultMap[i]
-            ? LC_READ_PAGE_RESULT_SUCCESS
-            : LC_READ_PAGE_RESULT_UNSPECIFIED_ERROR;
+        pResults[i] = pbResultMap[i] ? LC_READ_PAGE_RESULT_SUCCESS : LC_READ_PAGE_RESULT_UNSPECIFIED_ERROR;
     }
     if(!cSelected) {
         return TRUE;
@@ -4738,9 +4427,7 @@ VOID DeviceFPGA_ProbeMEM_Chunk(_In_ PLC_CONTEXT ctxLC, _In_ QWORD pa, _In_ DWORD
     DWORD i, cSelected = 0, cRetry;
     PDWORD pSelected = NULL;
     PLC_READ_PAGE_RESULT pResults = NULL, pRetryResults = NULL;
-    if(!cPages ||
-        ((SIZE_T)cPages > ((SIZE_T)-1) / sizeof(DWORD)) ||
-        ((SIZE_T)cPages > ((SIZE_T)-1) / sizeof(LC_READ_PAGE_RESULT))) {
+    if(!cPages || ((SIZE_T)cPages > ((SIZE_T)-1) / sizeof(DWORD)) || ((SIZE_T)cPages > ((SIZE_T)-1) / sizeof(LC_READ_PAGE_RESULT))) {
         return;
     }
     pSelected = LocalAlloc(0, (SIZE_T)cPages * sizeof(DWORD));
@@ -4886,10 +4573,8 @@ VOID DeviceFPGA_WriteScatter(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cpMEMs, _Inout_ 
     // Flush and publish completion only after the transport accepts the batch.
     if(result) {
         result = (ctx->perf.FLAGS & DEVICE_PERFORMANCE_FLAG_FASTWRITE) ?
-            DeviceFPGA_TxTlp_FastWrite_NoLock(
-                ctxLC, ctx, NULL, 0, FALSE, TRUE) :
-            DeviceFPGA_TxTlp(
-                ctxLC, ctx, NULL, 0, FALSE, TRUE);
+            DeviceFPGA_TxTlp_FastWrite_NoLock(ctxLC, ctx, NULL, 0, FALSE, TRUE) :
+            DeviceFPGA_TxTlp(ctxLC, ctx, NULL, 0, FALSE, TRUE);
     }
     if(result) {
         for(iMEM = 0; iMEM < cpMEMs; iMEM++) {
@@ -4950,24 +4635,12 @@ BOOL DeviceFPGA_Command(
             for(i = 0, c = cbDataIn / sizeof(LC_TLP); i < c; i++) {
                 pTLP = ((PLC_TLP)pbDataIn) + i;
                 if((pTLP->cb >= 12) && !(pTLP->cb % 4)) {
-                    if(!DeviceFPGA_TxTlp(
-                        ctxLC,
-                        ctx,
-                        pTLP->pb,
-                        pTLP->cb,
-                        FALSE,
-                        FALSE)) {
+                    if(!DeviceFPGA_TxTlp(ctxLC, ctx, pTLP->pb, pTLP->cb, FALSE, FALSE)) {
                         return FALSE;
                     }
                 }
             }
-            return DeviceFPGA_TxTlp(
-                ctxLC,
-                ctx,
-                NULL,
-                0,
-                FALSE,
-                TRUE);
+            return DeviceFPGA_TxTlp(ctxLC, ctx, NULL, 0, FALSE, TRUE);
         case LC_CMD_FPGA_TLP_TOSTRING:
             if(!ppbDataOut || !pbDataIn || (cbDataIn % 4)) { return FALSE; }
             return TLP_ToString(pbDataIn, cbDataIn, (LPSTR*)ppbDataOut, pcbDataOut);
@@ -5112,13 +4785,7 @@ BOOL DeviceFPGA_Command_DoLock(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _In_ 
                 // queue single TLP for transmission in other thread (or perform a direct fast-write if possible):
                 if((cbDataIn >= 12) && !(cbDataIn % 4) && pbDataIn) {
                     if(ctx->perf.FLAGS & DEVICE_PERFORMANCE_FLAG_FASTWRITE) {
-                        if(!DeviceFPGA_TxTlp_FastWrite_NoLock(
-                            ctxLC,
-                            ctx,
-                            pbDataIn,
-                            cbDataIn,
-                            FALSE,
-                            TRUE)) {
+                        if(!DeviceFPGA_TxTlp_FastWrite_NoLock(ctxLC, ctx, pbDataIn, cbDataIn, FALSE, TRUE)) {
                             return FALSE;
                         }
                     } else {
@@ -5136,24 +4803,12 @@ BOOL DeviceFPGA_Command_DoLock(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _In_ 
                         for(i = 0, c = cbDataIn / sizeof(LC_TLP); i < c; i++) {
                             pTLP = ((PLC_TLP)pbDataIn) + i;
                             if((pTLP->cb >= 12) && !(pTLP->cb % 4)) {
-                                if(!DeviceFPGA_TxTlp_FastWrite_NoLock(
-                                    ctxLC,
-                                    ctx,
-                                    pTLP->pb,
-                                    pTLP->cb,
-                                    FALSE,
-                                    FALSE)) {
+                                if(!DeviceFPGA_TxTlp_FastWrite_NoLock(ctxLC, ctx, pTLP->pb, pTLP->cb, FALSE, FALSE)) {
                                     return FALSE;
                                 }
                             }
                         }
-                        if(!DeviceFPGA_TxTlp_FastWrite_NoLock(
-                            ctxLC,
-                            ctx,
-                            NULL,
-                            0,
-                            FALSE,
-                            TRUE)) {
+                        if(!DeviceFPGA_TxTlp_FastWrite_NoLock(ctxLC, ctx, NULL, 0, FALSE, TRUE)) {
                             return FALSE;
                         }
                     } else {
@@ -5471,7 +5126,8 @@ fail:
             ctx->wFpgaVersionMajor,
             ctx->wFpgaVersionMinor,
             ctx->wDeviceId,
-            ((!dwVIDPID || (dwVIDPID == 0x066610ee)) ? "" : ",FWCUST"));
+            ((!dwVIDPID || (dwVIDPID == 0x066610ee)) ? "" : ",FWCUST")
+        );
     }
     DeviceFPGA_Close(ctxLC);
     return FALSE;

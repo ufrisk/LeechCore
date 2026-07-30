@@ -851,6 +851,9 @@ static BOOL LcReadScatter_Impl(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _Inout_
     if(!cMEMs) {
         return TRUE;
     }
+    if(!ppMEMs) {
+        return FALSE;
+    }
     if(ctxLC->Config.fRemote && ctxLC->pfnReadScatter) {
         ctxLC->pfnReadScatter(ctxLC, cMEMs, ppMEMs);
         fDispatched = TRUE;
@@ -898,8 +901,16 @@ static BOOL LcReadScatter_Impl(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _Inout_
 }
 
 /*
-* Read memory in a scattered non-contiguous way and return per-page results.
+* Read memory in a scattered non-contiguous way and return a typed result for
+* every page. The function-level result reports argument/setup/dispatch status;
+* individual page success remains in MEM_SCATTER.f and pResults.
+* -- hLC
+* -- cMEMs
+* -- ppMEMs
+* -- pResults
+* -- return
 */
+_Success_(return)
 EXPORTED_FUNCTION BOOL LcReadScatterEx(_In_ HANDLE hLC, _In_ DWORD cMEMs, _Inout_ PPMEM_SCATTER ppMEMs, _Out_writes_(cMEMs) PLC_READ_PAGE_RESULT pResults)
 {
     BOOL fResult;

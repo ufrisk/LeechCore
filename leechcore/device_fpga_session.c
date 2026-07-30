@@ -72,7 +72,7 @@ DEVICE_FPGA_SESSION_WAIT_RESULT DeviceFPGA_Session_WaitOverlapped(
     _In_ BOOL fUseEventWait,
     _In_ DWORD dwTimeoutMs,
     _In_ DWORD dwPollMs,
-    _In_ PVOID pvTimingContext,
+    _In_opt_ PVOID pvTimingContext,
     _In_ PFN_DEVICE_FPGA_SESSION_TICK pfnTick,
     _In_ PFN_DEVICE_FPGA_SESSION_SLEEP pfnSleep
 )
@@ -173,7 +173,7 @@ DEVICE_FPGA_SESSION_WAIT_RESULT DeviceFPGA_Session_ReadPipeBounded(
     _In_ BOOL fUseEventWait,
     _In_ DWORD dwTimeoutMs,
     _In_ DWORD dwPollMs,
-    _In_ PVOID pvTimingContext,
+    _In_opt_ PVOID pvTimingContext,
     _In_ PFN_DEVICE_FPGA_SESSION_TICK pfnTick,
     _In_ PFN_DEVICE_FPGA_SESSION_SLEEP pfnSleep
 )
@@ -458,6 +458,7 @@ BOOL DeviceFPGA_Session_ParseV3Identity(
     return TRUE;
 }
 
+_Success_(return)
 BOOL DeviceFPGA_Session_ConfigurePipeTimeouts(
     _In_ HANDLE hFTDI,
     _In_ ULONG ulTimeoutInMs,
@@ -488,6 +489,7 @@ static VOID DeviceFPGA_Session_DefaultSleep(
     Sleep(dwMilliseconds);
 }
 
+_Success_(return)
 BOOL DeviceFPGA_Session_CloseOverlapped(
     _In_ HANDLE hFTDI,
     _In_ LPOVERLAPPED pOverlapped,
@@ -500,6 +502,7 @@ BOOL DeviceFPGA_Session_CloseOverlapped(
 )
 {
     BOOL fResult = TRUE;
+    ULONG ftStatus;
     DEVICE_FPGA_SESSION_WAIT_RESULT WaitResult;
     if(!hFTDI || !pOverlapped) { return TRUE; }
     if(!pfnAbortPipe || !pfnGetOverlappedResult || !pfnReleaseOverlapped) {
@@ -508,7 +511,8 @@ BOOL DeviceFPGA_Session_CloseOverlapped(
     if(!pfnTick) { pfnTick = DeviceFPGA_Session_DefaultTick; }
     if(!pfnSleep) { pfnSleep = DeviceFPGA_Session_DefaultSleep; }
     // RX only: some callers don't hold the TX fast-write lock, and aborting TX here could cancel an in-flight write on that path.
-    fResult &= pfnAbortPipe(hFTDI, 0x82) == DEVICE_FPGA_SESSION_FT_OK;
+    ftStatus = pfnAbortPipe(hFTDI, 0x82);
+    fResult &= ftStatus == DEVICE_FPGA_SESSION_FT_OK;
     WaitResult = DeviceFPGA_Session_WaitOverlapped(
         hFTDI,
         pOverlapped,

@@ -131,11 +131,11 @@ typedef ULONG(WINAPI *PFN_DEVICE_FPGA_SESSION_SET_PIPE_TIMEOUT)(
 #define DEVICE_FPGA_SESSION_CANCEL_TIMEOUT_MS       100
 
 typedef QWORD(*PFN_DEVICE_FPGA_SESSION_TICK)(
-    _In_ PVOID pvContext
+    _In_opt_ PVOID pvContext
 );
 
 typedef VOID(*PFN_DEVICE_FPGA_SESSION_SLEEP)(
-    _In_ PVOID pvContext,
+    _In_opt_ PVOID pvContext,
     _In_ DWORD dwMilliseconds
 );
 
@@ -199,7 +199,7 @@ DEVICE_FPGA_SESSION_WAIT_RESULT DeviceFPGA_Session_WaitOverlapped(
     _In_ BOOL fUseEventWait,
     _In_ DWORD dwTimeoutMs,
     _In_ DWORD dwPollMs,
-    _In_ PVOID pvTimingContext,
+    _In_opt_ PVOID pvTimingContext,
     _In_ PFN_DEVICE_FPGA_SESSION_TICK pfnTick,
     _In_ PFN_DEVICE_FPGA_SESSION_SLEEP pfnSleep
 );
@@ -215,7 +215,7 @@ DEVICE_FPGA_SESSION_WAIT_RESULT DeviceFPGA_Session_ReadPipeBounded(
     _In_ BOOL fUseEventWait,
     _In_ DWORD dwTimeoutMs,
     _In_ DWORD dwPollMs,
-    _In_ PVOID pvTimingContext,
+    _In_opt_ PVOID pvTimingContext,
     _In_ PFN_DEVICE_FPGA_SESSION_TICK pfnTick,
     _In_ PFN_DEVICE_FPGA_SESSION_SLEEP pfnSleep
 );

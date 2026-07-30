@@ -232,26 +232,32 @@ BOOL FpgaReadTagMap_Assign(_Inout_ PFPGA_READ_TAG_MAP map, _In_ DWORD iPage, _Ou
 {
     DWORD i;
     BYTE tag;
-    if(!map || !pTag || (map->cActive >= FPGA_READ_TAGS_PER_GENERATION)) {
+    if(!pTag) {
         return (BOOL)0;
     }
-    for(i = 0; i < FPGA_READ_TAGS_PER_GENERATION; i++) {
-        tag = (BYTE)(map->bGeneration + i);
-        if(!map->entries[tag].fActive) {
-            map->entries[tag].iPage = iPage;
-            map->entries[tag].fActive = (BOOL)1;
-            map->cActive++;
-            *pTag = tag;
-            return (BOOL)1;
+    if(map && (map->cActive < FPGA_READ_TAGS_PER_GENERATION)) {
+        for(i = 0; i < FPGA_READ_TAGS_PER_GENERATION; i++) {
+            tag = (BYTE)(map->bGeneration + i);
+            if(!map->entries[tag].fActive) {
+                map->entries[tag].iPage = iPage;
+                map->entries[tag].fActive = (BOOL)1;
+                map->cActive++;
+                *pTag = tag;
+                return (BOOL)1;
+            }
         }
     }
+    *pTag = 0;
     return (BOOL)0;
 }
 
 BOOL FpgaReadTagMap_Resolve(_In_ PFPGA_READ_TAG_MAP map, _In_ BYTE tag, _Out_ PDWORD piPage)
 {
-    if(!map || !piPage || ((tag & 0x80) != map->bGeneration) ||
-        !map->entries[tag].fActive) {
+    if(!piPage) {
+        return (BOOL)0;
+    }
+    if(!map || ((tag & 0x80) != map->bGeneration) || !map->entries[tag].fActive) {
+        *piPage = 0;
         return (BOOL)0;
     }
     *piPage = map->entries[tag].iPage;
@@ -262,6 +268,7 @@ BOOL FpgaReadTagMap_Retire(_Inout_ PFPGA_READ_TAG_MAP map, _In_ BYTE tag, _Out_o
 {
     DWORD iPage;
     if(!FpgaReadTagMap_Resolve(map, tag, &iPage)) {
+        if(piPage) { *piPage = 0; }
         return (BOOL)0;
     }
     map->entries[tag].fActive = (BOOL)0;
@@ -269,9 +276,7 @@ BOOL FpgaReadTagMap_Retire(_Inout_ PFPGA_READ_TAG_MAP map, _In_ BYTE tag, _Out_o
     if(map->cActive) {
         map->cActive--;
     }
-    if(piPage) {
-        *piPage = iPage;
-    }
+    if(piPage) { *piPage = iPage; }
     return (BOOL)1;
 }
 

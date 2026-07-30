@@ -150,9 +150,12 @@
     </Link>
     <PostBuildEvent>
       <Command>if not exist "$(SolutionDir)\includes\lib64" mkdir "$(SolutionDir)\includes\lib64"
+
 copy "$(OutDir)\lib\leechcore.lib" "$(SolutionDir)\includes\lib64\" /y
+
 copy "$(ProjectDir)\leechcore.h" "$(SolutionDir)\includes\" /y
-</Command>
+
+copy $(OutDir)\leechcore.dll W:\bin\ /y</Command>
     </PostBuildEvent>
     <PreBuildEvent>
       <Command>

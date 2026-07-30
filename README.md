@@ -236,10 +236,10 @@ v1.0-1.8
 * Bug fixes.
 * Windows 11 24H2 hibernation file support.
 * ZDMA fast-write "lockless" support.
-* </details>
 
 [v2.20](https://github.com/ufrisk/LeechCore/releases/tag/v2.20)
 * macOS support
+* </details>
 
 [v2.21](https://github.com/ufrisk/LeechCore/releases/tag/v2.21)
 * LeechAgent gRPC support.
@@ -249,6 +249,7 @@ v1.0-1.8
 [v2.22](https://github.com/ufrisk/LeechCore/releases/tag/v2.22)
 * Support for FTDI FT601 driver 1.4 (FTD3XXWU.dll)
 
-Latest:
+[v2.23](https://github.com/ufrisk/LeechCore/releases/tag/v2.23)
+* Improved FPGA error handling and recovery.
 * bug fix: hibernation file support.
 * Support for non-ascii characters in file paths.

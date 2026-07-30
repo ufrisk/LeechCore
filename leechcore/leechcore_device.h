@@ -18,7 +18,7 @@
 // (c) Ulf Frisk, 2020-2026
 // Author: Ulf Frisk, pcileech@frizk.net
 //
-// Header Version: 2.5
+// Header Version: 2.23
 //
 
 #ifndef __LEECHCORE_DEVICE_H__
@@ -94,7 +94,6 @@ typedef struct tdLC_CONTEXT {
     HANDLE hDevice;
     BOOL fMultiThread;
     VOID(*pfnReadScatter)(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cpMEMs, _Inout_ PPMEM_SCATTER ppMEMs);
-    BOOL(*pfnReadScatterEx)(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cpMEMs, _Inout_ PPMEM_SCATTER ppMEMs, _Out_writes_(cpMEMs) PLC_READ_PAGE_RESULT pResults);
     VOID(*pfnReadContigious)(_Inout_ PLC_READ_CONTIGIOUS_CONTEXT ctxReadContigious);
     VOID(*pfnWriteScatter)(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cpMEMs, _Inout_ PPMEM_SCATTER ppMEMs);
     BOOL(*pfnWriteContigious)(_In_ PLC_CONTEXT ctxLC, _In_ QWORD pa, _In_ DWORD cb, _In_reads_(cb) PBYTE pb);
@@ -122,6 +121,8 @@ typedef struct tdLC_CONTEXT {
         BOOL fCompress;
         DWORD dwRpcClientId;
     } Rpc;
+    // New functionality, plugins must ensure they are called by LeechCore 2.23+ before using.
+    BOOL(*pfnReadScatterEx)(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cpMEMs, _Inout_ PPMEM_SCATTER ppMEMs, _Out_writes_(cpMEMs) PLC_READ_PAGE_RESULT pResults);
 } LC_CONTEXT, *PLC_CONTEXT;
 
 /*

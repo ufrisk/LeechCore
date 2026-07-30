@@ -1,7 +1,12 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
+    <DebuggerFlavor>WindowsRemoteDebugger</DebuggerFlavor>
+    <RemoteDebuggerCommandArguments>-device fpga://algo=4 -v -memmap c:\temp\memmap-hades.txt benchmark</RemoteDebuggerCommandArguments>
+    <RemoteDebuggerWorkingDirectory>Z:\dev-pcileech\bin</RemoteDebuggerWorkingDirectory>
+    <RemoteDebuggerServerName>WORKSTATION.ad.frizk.net</RemoteDebuggerServerName>
+    <RemoteDebuggerCommandArgumentsHistory>pcileech.exe -device fpga -v -memmap c:\temp\memmap-hades.txt|-device fpga -v -memmap c:\temp\memmap-hades.txt|-device fpga://algo=4 -v -memmap c:\temp\memmap-hades.txt benchmark|</RemoteDebuggerCommandArgumentsHistory>
+    <RemoteDebuggerCommand>Z:\dev-pcileech\bin\pcileech.exe</RemoteDebuggerCommand>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <DebuggerFlavor>WindowsRemoteDebugger</DebuggerFlavor>
