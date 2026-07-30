@@ -113,6 +113,59 @@ DEVICE_FPGA_SESSION_WAIT_RESULT DeviceFPGA_Session_WaitOverlapped(
     }
 }
 
+DEVICE_FPGA_SESSION_WAIT_RESULT DeviceFPGA_Session_ReadPipeBounded(
+    _In_ HANDLE hFTDI,
+    _In_ UCHAR ucPipeID,
+    _Out_writes_(cbBuffer) PUCHAR pbBuffer,
+    _In_ ULONG cbBuffer,
+    _In_ LPOVERLAPPED pOverlapped,
+    _In_ PFN_DEVICE_FPGA_SESSION_READ_PIPE pfnReadPipe,
+    _In_ PFN_DEVICE_FPGA_SESSION_GET_OVERLAPPED_RESULT pfnGetOverlappedResult,
+    _In_ BOOL fUseEventWait,
+    _In_ DWORD dwTimeoutMs,
+    _In_ DWORD dwPollMs,
+    _In_ PVOID pvTimingContext,
+    _In_ PFN_DEVICE_FPGA_SESSION_TICK pfnTick,
+    _In_ PFN_DEVICE_FPGA_SESSION_SLEEP pfnSleep
+)
+{
+    DEVICE_FPGA_SESSION_WAIT_RESULT Result = {
+        DEVICE_FPGA_SESSION_WAIT_DRIVER_ERROR,
+        (ULONG)-1,
+        0
+    };
+    if(!hFTDI || !pbBuffer || !cbBuffer || !pOverlapped || !pfnReadPipe ||
+       !pfnGetOverlappedResult || !dwTimeoutMs || !dwPollMs ||
+       !pfnTick || !pfnSleep) {
+        return Result;
+    }
+    Result.status = pfnReadPipe(
+        hFTDI,
+        ucPipeID,
+        pbBuffer,
+        cbBuffer,
+        &Result.cbTransferred,
+        pOverlapped);
+    if(Result.status == DEVICE_FPGA_SESSION_FT_OK) {
+        Result.outcome = DEVICE_FPGA_SESSION_WAIT_COMPLETED;
+        return Result;
+    }
+    Result.cbTransferred = 0;
+    if(Result.status != DEVICE_FPGA_SESSION_FT_IO_PENDING) {
+        return Result;
+    }
+    return DeviceFPGA_Session_WaitOverlapped(
+        hFTDI,
+        pOverlapped,
+        pfnGetOverlappedResult,
+        fUseEventWait,
+        dwTimeoutMs,
+        dwPollMs,
+        pvTimingContext,
+        pfnTick,
+        pfnSleep);
+}
+
 DEVICE_FPGA_SESSION_RECOVERY_STAGE DeviceFPGA_Session_Recover(
     _Inout_ PVOID pvContext,
     _In_ PDEVICE_FPGA_SESSION_RECOVERY_OPS pOps
@@ -175,7 +228,7 @@ DEVICE_FPGA_SESSION_DRAIN_OUTCOME DeviceFPGA_Session_Drain(
     _In_ PFN_DEVICE_FPGA_SESSION_SLEEP pfnSleep
 )
 {
-    DWORD cbRead, cbNonFiller = 0;
+    DWORD cbRead, cbNonFiller = 0, dwReadTimeoutMs, dwSleepMs;
     QWORD qwNow, qwStart, qwLastNonFiller;
     if(!pfnRead || !pbBuffer || !cbBuffer || !cbMaxNonFiller ||
        !dwQuietMs || !dwTimeoutMs || !dwPollMs || !pfnTick || !pfnSleep) {
@@ -184,12 +237,26 @@ DEVICE_FPGA_SESSION_DRAIN_OUTCOME DeviceFPGA_Session_Drain(
     qwStart = pfnTick(pvTimingContext);
     qwLastNonFiller = qwStart;
     for(;;) {
+        qwNow = pfnTick(pvTimingContext);
+        if(qwNow - qwStart >= dwTimeoutMs) {
+            return DEVICE_FPGA_SESSION_DRAIN_TIME_LIMIT;
+        }
+        // Bound the read itself, not just the loop: a single slow read must not run past the deadline.
+        dwReadTimeoutMs = (DWORD)(dwTimeoutMs - (qwNow - qwStart));
         cbRead = 0;
-        if(!pfnRead(pvContext, pbBuffer, cbBuffer, &cbRead) ||
+        if(!pfnRead(
+            pvContext,
+            pbBuffer,
+            cbBuffer,
+            dwReadTimeoutMs,
+            &cbRead) ||
            (cbRead > cbBuffer)) {
             return DEVICE_FPGA_SESSION_DRAIN_READ_ERROR;
         }
         qwNow = pfnTick(pvTimingContext);
+        if(qwNow - qwStart >= dwTimeoutMs) {
+            return DEVICE_FPGA_SESSION_DRAIN_TIME_LIMIT;
+        }
         if(DeviceFPGA_Session_IsFillerOnly(pbBuffer, cbRead)) {
             if(qwNow - qwLastNonFiller >= dwQuietMs) {
                 return DEVICE_FPGA_SESSION_DRAIN_CLEAN;
@@ -201,10 +268,10 @@ DEVICE_FPGA_SESSION_DRAIN_OUTCOME DeviceFPGA_Session_Drain(
             cbNonFiller += cbRead;
             qwLastNonFiller = qwNow;
         }
-        if(qwNow - qwStart >= dwTimeoutMs) {
-            return DEVICE_FPGA_SESSION_DRAIN_TIME_LIMIT;
-        }
-        pfnSleep(pvTimingContext, dwPollMs);
+        dwSleepMs = min(
+            dwPollMs,
+            (DWORD)(dwTimeoutMs - (qwNow - qwStart)));
+        pfnSleep(pvTimingContext, dwSleepMs);
     }
 }
 

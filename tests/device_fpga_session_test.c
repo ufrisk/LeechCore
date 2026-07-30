@@ -286,6 +286,36 @@ typedef struct tdWAIT_SCRIPT {
     HANDLE hFirstQueryEvent;
 } WAIT_SCRIPT, *PWAIT_SCRIPT;
 
+typedef struct tdREAD_PIPE_SCRIPT {
+    WAIT_SCRIPT Wait;
+    ULONG ulReadStatus;
+    ULONG cbImmediate;
+    DWORD cReadCalls;
+    UCHAR ucPipeID;
+    ULONG cbBuffer;
+    PUCHAR pbBuffer;
+    LPOVERLAPPED pOverlapped;
+} READ_PIPE_SCRIPT, *PREAD_PIPE_SCRIPT;
+
+static ULONG WINAPI ScriptedReadPipe(
+    _In_ HANDLE hFTDI,
+    _In_ UCHAR ucPipeID,
+    _Out_writes_(cbBuffer) PUCHAR pbBuffer,
+    _In_ ULONG cbBuffer,
+    _Out_ PULONG pcbTransferred,
+    _In_ LPOVERLAPPED pOverlapped
+)
+{
+    PREAD_PIPE_SCRIPT pScript = (PREAD_PIPE_SCRIPT)hFTDI;
+    pScript->cReadCalls++;
+    pScript->ucPipeID = ucPipeID;
+    pScript->cbBuffer = cbBuffer;
+    pScript->pbBuffer = pbBuffer;
+    pScript->pOverlapped = pOverlapped;
+    *pcbTransferred = pScript->cbImmediate;
+    return pScript->ulReadStatus;
+}
+
 static ULONG WINAPI ScriptedWaitGetOverlappedResult(
     _In_ HANDLE hFTDI,
     _In_ LPOVERLAPPED pOverlapped,
@@ -516,6 +546,212 @@ static VOID TestWaitEventTimeoutDoesNotPoll(VOID)
     ASSERT_EQ(Script.cSleepCalls, 0);
     ASSERT_FALSE(Script.fWaitArgument);
     CloseHandle(Overlapped.hEvent);
+}
+
+static VOID TestBoundedReadReturnsImmediateCompletion(VOID)
+{
+    BYTE pbBuffer[0x4000];
+    OVERLAPPED Overlapped = { 0 };
+    READ_PIPE_SCRIPT Script = { 0 };
+    DEVICE_FPGA_SESSION_WAIT_RESULT Result;
+    Script.cbImmediate = 0x2345;
+    Result = DeviceFPGA_Session_ReadPipeBounded(
+        &Script,
+        0x82,
+        pbBuffer,
+        sizeof(pbBuffer),
+        &Overlapped,
+        ScriptedReadPipe,
+        ScriptedWaitGetOverlappedResult,
+        TRUE,
+        1000,
+        1,
+        &Script.Wait,
+        ScriptedWaitTick,
+        ScriptedWaitSleep);
+    ASSERT_EQ(Result.outcome, DEVICE_FPGA_SESSION_WAIT_COMPLETED);
+    ASSERT_EQ(Result.status, DEVICE_FPGA_SESSION_FT_OK);
+    ASSERT_EQ(Result.cbTransferred, 0x2345);
+    ASSERT_EQ(Script.cReadCalls, 1);
+    ASSERT_EQ(Script.Wait.cGetCalls, 0);
+    ASSERT_EQ(Script.Wait.cSleepCalls, 0);
+    ASSERT_EQ(Script.ucPipeID, 0x82);
+    ASSERT_EQ(Script.cbBuffer, sizeof(pbBuffer));
+    ASSERT_TRUE(Script.pbBuffer == pbBuffer);
+    ASSERT_TRUE(Script.pOverlapped == &Overlapped);
+}
+
+static VOID TestBoundedReadWaitsForPendingCompletion(VOID)
+{
+    BYTE pbBuffer[0x4000];
+    OVERLAPPED Overlapped = { 0 };
+    READ_PIPE_SCRIPT Script = { 0 };
+    DEVICE_FPGA_SESSION_WAIT_RESULT Result;
+    HANDLE hSignalThread;
+    WAIT_EVENT_SIGNAL Signal;
+    Overlapped.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+    Script.Wait.hFirstQueryEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+    ASSERT_TRUE(Overlapped.hEvent != NULL);
+    ASSERT_TRUE(Script.Wait.hFirstQueryEvent != NULL);
+    if(!Overlapped.hEvent || !Script.Wait.hFirstQueryEvent) {
+        if(Script.Wait.hFirstQueryEvent) {
+            CloseHandle(Script.Wait.hFirstQueryEvent);
+        }
+        if(Overlapped.hEvent) { CloseHandle(Overlapped.hEvent); }
+        return;
+    }
+    Script.ulReadStatus = DEVICE_FPGA_SESSION_FT_IO_PENDING;
+    Script.cbImmediate = 0x9999;
+    Script.Wait.fResultTracksEvent = TRUE;
+    Signal.hFirstQueryEvent = Script.Wait.hFirstQueryEvent;
+    Signal.hCompletionEvent = Overlapped.hEvent;
+    hSignalThread = CreateThread(
+        NULL,
+        0,
+        SignalWaitEventAfterFirstQuery,
+        &Signal,
+        0,
+        NULL);
+    ASSERT_TRUE(hSignalThread != NULL);
+    if(!hSignalThread) {
+        CloseHandle(Script.Wait.hFirstQueryEvent);
+        CloseHandle(Overlapped.hEvent);
+        return;
+    }
+    SetEvent(Script.Wait.hFirstQueryEvent);
+    Result = DeviceFPGA_Session_ReadPipeBounded(
+        &Script,
+        0x82,
+        pbBuffer,
+        sizeof(pbBuffer),
+        &Overlapped,
+        ScriptedReadPipe,
+        ScriptedWaitGetOverlappedResult,
+        TRUE,
+        1000,
+        1,
+        &Script.Wait,
+        ScriptedWaitTick,
+        ScriptedWaitSleep);
+    ASSERT_EQ(Result.outcome, DEVICE_FPGA_SESSION_WAIT_COMPLETED);
+    ASSERT_EQ(Result.status, DEVICE_FPGA_SESSION_FT_OK);
+    ASSERT_EQ(Result.cbTransferred, 0x1234);
+    ASSERT_EQ(Script.cReadCalls, 1);
+    ASSERT_EQ(Script.Wait.cGetCalls, 1);
+    ASSERT_EQ(Script.Wait.cSleepCalls, 0);
+    ASSERT_FALSE(Script.Wait.fWaitArgument);
+    ASSERT_TRUE(Script.pOverlapped == &Overlapped);
+    ASSERT_EQ(WaitForSingleObject(hSignalThread, 1000), WAIT_OBJECT_0);
+    CloseHandle(hSignalThread);
+    CloseHandle(Script.Wait.hFirstQueryEvent);
+    CloseHandle(Overlapped.hEvent);
+}
+
+static VOID TestBoundedReadPendingForeverTimesOut(VOID)
+{
+    BYTE pbBuffer[0x4000];
+    OVERLAPPED Overlapped = { 0 };
+    READ_PIPE_SCRIPT Script = { 0 };
+    DEVICE_FPGA_SESSION_WAIT_RESULT Result;
+    Overlapped.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+    ASSERT_TRUE(Overlapped.hEvent != NULL);
+    if(!Overlapped.hEvent) { return; }
+    Script.ulReadStatus = DEVICE_FPGA_SESSION_FT_IO_PENDING;
+    Script.cbImmediate = 0x9999;
+    Result = DeviceFPGA_Session_ReadPipeBounded(
+        &Script,
+        0x82,
+        pbBuffer,
+        sizeof(pbBuffer),
+        &Overlapped,
+        ScriptedReadPipe,
+        ScriptedWaitGetOverlappedResult,
+        TRUE,
+        5,
+        1,
+        &Script.Wait,
+        ScriptedWaitTick,
+        ScriptedWaitSleep);
+    ASSERT_EQ(Result.outcome, DEVICE_FPGA_SESSION_WAIT_TIMED_OUT);
+    ASSERT_EQ(Result.status, DEVICE_FPGA_SESSION_FT_IO_INCOMPLETE);
+    ASSERT_EQ(Result.cbTransferred, 0);
+    ASSERT_EQ(Script.cReadCalls, 1);
+    ASSERT_EQ(Script.Wait.qwNow, 0);
+    ASSERT_EQ(Script.Wait.cGetCalls, 0);
+    ASSERT_EQ(Script.Wait.cSleepCalls, 0);
+    ASSERT_FALSE(Script.Wait.fWaitArgument);
+    CloseHandle(Overlapped.hEvent);
+}
+
+static VOID TestBoundedReadReturnsSubmissionErrorWithoutPolling(VOID)
+{
+    BYTE pbBuffer[0x4000];
+    OVERLAPPED Overlapped = { 0 };
+    READ_PIPE_SCRIPT Script = { 0 };
+    DEVICE_FPGA_SESSION_WAIT_RESULT Result;
+    Script.ulReadStatus = 0x20;
+    Script.cbImmediate = 0x9999;
+    Result = DeviceFPGA_Session_ReadPipeBounded(
+        &Script,
+        0x82,
+        pbBuffer,
+        sizeof(pbBuffer),
+        &Overlapped,
+        ScriptedReadPipe,
+        ScriptedWaitGetOverlappedResult,
+        TRUE,
+        1000,
+        1,
+        &Script.Wait,
+        ScriptedWaitTick,
+        ScriptedWaitSleep);
+    ASSERT_EQ(Result.outcome, DEVICE_FPGA_SESSION_WAIT_DRIVER_ERROR);
+    ASSERT_EQ(Result.status, 0x20);
+    ASSERT_EQ(Result.cbTransferred, 0);
+    ASSERT_EQ(Script.cReadCalls, 1);
+    ASSERT_EQ(Script.Wait.cGetCalls, 0);
+    ASSERT_EQ(Script.Wait.cSleepCalls, 0);
+}
+
+static VOID TestBoundedReadRejectsInvalidArguments(VOID)
+{
+    BYTE pbBuffer[0x100];
+    OVERLAPPED Overlapped = { 0 };
+    READ_PIPE_SCRIPT Script = { 0 };
+#define ASSERT_INVALID_BOUNDED_READ(handle, buffer, size, overlapped, read, get, tick, sleep) \
+    ASSERT_EQ( \
+        DeviceFPGA_Session_ReadPipeBounded( \
+            (handle), 0x82, (buffer), (size), (overlapped), (read), (get), \
+            TRUE, 1000, 1, &Script.Wait, (tick), (sleep)).outcome, \
+        DEVICE_FPGA_SESSION_WAIT_DRIVER_ERROR)
+    ASSERT_INVALID_BOUNDED_READ(
+        NULL, pbBuffer, sizeof(pbBuffer), &Overlapped, ScriptedReadPipe,
+        ScriptedWaitGetOverlappedResult, ScriptedWaitTick, ScriptedWaitSleep);
+    ASSERT_INVALID_BOUNDED_READ(
+        &Script, NULL, sizeof(pbBuffer), &Overlapped, ScriptedReadPipe,
+        ScriptedWaitGetOverlappedResult, ScriptedWaitTick, ScriptedWaitSleep);
+    ASSERT_INVALID_BOUNDED_READ(
+        &Script, pbBuffer, 0, &Overlapped, ScriptedReadPipe,
+        ScriptedWaitGetOverlappedResult, ScriptedWaitTick, ScriptedWaitSleep);
+    ASSERT_INVALID_BOUNDED_READ(
+        &Script, pbBuffer, sizeof(pbBuffer), NULL, ScriptedReadPipe,
+        ScriptedWaitGetOverlappedResult, ScriptedWaitTick, ScriptedWaitSleep);
+    ASSERT_INVALID_BOUNDED_READ(
+        &Script, pbBuffer, sizeof(pbBuffer), &Overlapped, NULL,
+        ScriptedWaitGetOverlappedResult, ScriptedWaitTick, ScriptedWaitSleep);
+    ASSERT_INVALID_BOUNDED_READ(
+        &Script, pbBuffer, sizeof(pbBuffer), &Overlapped, ScriptedReadPipe,
+        NULL, ScriptedWaitTick, ScriptedWaitSleep);
+    ASSERT_INVALID_BOUNDED_READ(
+        &Script, pbBuffer, sizeof(pbBuffer), &Overlapped, ScriptedReadPipe,
+        ScriptedWaitGetOverlappedResult, NULL, ScriptedWaitSleep);
+    ASSERT_INVALID_BOUNDED_READ(
+        &Script, pbBuffer, sizeof(pbBuffer), &Overlapped, ScriptedReadPipe,
+        ScriptedWaitGetOverlappedResult, ScriptedWaitTick, NULL);
+#undef ASSERT_INVALID_BOUNDED_READ
+    ASSERT_EQ(Script.cReadCalls, 0);
+    ASSERT_EQ(Script.Wait.cGetCalls, 0);
+    ASSERT_EQ(Script.Wait.cSleepCalls, 0);
 }
 
 static VOID TestWaitCompletesWithoutBlockingDriverCall(VOID)
@@ -959,6 +1195,9 @@ typedef struct tdDRAIN_SCRIPT {
     DWORD iOversizeCall;
     DWORD iNonFillerCall;
     DWORD cbNonFiller;
+    DWORD dwReadDelayMs;
+    DWORD dwFirstReadTimeoutMs;
+    DWORD dwLastReadTimeoutMs;
     QWORD qwNow;
     BOOL fAlwaysNonFiller;
     BOOL fUseFiller;
@@ -969,11 +1208,17 @@ static BOOL ScriptedDrainRead(
     _Inout_ PVOID pvContext,
     _Out_writes_(cbBuffer) PBYTE pbBuffer,
     _In_ DWORD cbBuffer,
+    _In_ DWORD dwTimeoutMs,
     _Out_ PDWORD pcbRead
 )
 {
     PDRAIN_SCRIPT pScript = (PDRAIN_SCRIPT)pvContext;
     DWORD iCall = ++pScript->cCalls;
+    if(iCall == 1) {
+        pScript->dwFirstReadTimeoutMs = dwTimeoutMs;
+    }
+    pScript->dwLastReadTimeoutMs = dwTimeoutMs;
+    pScript->qwNow += pScript->dwReadDelayMs;
     if(iCall == pScript->iFailCall) {
         *pcbRead = 0;
         return FALSE;
@@ -1129,9 +1374,40 @@ static VOID TestDrainEnforcesOverallDeadline(VOID)
             &Script, pbBuffer, sizeof(pbBuffer), 0x100000),
         DEVICE_FPGA_SESSION_DRAIN_TIME_LIMIT);
     ASSERT_EQ(Script.qwNow, 5000);
-    ASSERT_EQ(Script.cCalls, 501);
+    ASSERT_EQ(Script.cCalls, 500);
     ASSERT_EQ(Script.cSleepCalls, 500);
     ASSERT_FALSE(Script.fWrongSleep);
+}
+
+static VOID TestDrainDeadlineWinsAfterSlowRead(VOID)
+{
+    BYTE pbBuffer[64];
+    DRAIN_SCRIPT Script = { 0 };
+    DEVICE_FPGA_SESSION_DRAIN_OUTCOME Outcome;
+    Script.dwReadDelayMs = 5000;
+    Outcome = RunScriptedDrain(
+        &Script, pbBuffer, sizeof(pbBuffer), 0x100000);
+    ASSERT_EQ(Outcome, DEVICE_FPGA_SESSION_DRAIN_TIME_LIMIT);
+    ASSERT_EQ(Script.qwNow, 5000);
+    ASSERT_EQ(Script.cCalls, 1);
+    ASSERT_EQ(Script.cSleepCalls, 0);
+}
+
+static VOID TestDrainPassesRemainingDeadlineToReads(VOID)
+{
+    BYTE pbBuffer[64];
+    DRAIN_SCRIPT Script = { 0 };
+    DEVICE_FPGA_SESSION_DRAIN_OUTCOME Outcome;
+    Script.cbNonFiller = sizeof(DWORD);
+    Script.dwReadDelayMs = 1000;
+    Script.fAlwaysNonFiller = TRUE;
+    Outcome = RunScriptedDrain(
+        &Script, pbBuffer, sizeof(pbBuffer), 0x100000);
+    ASSERT_EQ(Outcome, DEVICE_FPGA_SESSION_DRAIN_TIME_LIMIT);
+    ASSERT_EQ(Script.dwFirstReadTimeoutMs, 5000);
+    ASSERT_EQ(Script.dwLastReadTimeoutMs, 960);
+    ASSERT_EQ(Script.cCalls, 5);
+    ASSERT_EQ(Script.cSleepCalls, 4);
 }
 
 static VOID TestDrainRejectsInvalidPolicy(VOID)
@@ -1174,6 +1450,11 @@ int main(void)
     TestWaitFallsBackToPollingAfterEarlyEvent();
     TestWaitCanBypassSignaledEventForPolling();
     TestWaitEventTimeoutDoesNotPoll();
+    TestBoundedReadReturnsImmediateCompletion();
+    TestBoundedReadWaitsForPendingCompletion();
+    TestBoundedReadPendingForeverTimesOut();
+    TestBoundedReadReturnsSubmissionErrorWithoutPolling();
+    TestBoundedReadRejectsInvalidArguments();
     TestWaitCompletesWithoutBlockingDriverCall();
     TestWaitPendingForeverTimesOutAtDeadline();
     TestWaitReturnsDriverErrorWithoutRetry();
@@ -1192,11 +1473,13 @@ int main(void)
     TestDrainRejectsOversizedRead();
     TestDrainEnforcesNonFillerByteLimit();
     TestDrainEnforcesOverallDeadline();
+    TestDrainDeadlineWinsAfterSlowRead();
+    TestDrainPassesRemainingDeadlineToReads();
     TestDrainRejectsInvalidPolicy();
     if(g_cFailures) {
         printf("%d test assertion(s) failed.\n", g_cFailures);
         return 1;
     }
-    printf("PASS: 35 FPGA session protocol cases.\n");
+    printf("PASS: 42 FPGA session protocol cases.\n");
     return 0;
 }

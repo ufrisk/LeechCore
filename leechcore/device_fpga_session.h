@@ -24,6 +24,15 @@ typedef ULONG(WINAPI *PFN_DEVICE_FPGA_SESSION_ABORT_PIPE)(
     _In_ UCHAR ucPipeID
 );
 
+typedef ULONG(WINAPI *PFN_DEVICE_FPGA_SESSION_READ_PIPE)(
+    _In_ HANDLE hFTDI,
+    _In_ UCHAR ucPipeID,
+    _Out_writes_(cbBuffer) PUCHAR pbBuffer,
+    _In_ ULONG cbBuffer,
+    _Out_ PULONG pcbTransferred,
+    _In_ LPOVERLAPPED pOverlapped
+);
+
 typedef ULONG(WINAPI *PFN_DEVICE_FPGA_SESSION_GET_OVERLAPPED_RESULT)(
     _In_ HANDLE hFTDI,
     _In_ LPOVERLAPPED pOverlapped,
@@ -44,6 +53,7 @@ typedef ULONG(WINAPI *PFN_DEVICE_FPGA_SESSION_SET_PIPE_TIMEOUT)(
 
 #define DEVICE_FPGA_SESSION_FT_OK                  0
 #define DEVICE_FPGA_SESSION_FT_TIMEOUT             19
+#define DEVICE_FPGA_SESSION_FT_IO_PENDING          24
 #define DEVICE_FPGA_SESSION_FT_IO_INCOMPLETE       25
 #define DEVICE_FPGA_SESSION_WAIT_TIMEOUT_MS         1000
 #define DEVICE_FPGA_SESSION_WAIT_POLL_MS            1
@@ -107,12 +117,29 @@ typedef BOOL(*PFN_DEVICE_FPGA_SESSION_DRAIN_READ)(
     _Inout_ PVOID pvContext,
     _Out_writes_(cbBuffer) PBYTE pbBuffer,
     _In_ DWORD cbBuffer,
+    _In_ DWORD dwTimeoutMs,
     _Out_ PDWORD pcbRead
 );
 
 DEVICE_FPGA_SESSION_WAIT_RESULT DeviceFPGA_Session_WaitOverlapped(
     _In_ HANDLE hFTDI,
     _In_ LPOVERLAPPED pOverlapped,
+    _In_ PFN_DEVICE_FPGA_SESSION_GET_OVERLAPPED_RESULT pfnGetOverlappedResult,
+    _In_ BOOL fUseEventWait,
+    _In_ DWORD dwTimeoutMs,
+    _In_ DWORD dwPollMs,
+    _In_ PVOID pvTimingContext,
+    _In_ PFN_DEVICE_FPGA_SESSION_TICK pfnTick,
+    _In_ PFN_DEVICE_FPGA_SESSION_SLEEP pfnSleep
+);
+
+DEVICE_FPGA_SESSION_WAIT_RESULT DeviceFPGA_Session_ReadPipeBounded(
+    _In_ HANDLE hFTDI,
+    _In_ UCHAR ucPipeID,
+    _Out_writes_(cbBuffer) PUCHAR pbBuffer,
+    _In_ ULONG cbBuffer,
+    _In_ LPOVERLAPPED pOverlapped,
+    _In_ PFN_DEVICE_FPGA_SESSION_READ_PIPE pfnReadPipe,
     _In_ PFN_DEVICE_FPGA_SESSION_GET_OVERLAPPED_RESULT pfnGetOverlappedResult,
     _In_ BOOL fUseEventWait,
     _In_ DWORD dwTimeoutMs,
