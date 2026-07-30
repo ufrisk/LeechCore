@@ -272,6 +272,24 @@ BOOL LcAllocScatter3(
 );
 
 /*
+* Read memory in a scattered non-contiguous way and return a typed result for
+* every page. The function-level result reports argument/setup/dispatch status;
+* individual page success remains in MEM_SCATTER.f and pResults.
+* -- hLC
+* -- cMEMs
+* -- ppMEMs
+* -- pResults
+* -- return
+*/
+EXPORTED_FUNCTION _Success_(return)
+BOOL LcReadScatterEx(
+    _In_ HANDLE hLC,
+    _In_ DWORD cMEMs,
+    _Inout_ PPMEM_SCATTER ppMEMs,
+    _Out_writes_(cMEMs) PLC_READ_PAGE_RESULT pResults
+);
+
+/*
 * Read memory in a scattered non-contiguous way. This is recommended for reads.
 * -- hLC
 * -- cMEMs

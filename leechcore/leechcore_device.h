@@ -94,6 +94,7 @@ typedef struct tdLC_CONTEXT {
     HANDLE hDevice;
     BOOL fMultiThread;
     VOID(*pfnReadScatter)(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cpMEMs, _Inout_ PPMEM_SCATTER ppMEMs);
+    BOOL(*pfnReadScatterEx)(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cpMEMs, _Inout_ PPMEM_SCATTER ppMEMs, _Out_writes_(cpMEMs) PLC_READ_PAGE_RESULT pResults);
     VOID(*pfnReadContigious)(_Inout_ PLC_READ_CONTIGIOUS_CONTEXT ctxReadContigious);
     VOID(*pfnWriteScatter)(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cpMEMs, _Inout_ PPMEM_SCATTER ppMEMs);
     BOOL(*pfnWriteContigious)(_In_ PLC_CONTEXT ctxLC, _In_ QWORD pa, _In_ DWORD cb, _In_reads_(cb) PBYTE pb);

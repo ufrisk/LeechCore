@@ -20,3 +20,6 @@ leechrpc_s.c
 /files/x86/lib
 /leechcorepyc/pkg_linux
 /files/leechagent
+/tests/bin
+/tests/obj
+/tests/device_fpga_read_policy_test
