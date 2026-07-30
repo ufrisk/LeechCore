@@ -20,6 +20,7 @@ DEVICE_FPGA_SESSION_WAIT_RESULT DeviceFPGA_Session_WaitOverlapped(
     _In_ HANDLE hFTDI,
     _In_ LPOVERLAPPED pOverlapped,
     _In_ PFN_DEVICE_FPGA_SESSION_GET_OVERLAPPED_RESULT pfnGetOverlappedResult,
+    _In_ BOOL fUseEventWait,
     _In_ DWORD dwTimeoutMs,
     _In_ DWORD dwPollMs,
     _In_ PVOID pvTimingContext,
@@ -38,6 +39,57 @@ DEVICE_FPGA_SESSION_WAIT_RESULT DeviceFPGA_Session_WaitOverlapped(
         return Result;
     }
     qwStart = pfnTick(pvTimingContext);
+#ifdef WIN32
+    if(fUseEventWait && pOverlapped->hEvent) {
+        DWORD dwWaitResult;
+        Result.status = DEVICE_FPGA_SESSION_FT_IO_INCOMPLETE;
+        dwWaitResult = WaitForSingleObject(
+            pOverlapped->hEvent,
+            dwTimeoutMs);
+        if(dwWaitResult == WAIT_TIMEOUT) {
+            Result.outcome = DEVICE_FPGA_SESSION_WAIT_TIMED_OUT;
+            return Result;
+        }
+        if(dwWaitResult != WAIT_OBJECT_0) {
+            Result.status = (ULONG)-1;
+            return Result;
+        }
+        Result.status = pfnGetOverlappedResult(
+            hFTDI,
+            pOverlapped,
+            &Result.cbTransferred,
+            FALSE);
+        if(Result.status == DEVICE_FPGA_SESSION_FT_OK) {
+            Result.outcome = DEVICE_FPGA_SESSION_WAIT_COMPLETED;
+            return Result;
+        }
+        Result.cbTransferred = 0;
+        if(Result.status != DEVICE_FPGA_SESSION_FT_IO_INCOMPLETE) {
+            return Result;
+        }
+    }
+#endif /* WIN32 */
+#ifdef LINUX
+    if(fUseEventWait) {
+        Result.status = pfnGetOverlappedResult(
+            hFTDI,
+            pOverlapped,
+            &Result.cbTransferred,
+            TRUE);
+        if(Result.status == DEVICE_FPGA_SESSION_FT_OK) {
+            Result.outcome = DEVICE_FPGA_SESSION_WAIT_COMPLETED;
+            return Result;
+        }
+        Result.cbTransferred = 0;
+        if(Result.status == DEVICE_FPGA_SESSION_FT_TIMEOUT) {
+            Result.outcome = DEVICE_FPGA_SESSION_WAIT_TIMED_OUT;
+            return Result;
+        }
+        if(Result.status != DEVICE_FPGA_SESSION_FT_IO_INCOMPLETE) {
+            return Result;
+        }
+    }
+#endif /* LINUX */
     for(;;) {
         Result.cbTransferred = 0;
         Result.status = pfnGetOverlappedResult(
@@ -56,6 +108,101 @@ DEVICE_FPGA_SESSION_WAIT_RESULT DeviceFPGA_Session_WaitOverlapped(
         if(pfnTick(pvTimingContext) - qwStart >= dwTimeoutMs) {
             Result.outcome = DEVICE_FPGA_SESSION_WAIT_TIMED_OUT;
             return Result;
+        }
+        pfnSleep(pvTimingContext, dwPollMs);
+    }
+}
+
+DEVICE_FPGA_SESSION_RECOVERY_STAGE DeviceFPGA_Session_Recover(
+    _Inout_ PVOID pvContext,
+    _In_ PDEVICE_FPGA_SESSION_RECOVERY_OPS pOps
+)
+{
+    if(!pvContext || !pOps ||
+       !pOps->pfnQuiesceOldHandle ||
+       !pOps->pfnReopenHandle ||
+       !pOps->pfnInitializeOverlapped ||
+       !pOps->pfnInvalidateState ||
+       !pOps->pfnDrainStaleTraffic ||
+       !pOps->pfnValidateIdentity) {
+        return DEVICE_FPGA_SESSION_RECOVERY_QUIESCE_FAILED;
+    }
+    if(!pOps->pfnQuiesceOldHandle(pvContext)) {
+        return DEVICE_FPGA_SESSION_RECOVERY_QUIESCE_FAILED;
+    }
+    if(!pOps->pfnReopenHandle(pvContext)) {
+        return DEVICE_FPGA_SESSION_RECOVERY_REOPEN_FAILED;
+    }
+    if(!pOps->pfnInitializeOverlapped(pvContext)) {
+        return DEVICE_FPGA_SESSION_RECOVERY_INITIALIZE_FAILED;
+    }
+    pOps->pfnInvalidateState(pvContext);
+    if(!pOps->pfnDrainStaleTraffic(pvContext)) {
+        return DEVICE_FPGA_SESSION_RECOVERY_DRAIN_FAILED;
+    }
+    if(!pOps->pfnValidateIdentity(pvContext)) {
+        return DEVICE_FPGA_SESSION_RECOVERY_IDENTITY_FAILED;
+    }
+    return DEVICE_FPGA_SESSION_RECOVERY_READY;
+}
+
+BOOL DeviceFPGA_Session_IsFillerOnly(
+    _In_reads_(cb) PBYTE pb,
+    _In_ DWORD cb
+)
+{
+    DWORD i, dw;
+    if(!cb) { return TRUE; }
+    if(!pb || (cb % sizeof(DWORD))) { return FALSE; }
+    for(i = 0; i < cb; i += sizeof(DWORD)) {
+        memcpy(&dw, pb + i, sizeof(dw));
+        if(dw != 0x55556666) { return FALSE; }
+    }
+    return TRUE;
+}
+
+DEVICE_FPGA_SESSION_DRAIN_OUTCOME DeviceFPGA_Session_Drain(
+    _Inout_ PVOID pvContext,
+    _In_ PFN_DEVICE_FPGA_SESSION_DRAIN_READ pfnRead,
+    _Out_writes_(cbBuffer) PBYTE pbBuffer,
+    _In_ DWORD cbBuffer,
+    _In_ DWORD cbMaxNonFiller,
+    _In_ DWORD dwQuietMs,
+    _In_ DWORD dwTimeoutMs,
+    _In_ DWORD dwPollMs,
+    _In_ PVOID pvTimingContext,
+    _In_ PFN_DEVICE_FPGA_SESSION_TICK pfnTick,
+    _In_ PFN_DEVICE_FPGA_SESSION_SLEEP pfnSleep
+)
+{
+    DWORD cbRead, cbNonFiller = 0;
+    QWORD qwNow, qwStart, qwLastNonFiller;
+    if(!pfnRead || !pbBuffer || !cbBuffer || !cbMaxNonFiller ||
+       !dwQuietMs || !dwTimeoutMs || !dwPollMs || !pfnTick || !pfnSleep) {
+        return DEVICE_FPGA_SESSION_DRAIN_READ_ERROR;
+    }
+    qwStart = pfnTick(pvTimingContext);
+    qwLastNonFiller = qwStart;
+    for(;;) {
+        cbRead = 0;
+        if(!pfnRead(pvContext, pbBuffer, cbBuffer, &cbRead) ||
+           (cbRead > cbBuffer)) {
+            return DEVICE_FPGA_SESSION_DRAIN_READ_ERROR;
+        }
+        qwNow = pfnTick(pvTimingContext);
+        if(DeviceFPGA_Session_IsFillerOnly(pbBuffer, cbRead)) {
+            if(qwNow - qwLastNonFiller >= dwQuietMs) {
+                return DEVICE_FPGA_SESSION_DRAIN_CLEAN;
+            }
+        } else {
+            if(cbRead >= cbMaxNonFiller - cbNonFiller) {
+                return DEVICE_FPGA_SESSION_DRAIN_BYTE_LIMIT;
+            }
+            cbNonFiller += cbRead;
+            qwLastNonFiller = qwNow;
+        }
+        if(qwNow - qwStart >= dwTimeoutMs) {
+            return DEVICE_FPGA_SESSION_DRAIN_TIME_LIMIT;
         }
         pfnSleep(pvTimingContext, dwPollMs);
     }
@@ -250,6 +397,7 @@ BOOL DeviceFPGA_Session_CloseOverlapped(
         hFTDI,
         pOverlapped,
         pfnGetOverlappedResult,
+        TRUE,
         DEVICE_FPGA_SESSION_CANCEL_TIMEOUT_MS,
         DEVICE_FPGA_SESSION_WAIT_POLL_MS,
         pvTimingContext,
