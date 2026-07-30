@@ -88,11 +88,37 @@ BOOL FpgaReadPolicy_IsRetryable(_In_ LC_READ_PAGE_RESULT result)
     }
 }
 
+DWORD FpgaReadPolicy_BuildRetryList(_In_ DWORD cResults, _In_reads_(cResults) PLC_READ_PAGE_RESULT pResults, _In_ DWORD cIndices, _Out_writes_to_(cIndices, return) PDWORD pIndices)
+{
+    DWORD i, cRetry = 0;
+    if(!pResults || !pIndices) {
+        return 0;
+    }
+    for(i = 0; (i < cResults) && (cRetry < cIndices); i++) {
+        if(FpgaReadPolicy_IsRetryable(pResults[i])) {
+            pIndices[cRetry++] = i;
+        }
+    }
+    return cRetry;
+}
+
 BOOL FpgaReadPolicy_ShouldEnableAdaptivePolling(_In_ DWORD cRetry)
 {
     // A full tag generation distinguishes sustained completion loss from an
     // isolated retry that should not slow the remainder of a healthy session.
     return cRetry >= FPGA_READ_TAGS_PER_GENERATION;
+}
+
+LC_READ_PAGE_RESULT FpgaReadPolicy_MergeRetryResult(_In_ LC_READ_PAGE_RESULT firstResult, _In_ LC_READ_PAGE_RESULT retryResult)
+{
+    if((retryResult == LC_READ_PAGE_RESULT_SUCCESS) ||
+        (retryResult == LC_READ_PAGE_RESULT_SUCCESS_AFTER_RETRY)) {
+        return LC_READ_PAGE_RESULT_SUCCESS_AFTER_RETRY;
+    }
+    if(retryResult == LC_READ_PAGE_RESULT_NONE) {
+        return firstResult;
+    }
+    return retryResult;
 }
 
 VOID FpgaReadPolicy_PageBegin(_Out_ PFPGA_READ_PAGE_STATE state, _In_ DWORD cbExpected)
@@ -131,6 +157,11 @@ VOID FpgaReadPolicy_Observe(_Inout_ PFPGA_READ_PAGE_STATE state, _In_ LC_READ_PA
         }
     }
     state->result = FpgaReadPolicy_Merge(state->result, observed);
+}
+
+VOID FpgaReadPolicy_MarkTransportError(_Inout_ PFPGA_READ_PAGE_STATE state)
+{
+    state->fTransportError = (BOOL)1;
 }
 
 LC_READ_PAGE_RESULT FpgaReadPolicy_Finalize(_Inout_ PFPGA_READ_PAGE_STATE state)
@@ -173,4 +204,84 @@ VOID FpgaReadPolicy_RecordPass(_Inout_ PFPGA_READ_COUNTERS counters, _In_ LC_REA
     } else if(!FpgaReadPolicy_IsSuccess(result)) {
         counters->cFirstPassFailed++;
     }
+}
+
+BOOL FpgaReadPolicy_CountersHaveData(_In_ PFPGA_READ_COUNTERS counters)
+{
+    return counters &&
+        (counters->cFirstPassFailed ||
+         counters->cUnsupportedRequest ||
+         counters->cCompleterAbort ||
+         counters->cRetryAttempted ||
+         counters->cRetryRecovered ||
+         counters->cRetryExhausted ||
+         counters->cProtocolError);
+}
+
+VOID FpgaReadTagMap_Begin(_Out_ PFPGA_READ_TAG_MAP map, _In_ BYTE bGeneration)
+{
+    DWORD i;
+    memset(map, 0, sizeof(FPGA_READ_TAG_MAP));
+    map->bGeneration = bGeneration & 0x80;
+    for(i = 0; i < 0x100; i++) {
+        map->entries[i].iPage = FPGA_READ_TAG_PAGE_INVALID;
+    }
+}
+
+BOOL FpgaReadTagMap_Assign(_Inout_ PFPGA_READ_TAG_MAP map, _In_ DWORD iPage, _Out_ PBYTE pTag)
+{
+    DWORD i;
+    BYTE tag;
+    if(!map || !pTag || (map->cActive >= FPGA_READ_TAGS_PER_GENERATION)) {
+        return (BOOL)0;
+    }
+    for(i = 0; i < FPGA_READ_TAGS_PER_GENERATION; i++) {
+        tag = (BYTE)(map->bGeneration + i);
+        if(!map->entries[tag].fActive) {
+            map->entries[tag].iPage = iPage;
+            map->entries[tag].fActive = (BOOL)1;
+            map->cActive++;
+            *pTag = tag;
+            return (BOOL)1;
+        }
+    }
+    return (BOOL)0;
+}
+
+BOOL FpgaReadTagMap_Resolve(_In_ PFPGA_READ_TAG_MAP map, _In_ BYTE tag, _Out_ PDWORD piPage)
+{
+    if(!map || !piPage || ((tag & 0x80) != map->bGeneration) ||
+        !map->entries[tag].fActive) {
+        return (BOOL)0;
+    }
+    *piPage = map->entries[tag].iPage;
+    return (BOOL)1;
+}
+
+BOOL FpgaReadTagMap_Retire(_Inout_ PFPGA_READ_TAG_MAP map, _In_ BYTE tag, _Out_opt_ PDWORD piPage)
+{
+    DWORD iPage;
+    if(!FpgaReadTagMap_Resolve(map, tag, &iPage)) {
+        return (BOOL)0;
+    }
+    map->entries[tag].fActive = (BOOL)0;
+    map->entries[tag].iPage = FPGA_READ_TAG_PAGE_INVALID;
+    if(map->cActive) {
+        map->cActive--;
+    }
+    if(piPage) {
+        *piPage = iPage;
+    }
+    return (BOOL)1;
+}
+
+VOID FpgaReadTagMap_Invalidate(_Inout_ PFPGA_READ_TAG_MAP map)
+{
+    DWORD i;
+    if(!map) { return; }
+    for(i = 0; i < 0x100; i++) {
+        map->entries[i].fActive = (BOOL)0;
+        map->entries[i].iPage = FPGA_READ_TAG_PAGE_INVALID;
+    }
+    map->cActive = 0;
 }
