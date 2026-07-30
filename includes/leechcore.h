@@ -194,6 +194,21 @@ typedef struct tdMEM_SCATTER {
 #define MEM_SCATTER_STACK_POP(pMEM)         (pMEM->vStack[--pMEM->iStack])
 
 /*
+* Per-page result returned by LcReadScatterEx(). Numeric values are ABI-stable.
+*/
+typedef DWORD LC_READ_PAGE_RESULT, *PLC_READ_PAGE_RESULT;
+#define LC_READ_PAGE_RESULT_NONE                    0
+#define LC_READ_PAGE_RESULT_SUCCESS                 1
+#define LC_READ_PAGE_RESULT_SUCCESS_AFTER_RETRY     2
+#define LC_READ_PAGE_RESULT_UNSUPPORTED_REQUEST     3
+#define LC_READ_PAGE_RESULT_COMPLETER_ABORT         4
+#define LC_READ_PAGE_RESULT_NO_COMPLETION           5
+#define LC_READ_PAGE_RESULT_PARTIAL_COMPLETION      6
+#define LC_READ_PAGE_RESULT_TRANSPORT_ERROR         7
+#define LC_READ_PAGE_RESULT_PROTOCOL_ERROR          8
+#define LC_READ_PAGE_RESULT_UNSPECIFIED_ERROR       9
+
+/*
 * Free LeechCore allocated memory such as memory allocated by the
 * LcAllocScatter / LcCommand functions.
 * -- pv
@@ -254,6 +269,24 @@ BOOL LcAllocScatter3(
     _Inout_updates_opt_(cbData) PBYTE pbData,
     _In_ DWORD cMEMs,
     _Out_ PPMEM_SCATTER *pppMEMs
+);
+
+/*
+* Read memory in a scattered non-contiguous way and return a typed result for
+* every page. The function-level result reports argument/setup/dispatch status;
+* individual page success remains in MEM_SCATTER.f and pResults.
+* -- hLC
+* -- cMEMs
+* -- ppMEMs
+* -- pResults
+* -- return
+*/
+EXPORTED_FUNCTION _Success_(return)
+BOOL LcReadScatterEx(
+    _In_ HANDLE hLC,
+    _In_ DWORD cMEMs,
+    _Inout_ PPMEM_SCATTER ppMEMs,
+    _Out_writes_(cMEMs) PLC_READ_PAGE_RESULT pResults
 );
 
 /*

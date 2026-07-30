@@ -352,6 +352,8 @@ copy "$(ProjectDir)\leechcore.h" "$(SolutionDir)\includes\" /y
     <ClCompile Include="charutil.c" />
     <ClCompile Include="device_file.c" />
     <ClCompile Include="device_fpga.c" />
+    <ClCompile Include="device_fpga_session.c" />
+    <ClCompile Include="device_fpga_read_policy.c" />
     <ClCompile Include="device_hibr.c" />
     <ClCompile Include="device_pmem.c" />
     <ClCompile Include="device_tmd.c" />
@@ -372,6 +374,8 @@ copy "$(ProjectDir)\leechcore.h" "$(SolutionDir)\includes\" /y
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="charutil.h" />
+    <ClInclude Include="device_fpga_session.h" />
+    <ClInclude Include="device_fpga_read_policy.h" />
     <ClInclude Include="leechcore.h" />
     <ClInclude Include="leechcore_device.h" />
     <ClInclude Include="leechcore_internal.h" />

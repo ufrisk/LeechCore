@@ -804,6 +804,114 @@ fail:
 // READ / WRITE FUNCTIONALITY BELOW:
 // ----------------------------------------------------------------------------
 
+static VOID LcReadScatter_ClearOutputs(_In_ DWORD cMEMs, _In_opt_ PPMEM_SCATTER ppMEMs, _Out_writes_opt_(cMEMs) PLC_READ_PAGE_RESULT pResults)
+{
+    DWORD i;
+    for(i = 0; i < cMEMs; i++) {
+        if(pResults) {
+            pResults[i] = LC_READ_PAGE_RESULT_UNSPECIFIED_ERROR;
+        }
+        if(ppMEMs && ppMEMs[i]) {
+            ppMEMs[i]->f = FALSE;
+        }
+    }
+}
+
+static BOOL LcReadScatter_Validate(_In_ DWORD cMEMs, _In_opt_ PPMEM_SCATTER ppMEMs, _Out_writes_opt_(cMEMs) PLC_READ_PAGE_RESULT pResults)
+{
+    DWORD i;
+    if(!cMEMs) {
+        return TRUE;
+    }
+    if(!ppMEMs || !pResults || ((SIZE_T)cMEMs > ((SIZE_T)-1) / sizeof(LC_READ_PAGE_RESULT))) {
+        LcReadScatter_ClearOutputs(cMEMs, ppMEMs, pResults);
+        return FALSE;
+    }
+    for(i = 0; i < cMEMs; i++) {
+        pResults[i] = LC_READ_PAGE_RESULT_UNSPECIFIED_ERROR;
+        if(!ppMEMs[i] || (ppMEMs[i]->iStack >= MEM_SCATTER_STACK_SIZE)) {
+            LcReadScatter_ClearOutputs(cMEMs, ppMEMs, pResults);
+            return FALSE;
+        }
+    }
+    return TRUE;
+}
+
+static BOOL LcReadScatter_Impl(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _Inout_opt_ PPMEM_SCATTER ppMEMs, _Out_writes_opt_(cMEMs) PLC_READ_PAGE_RESULT pResults)
+{
+    DWORD i;
+    BOOL fDispatched = FALSE, fTyped = FALSE;
+    if(!LcReadScatter_Validate(cMEMs, ppMEMs, pResults)) {
+        return FALSE;
+    }
+    if(!ctxLC || (ctxLC->version != LC_CONTEXT_VERSION)) {
+        LcReadScatter_ClearOutputs(cMEMs, ppMEMs, pResults);
+        return FALSE;
+    }
+    if(!cMEMs) {
+        return TRUE;
+    }
+    if(ctxLC->Config.fRemote && ctxLC->pfnReadScatter) {
+        ctxLC->pfnReadScatter(ctxLC, cMEMs, ppMEMs);
+        fDispatched = TRUE;
+    } else {
+        for(i = 0; i < cMEMs; i++) {
+            MEM_SCATTER_STACK_PUSH(ppMEMs[i], ppMEMs[i]->qwA);
+        }
+        LcMemMap_TranslateMEMs(ctxLC, cMEMs, ppMEMs);
+        LcLockAcquire(ctxLC);
+        if(ctxLC->pfnReadScatterEx) {
+            fDispatched = ctxLC->pfnReadScatterEx(ctxLC, cMEMs, ppMEMs, pResults);
+            fTyped = fDispatched;
+        } else if(ctxLC->pfnReadScatter) {
+            ctxLC->pfnReadScatter(ctxLC, cMEMs, ppMEMs);
+            fDispatched = TRUE;
+        } else if(ctxLC->RC.fActive) {
+            LcReadContigious_ReadScatterGather(ctxLC, cMEMs, ppMEMs);
+            fDispatched = TRUE;
+        }
+        LcLockRelease(ctxLC);
+        for(i = 0; i < cMEMs; i++) {
+            ppMEMs[i]->qwA = MEM_SCATTER_STACK_POP(ppMEMs[i]);
+        }
+    }
+    if(!fDispatched) {
+        LcReadScatter_ClearOutputs(cMEMs, ppMEMs, pResults);
+        return FALSE;
+    }
+    for(i = 0; i < cMEMs; i++) {
+        if(!fTyped) {
+            pResults[i] = ppMEMs[i]->f
+                ? LC_READ_PAGE_RESULT_SUCCESS
+                : LC_READ_PAGE_RESULT_UNSPECIFIED_ERROR;
+        } else if((pResults[i] == LC_READ_PAGE_RESULT_SUCCESS) ||
+            (pResults[i] == LC_READ_PAGE_RESULT_SUCCESS_AFTER_RETRY)) {
+            ppMEMs[i]->f = TRUE;
+        } else {
+            ppMEMs[i]->f = FALSE;
+            if(pResults[i] == LC_READ_PAGE_RESULT_NONE) {
+                pResults[i] = LC_READ_PAGE_RESULT_UNSPECIFIED_ERROR;
+            }
+        }
+    }
+    return TRUE;
+}
+
+/*
+* Read memory in a scattered non-contiguous way and return per-page results.
+*/
+EXPORTED_FUNCTION BOOL LcReadScatterEx(_In_ HANDLE hLC, _In_ DWORD cMEMs, _Inout_ PPMEM_SCATTER ppMEMs, _Out_writes_(cMEMs) PLC_READ_PAGE_RESULT pResults)
+{
+    BOOL fResult;
+    PLC_CONTEXT ctxLC = (PLC_CONTEXT)hLC;
+    QWORD tmStart = LcCallStart();
+    fResult = LcReadScatter_Impl(ctxLC, cMEMs, ppMEMs, pResults);
+    if(ctxLC && (ctxLC->version == LC_CONTEXT_VERSION)) {
+        LcCallEnd(ctxLC, LC_STATISTICS_ID_READSCATTER, tmStart);
+    }
+    return fResult;
+}
+
 /*
 * Read memory in a scattered non-contiguous way. This is recommended for reads.
 * -- hLC
