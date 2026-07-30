@@ -222,6 +222,7 @@ typedef ULONG(WINAPI *PFN_FT_AbortPipe)(HANDLE ftHandle, UCHAR ucPipeID);
 typedef ULONG(WINAPI *PFN_FT_GetOverlappedResult)(HANDLE ftHandle, LPOVERLAPPED pOverlapped, PULONG pulLengthTransferred, BOOL bWait);
 typedef ULONG(WINAPI *PFN_FT_InitializeOverlapped)(HANDLE ftHandle, LPOVERLAPPED pOverlapped);
 typedef ULONG(WINAPI *PFN_FT_ReleaseOverlapped)(HANDLE ftHandle, LPOVERLAPPED pOverlapped);
+typedef ULONG(WINAPI *PFN_FT_SetPipeTimeout)(HANDLE ftHandle, UCHAR ucPipeID, ULONG ulTimeoutInMs);
 
 typedef struct tdDEVICE_CONTEXT_FPGA {
     CRITICAL_SECTION Lock;
@@ -269,6 +270,7 @@ typedef struct tdDEVICE_CONTEXT_FPGA {
         PFN_FT_GetOverlappedResult pfnFT_GetOverlappedResult;
         PFN_FT_InitializeOverlapped pfnFT_InitializeOverlapped;
         PFN_FT_ReleaseOverlapped pfnFT_ReleaseOverlapped;
+        PFN_FT_SetPipeTimeout pfnFT_SetPipeTimeout;
     } dev;
     FPGA_NEWASYNC2_CONTEXT async2;
     PVOID pMRdBufferX; // NULL || PTLP_CALLBACK_BUF_MRd || PTLP_CALLBACK_BUF_MRd_2
@@ -872,10 +874,12 @@ ftdi_retry_old:
     ctx->dev.pfnFT_GetOverlappedResult = (PFN_FT_GetOverlappedResult)GetProcAddress(ctx->dev.hModule, "FT_GetOverlappedResult");
     ctx->dev.pfnFT_InitializeOverlapped = (PFN_FT_InitializeOverlapped)GetProcAddress(ctx->dev.hModule, "FT_InitializeOverlapped");
     ctx->dev.pfnFT_ReleaseOverlapped = (PFN_FT_ReleaseOverlapped)GetProcAddress(ctx->dev.hModule, "FT_ReleaseOverlapped");
+    ctx->dev.pfnFT_SetPipeTimeout = (PFN_FT_SetPipeTimeout)GetProcAddress(ctx->dev.hModule, "FT_SetPipeTimeout");
     pfnFT_GetChipConfiguration = (ULONG(WINAPI*)(HANDLE, PVOID))GetProcAddress(ctx->dev.hModule, "FT_GetChipConfiguration");
     pfnFT_SetChipConfiguration = (ULONG(WINAPI*)(HANDLE, PVOID))GetProcAddress(ctx->dev.hModule, "FT_SetChipConfiguration");
     pfnFT_SetSuspendTimeout = (ULONG(WINAPI*)(HANDLE, ULONG))GetProcAddress(ctx->dev.hModule, "FT_SetSuspendTimeout");
-    if(!ctx->dev.pfnFT_Create || !ctx->dev.pfnFT_ReadPipe || !ctx->dev.pfnFT_WritePipe) {
+    if(!ctx->dev.pfnFT_Create || !ctx->dev.pfnFT_ReadPipe || !ctx->dev.pfnFT_WritePipe ||
+       (fFT601 && !ctx->dev.pfnFT_SetPipeTimeout)) {
         szErrorReason = ctx->dev.pfnFT_ReadPipe ?
             "Unable to retrieve required functions from device driver dll/so/dylib." :
             "Unable to retrieve required functions from "DEVICE_FPGA_FT601_LIBRARY;
@@ -893,6 +897,8 @@ ftdi_retry_old:
             }
             goto fail;
         }
+        // D3XX 1.2.0.5 and later defaults both pipes to a bounded five-second
+        // timeout. Overriding that default cuts FT601 receive throughput.
         ctx->dev.pfnFT_AbortPipe(ctx->dev.hFTDI, 0x02);
         ctx->dev.pfnFT_AbortPipe(ctx->dev.hFTDI, 0x82);
         pfnFT_SetSuspendTimeout(ctx->dev.hFTDI, 0);
@@ -1151,29 +1157,41 @@ fail:
 
 VOID DeviceFPGA_ReInitializeFTDI(_In_ PDEVICE_CONTEXT_FPGA ctx)
 {
+    DWORD status;
     // called to try to recover link in case of unstable devices.
     if(ctx->dev.pfnFT_Create) {
         ctx->dev.pfnFT_Close(ctx->dev.hFTDI);
         ctx->dev.hFTDI = NULL;
         Sleep(250);
-        ctx->dev.pfnFT_Create((PVOID)ctx->qwDeviceIndex, 0x10 /*FT_OPEN_BY_INDEX*/, &ctx->dev.hFTDI);
+        status = ctx->dev.pfnFT_Create((PVOID)ctx->qwDeviceIndex, 0x10 /*FT_OPEN_BY_INDEX*/, &ctx->dev.hFTDI);
+        // A new D3XX handle restores the bounded default pipe timeouts.
+        if(status || !ctx->dev.hFTDI) {
+            if(ctx->dev.hFTDI) {
+                ctx->dev.pfnFT_Close(ctx->dev.hFTDI);
+                ctx->dev.hFTDI = NULL;
+            }
+        }
     }
 }
 
 VOID DeviceFPGA_Close(_Inout_ PLC_CONTEXT ctxLC)
 {
     PDEVICE_CONTEXT_FPGA ctx = (PDEVICE_CONTEXT_FPGA)ctxLC->hDevice;
-    DWORD cbTMP;
     if(!ctx) { return; }
     while(!TryEnterCriticalSection(&ctx->Lock)) {
         Sleep(50);
     }
     LeaveCriticalSection(&ctx->Lock);
-    if(ctx->async2.fEnabled && ctx->dev.pfnFT_GetOverlappedResult) {
-        ctx->dev.pfnFT_GetOverlappedResult(ctx->dev.hFTDI, &ctx->async2.oOverlapped, &cbTMP, TRUE);
-    }
-    if(ctx->async2.fEnabled && ctx->dev.pfnFT_ReleaseOverlapped) {
-        ctx->dev.pfnFT_ReleaseOverlapped(ctx->dev.hFTDI, &ctx->async2.oOverlapped);
+    if(ctx->async2.fEnabled) {
+        DeviceFPGA_Session_CloseOverlapped(
+            ctx->dev.hFTDI,
+            &ctx->async2.oOverlapped,
+            ctx->dev.pfnFT_AbortPipe,
+            ctx->dev.pfnFT_GetOverlappedResult,
+            ctx->dev.pfnFT_ReleaseOverlapped,
+            NULL,
+            NULL,
+            NULL);
     }
 #ifdef WIN32
     __try {

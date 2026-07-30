@@ -273,6 +273,335 @@ static VOID TestV3IdentityAcceptsExplicitZeroFpgaId(VOID)
     ASSERT_IDENTITY(Identity, 4, 19, 0);
 }
 
+typedef struct tdWAIT_SCRIPT {
+    ULONG pStatus[8];
+    ULONG pTransferred[8];
+    DWORD cResults;
+    DWORD iResult;
+    DWORD cGetCalls;
+    DWORD cSleepCalls;
+    QWORD qwNow;
+    BOOL fWaitArgument;
+} WAIT_SCRIPT, *PWAIT_SCRIPT;
+
+static ULONG WINAPI ScriptedWaitGetOverlappedResult(
+    _In_ HANDLE hFTDI,
+    _In_ LPOVERLAPPED pOverlapped,
+    _Out_ PULONG pulLengthTransferred,
+    _In_ BOOL fWait
+)
+{
+    PWAIT_SCRIPT pScript = (PWAIT_SCRIPT)hFTDI;
+    DWORD iResult;
+    UNREFERENCED_PARAMETER(pOverlapped);
+    pScript->cGetCalls++;
+    pScript->fWaitArgument = fWait;
+    iResult = pScript->iResult;
+    if(iResult >= pScript->cResults) {
+        iResult = pScript->cResults - 1;
+    } else {
+        pScript->iResult++;
+    }
+    *pulLengthTransferred = pScript->pTransferred[iResult];
+    return pScript->pStatus[iResult];
+}
+
+static QWORD ScriptedWaitTick(_In_ PVOID pvContext)
+{
+    return ((PWAIT_SCRIPT)pvContext)->qwNow;
+}
+
+static VOID ScriptedWaitSleep(_In_ PVOID pvContext, _In_ DWORD dwMilliseconds)
+{
+    PWAIT_SCRIPT pScript = (PWAIT_SCRIPT)pvContext;
+    pScript->cSleepCalls++;
+    pScript->qwNow += dwMilliseconds;
+}
+
+static VOID TestWaitCompletesWithoutBlockingDriverCall(VOID)
+{
+    WAIT_SCRIPT Script = {
+        { DEVICE_FPGA_SESSION_FT_IO_INCOMPLETE, DEVICE_FPGA_SESSION_FT_IO_INCOMPLETE, DEVICE_FPGA_SESSION_FT_OK },
+        { 0, 0, 0x1234 },
+        3,
+        0,
+        0,
+        0,
+        0,
+        FALSE
+    };
+    OVERLAPPED Overlapped = { 0 };
+    DEVICE_FPGA_SESSION_WAIT_RESULT Result = DeviceFPGA_Session_WaitOverlapped(
+        &Script,
+        &Overlapped,
+        ScriptedWaitGetOverlappedResult,
+        1000,
+        1,
+        &Script,
+        ScriptedWaitTick,
+        ScriptedWaitSleep);
+    ASSERT_EQ(Result.outcome, DEVICE_FPGA_SESSION_WAIT_COMPLETED);
+    ASSERT_EQ(Result.status, DEVICE_FPGA_SESSION_FT_OK);
+    ASSERT_EQ(Result.cbTransferred, 0x1234);
+    ASSERT_EQ(Script.cGetCalls, 3);
+    ASSERT_EQ(Script.cSleepCalls, 2);
+    ASSERT_FALSE(Script.fWaitArgument);
+}
+
+static VOID TestWaitPendingForeverTimesOutAtDeadline(VOID)
+{
+    WAIT_SCRIPT Script = {
+        { DEVICE_FPGA_SESSION_FT_IO_INCOMPLETE },
+        { 0 },
+        1,
+        0,
+        0,
+        0,
+        0,
+        FALSE
+    };
+    OVERLAPPED Overlapped = { 0 };
+    DEVICE_FPGA_SESSION_WAIT_RESULT Result = DeviceFPGA_Session_WaitOverlapped(
+        &Script,
+        &Overlapped,
+        ScriptedWaitGetOverlappedResult,
+        5,
+        1,
+        &Script,
+        ScriptedWaitTick,
+        ScriptedWaitSleep);
+    ASSERT_EQ(Result.outcome, DEVICE_FPGA_SESSION_WAIT_TIMED_OUT);
+    ASSERT_EQ(Result.status, DEVICE_FPGA_SESSION_FT_IO_INCOMPLETE);
+    ASSERT_EQ(Result.cbTransferred, 0);
+    ASSERT_EQ(Script.qwNow, 5);
+    ASSERT_EQ(Script.cGetCalls, 6);
+    ASSERT_EQ(Script.cSleepCalls, 5);
+    ASSERT_FALSE(Script.fWaitArgument);
+}
+
+static VOID TestWaitReturnsDriverErrorWithoutRetry(VOID)
+{
+    WAIT_SCRIPT Script = {
+        { 0x20 },
+        { 0x9999 },
+        1,
+        0,
+        0,
+        0,
+        0,
+        FALSE
+    };
+    OVERLAPPED Overlapped = { 0 };
+    DEVICE_FPGA_SESSION_WAIT_RESULT Result = DeviceFPGA_Session_WaitOverlapped(
+        &Script,
+        &Overlapped,
+        ScriptedWaitGetOverlappedResult,
+        1000,
+        1,
+        &Script,
+        ScriptedWaitTick,
+        ScriptedWaitSleep);
+    ASSERT_EQ(Result.outcome, DEVICE_FPGA_SESSION_WAIT_DRIVER_ERROR);
+    ASSERT_EQ(Result.status, 0x20);
+    ASSERT_EQ(Result.cbTransferred, 0);
+    ASSERT_EQ(Script.cGetCalls, 1);
+    ASSERT_EQ(Script.cSleepCalls, 0);
+    ASSERT_FALSE(Script.fWaitArgument);
+}
+
+typedef struct tdCLOSE_SCRIPT {
+    BYTE pbEvents[4];
+    DWORD cEvents;
+    DWORD cGetCalls;
+    DWORD cReleaseCalls;
+    DWORD cSleepCalls;
+    QWORD qwNow;
+    ULONG ulRxAbortStatus;
+    ULONG ulTxAbortStatus;
+    ULONG ulGetStatus;
+    ULONG ulReleaseStatus;
+    BOOL fRxAborted;
+    BOOL fTxAborted;
+    BOOL fWaitedBeforeAbort;
+    BOOL fSawWaitArgument;
+} CLOSE_SCRIPT, *PCLOSE_SCRIPT;
+
+#define EVENT_GET_OVERLAPPED    0xf1
+#define EVENT_RELEASE           0xf2
+
+static ULONG WINAPI ScriptedAbortPipe(_In_ HANDLE hFTDI, _In_ UCHAR ucPipeID)
+{
+    PCLOSE_SCRIPT pScript = (PCLOSE_SCRIPT)hFTDI;
+    if(pScript->cEvents < sizeof(pScript->pbEvents)) {
+        pScript->pbEvents[pScript->cEvents++] = ucPipeID;
+    }
+    if(ucPipeID == 0x82) { pScript->fRxAborted = TRUE; }
+    if(ucPipeID == 0x02) { pScript->fTxAborted = TRUE; }
+    return (ucPipeID == 0x82) ?
+        pScript->ulRxAbortStatus :
+        pScript->ulTxAbortStatus;
+}
+
+static ULONG WINAPI ScriptedGetOverlappedResult(
+    _In_ HANDLE hFTDI,
+    _In_ LPOVERLAPPED pOverlapped,
+    _Out_ PULONG pulLengthTransferred,
+    _In_ BOOL fWait
+)
+{
+    PCLOSE_SCRIPT pScript = (PCLOSE_SCRIPT)hFTDI;
+    UNREFERENCED_PARAMETER(pOverlapped);
+    *pulLengthTransferred = 0;
+    pScript->cGetCalls++;
+    pScript->fWaitedBeforeAbort = !pScript->fRxAborted;
+    pScript->fSawWaitArgument |= fWait;
+    if(pScript->cEvents < sizeof(pScript->pbEvents)) {
+        pScript->pbEvents[pScript->cEvents++] = EVENT_GET_OVERLAPPED;
+    }
+    return pScript->fWaitedBeforeAbort ? 1 : pScript->ulGetStatus;
+}
+
+static ULONG WINAPI ScriptedReleaseOverlapped(
+    _In_ HANDLE hFTDI,
+    _In_ LPOVERLAPPED pOverlapped
+)
+{
+    PCLOSE_SCRIPT pScript = (PCLOSE_SCRIPT)hFTDI;
+    UNREFERENCED_PARAMETER(pOverlapped);
+    pScript->cReleaseCalls++;
+    if(pScript->cEvents < sizeof(pScript->pbEvents)) {
+        pScript->pbEvents[pScript->cEvents++] = EVENT_RELEASE;
+    }
+    return pScript->ulReleaseStatus;
+}
+
+static QWORD ScriptedCloseTick(_In_ PVOID pvContext)
+{
+    return ((PCLOSE_SCRIPT)pvContext)->qwNow;
+}
+
+static VOID ScriptedCloseSleep(_In_ PVOID pvContext, _In_ DWORD dwMilliseconds)
+{
+    PCLOSE_SCRIPT pScript = (PCLOSE_SCRIPT)pvContext;
+    pScript->cSleepCalls++;
+    pScript->qwNow += dwMilliseconds;
+}
+
+static VOID TestCloseCancelsReadPipeBeforeWaiting(VOID)
+{
+    CLOSE_SCRIPT Script = { 0 };
+    OVERLAPPED Overlapped = { 0 };
+    BYTE pbExpected[] = { 0x82, EVENT_GET_OVERLAPPED, EVENT_RELEASE };
+    ASSERT_TRUE(DeviceFPGA_Session_CloseOverlapped(
+        &Script,
+        &Overlapped,
+        ScriptedAbortPipe,
+        ScriptedGetOverlappedResult,
+        ScriptedReleaseOverlapped,
+        &Script,
+        ScriptedCloseTick,
+        ScriptedCloseSleep));
+    ASSERT_FALSE(Script.fWaitedBeforeAbort);
+    ASSERT_FALSE(Script.fSawWaitArgument);
+    ASSERT_TRUE(Script.fRxAborted);
+    ASSERT_FALSE(Script.fTxAborted);
+    ASSERT_EQ(Script.cEvents, sizeof(pbExpected));
+    ASSERT_BYTES(Script.pbEvents, pbExpected, sizeof(pbExpected));
+}
+
+static VOID TestClosePendingForeverIsBoundedAndStillReleases(VOID)
+{
+    CLOSE_SCRIPT Script = { 0 };
+    OVERLAPPED Overlapped = { 0 };
+    Script.ulGetStatus = DEVICE_FPGA_SESSION_FT_IO_INCOMPLETE;
+    ASSERT_FALSE(DeviceFPGA_Session_CloseOverlapped(
+        &Script,
+        &Overlapped,
+        ScriptedAbortPipe,
+        ScriptedGetOverlappedResult,
+        ScriptedReleaseOverlapped,
+        &Script,
+        ScriptedCloseTick,
+        ScriptedCloseSleep));
+    ASSERT_FALSE(Script.fSawWaitArgument);
+    ASSERT_EQ(Script.qwNow, DEVICE_FPGA_SESSION_CANCEL_TIMEOUT_MS);
+    ASSERT_EQ(Script.cGetCalls, DEVICE_FPGA_SESSION_CANCEL_TIMEOUT_MS + 1);
+    ASSERT_EQ(Script.cReleaseCalls, 1);
+}
+
+static VOID TestCloseReportsAbortErrorAfterAttemptingCleanup(VOID)
+{
+    CLOSE_SCRIPT Script = { 0 };
+    OVERLAPPED Overlapped = { 0 };
+    Script.ulRxAbortStatus = 1;
+    ASSERT_FALSE(DeviceFPGA_Session_CloseOverlapped(
+        &Script,
+        &Overlapped,
+        ScriptedAbortPipe,
+        ScriptedGetOverlappedResult,
+        ScriptedReleaseOverlapped,
+        &Script,
+        ScriptedCloseTick,
+        ScriptedCloseSleep));
+    ASSERT_TRUE(Script.fRxAborted);
+    ASSERT_FALSE(Script.fTxAborted);
+    ASSERT_EQ(Script.cGetCalls, 1);
+    ASSERT_EQ(Script.cReleaseCalls, 1);
+}
+
+typedef struct tdPIPE_TIMEOUT_SCRIPT {
+    BYTE pbPipe[2];
+    ULONG pulTimeout[2];
+    DWORD cCalls;
+    ULONG ulRxStatus;
+    ULONG ulTxStatus;
+} PIPE_TIMEOUT_SCRIPT, *PPIPE_TIMEOUT_SCRIPT;
+
+static ULONG WINAPI ScriptedSetPipeTimeout(
+    _In_ HANDLE hFTDI,
+    _In_ UCHAR ucPipeID,
+    _In_ ULONG ulTimeoutInMs
+)
+{
+    PPIPE_TIMEOUT_SCRIPT pScript = (PPIPE_TIMEOUT_SCRIPT)hFTDI;
+    DWORD i = pScript->cCalls++;
+    if(i < 2) {
+        pScript->pbPipe[i] = ucPipeID;
+        pScript->pulTimeout[i] = ulTimeoutInMs;
+    }
+    return (ucPipeID == 0x82) ? pScript->ulRxStatus : pScript->ulTxStatus;
+}
+
+static VOID TestConfigurePipeTimeoutsConfiguresBothDirections(VOID)
+{
+    PIPE_TIMEOUT_SCRIPT Script = { 0 };
+    ASSERT_TRUE(DeviceFPGA_Session_ConfigurePipeTimeouts(
+        &Script,
+        DEVICE_FPGA_SESSION_WAIT_TIMEOUT_MS,
+        ScriptedSetPipeTimeout));
+    ASSERT_EQ(Script.cCalls, 2);
+    ASSERT_EQ(Script.pbPipe[0], 0x82);
+    ASSERT_EQ(Script.pbPipe[1], 0x02);
+    ASSERT_EQ(Script.pulTimeout[0], DEVICE_FPGA_SESSION_WAIT_TIMEOUT_MS);
+    ASSERT_EQ(Script.pulTimeout[1], DEVICE_FPGA_SESSION_WAIT_TIMEOUT_MS);
+}
+
+static VOID TestConfigurePipeTimeoutsReportsEitherFailure(VOID)
+{
+    PIPE_TIMEOUT_SCRIPT RxFailure = { { 0 }, { 0 }, 0, 1, 0 };
+    PIPE_TIMEOUT_SCRIPT TxFailure = { { 0 }, { 0 }, 0, 0, 1 };
+    ASSERT_FALSE(DeviceFPGA_Session_ConfigurePipeTimeouts(
+        &RxFailure,
+        DEVICE_FPGA_SESSION_WAIT_TIMEOUT_MS,
+        ScriptedSetPipeTimeout));
+    ASSERT_EQ(RxFailure.cCalls, 2);
+    ASSERT_FALSE(DeviceFPGA_Session_ConfigurePipeTimeouts(
+        &TxFailure,
+        DEVICE_FPGA_SESSION_WAIT_TIMEOUT_MS,
+        ScriptedSetPipeTimeout));
+    ASSERT_EQ(TxFailure.cCalls, 2);
+}
+
 int main(void)
 {
     TestCompleteAlignedReply();
@@ -288,10 +617,18 @@ int main(void)
     TestV3IdentityRequiresEveryIdentityCommand();
     TestV3IdentityPublishesCompleteReply();
     TestV3IdentityAcceptsExplicitZeroFpgaId();
+    TestWaitCompletesWithoutBlockingDriverCall();
+    TestWaitPendingForeverTimesOutAtDeadline();
+    TestWaitReturnsDriverErrorWithoutRetry();
+    TestCloseCancelsReadPipeBeforeWaiting();
+    TestClosePendingForeverIsBoundedAndStillReleases();
+    TestCloseReportsAbortErrorAfterAttemptingCleanup();
+    TestConfigurePipeTimeoutsConfiguresBothDirections();
+    TestConfigurePipeTimeoutsReportsEitherFailure();
     if(g_cFailures) {
         printf("%d test assertion(s) failed.\n", g_cFailures);
         return 1;
     }
-    printf("PASS: 13 FPGA identity protocol cases.\n");
+    printf("PASS: 21 FPGA session protocol cases.\n");
     return 0;
 }
