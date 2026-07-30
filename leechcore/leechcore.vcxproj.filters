@@ -30,6 +30,9 @@
     <ClCompile Include="device_fpga_session.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="device_fpga_read_policy.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="device_pmem.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -86,6 +89,9 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="device_fpga_read_policy.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="leechrpc.h">
       <Filter>Header Files</Filter>
     </ClInclude>
