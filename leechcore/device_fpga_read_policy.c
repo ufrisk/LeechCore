@@ -124,11 +124,15 @@ DWORD FpgaReadPolicy_CountAdaptivePollingEvidence(_In_ DWORD cResults, _In_reads
     return cEvidence;
 }
 
-BOOL FpgaReadPolicy_ShouldEnableAdaptivePolling(_In_ DWORD cEvidence)
+BOOL FpgaReadPolicy_ShouldEnableAdaptivePolling(_In_ DWORD cEvidence, _In_ DWORD dwEvidenceGeneration, _In_ DWORD dwTransportGeneration)
 {
     // A full tag generation distinguishes sustained completion loss from an
     // isolated retry that should not slow the remainder of a healthy session.
-    return cEvidence >= FPGA_READ_TAGS_PER_GENERATION;
+    // Evidence collected before a transport recovery must not affect the new
+    // transport generation.
+    return
+        (dwEvidenceGeneration == dwTransportGeneration) &&
+        (cEvidence >= FPGA_READ_TAGS_PER_GENERATION);
 }
 
 BOOL FpgaReadPolicy_ShouldResetAdaptivePolling(_In_ BOOL fAdaptivePollingWait, _In_ DWORD dwPollingGeneration, _In_ DWORD dwTransportGeneration)

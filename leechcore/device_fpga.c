@@ -2537,15 +2537,15 @@ static VOID DeviceFPGA_FTDI_ReevaluateAdaptivePollingWait(_In_ PLC_CONTEXT ctxLC
     LeaveCriticalSection(&ctx->Lock);
 }
 
-static VOID DeviceFPGA_FTDI_EnableAdaptivePollingWait(_In_ PLC_CONTEXT ctxLC, _Inout_ PDEVICE_CONTEXT_FPGA ctx, _In_ DWORD cEvidence)
+static VOID DeviceFPGA_FTDI_EnableAdaptivePollingWait(_In_ PLC_CONTEXT ctxLC, _Inout_ PDEVICE_CONTEXT_FPGA ctx, _In_ DWORD cEvidence, _In_ DWORD dwEvidenceGeneration)
 {
-    if(!FpgaReadPolicy_ShouldEnableAdaptivePolling(cEvidence) || ctx->fAdaptivePollingWait || !DeviceFPGA_FTDI_CanReadPipeBounded(ctx)) {
+    if(!FpgaReadPolicy_ShouldEnableAdaptivePolling(cEvidence, dwEvidenceGeneration, ctx->dwTransportGeneration) || ctx->fAdaptivePollingWait || !DeviceFPGA_FTDI_CanReadPipeBounded(ctx)) {
         return;
     }
     EnterCriticalSection(&ctx->Lock);
-    if(!ctx->fAdaptivePollingWait && FpgaReadPolicy_ShouldEnableAdaptivePolling(cEvidence) && DeviceFPGA_FTDI_CanReadPipeBounded(ctx)) {
+    if(!ctx->fAdaptivePollingWait && FpgaReadPolicy_ShouldEnableAdaptivePolling(cEvidence, dwEvidenceGeneration, ctx->dwTransportGeneration) && DeviceFPGA_FTDI_CanReadPipeBounded(ctx)) {
         ctx->fAdaptivePollingWait = TRUE;
-        ctx->dwAdaptivePollingGeneration = ctx->dwTransportGeneration;
+        ctx->dwAdaptivePollingGeneration = dwEvidenceGeneration;
         lcprintfv(ctxLC, "Device Info: FPGA: switching FT601 receive waits to bounded polling after %u issued failure pages\n", cEvidence);
     }
     LeaveCriticalSection(&ctx->Lock);
@@ -3074,7 +3074,7 @@ BOOL DeviceFPGA_Synch_ReadScatterEx(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _I
         cRetry = FpgaReadPolicy_BuildRetryList(cMEMs, pResults, cMEMs, pRetryIndices);
         if(!cRetry) { break; }
         if(!ctx->fAdaptivePollingWait) {
-            DeviceFPGA_FTDI_EnableAdaptivePollingWait(ctxLC, ctx, cAdaptiveEvidence);
+            DeviceFPGA_FTDI_EnableAdaptivePollingWait(ctxLC, ctx, cAdaptiveEvidence, dwAttemptTransportGeneration);
         }
         if(ctx->fAdaptivePollingWait) {
             cRetryPassMax = 2;
@@ -3099,7 +3099,7 @@ BOOL DeviceFPGA_Synch_ReadScatterEx(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _I
         if(!cRetryPass && !ctx->fAdaptivePollingWait &&
            (dwRetryTransportGeneration == ctx->dwTransportGeneration)) {
             cAdaptiveEvidence = FpgaReadPolicy_CountAdaptivePollingEvidence(cRetry, pRetryResults);
-            DeviceFPGA_FTDI_EnableAdaptivePollingWait(ctxLC, ctx, cAdaptiveEvidence);
+            DeviceFPGA_FTDI_EnableAdaptivePollingWait(ctxLC, ctx, cAdaptiveEvidence, dwRetryTransportGeneration);
             if(ctx->fAdaptivePollingWait) {
                 cRetryPassMax = 2;
             }
@@ -3944,7 +3944,7 @@ BOOL DeviceFPGA_Async2_ReadScatterEx(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _
         cRetry = FpgaReadPolicy_BuildRetryList(cMEMs, pResults, cMEMs, pRetryIndices);
         if(!cRetry) { break; }
         if(!ctx->fAdaptivePollingWait) {
-            DeviceFPGA_FTDI_EnableAdaptivePollingWait(ctxLC, ctx, cAdaptiveEvidence);
+            DeviceFPGA_FTDI_EnableAdaptivePollingWait(ctxLC, ctx, cAdaptiveEvidence, dwAttemptTransportGeneration);
         }
         if(ctx->fAdaptivePollingWait) {
             cRetryPassMax = 2;
@@ -3969,7 +3969,7 @@ BOOL DeviceFPGA_Async2_ReadScatterEx(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _
         if(!cRetryPass && !ctx->fAdaptivePollingWait &&
            (dwRetryTransportGeneration == ctx->dwTransportGeneration)) {
             cAdaptiveEvidence = FpgaReadPolicy_CountAdaptivePollingEvidence(cRetry, pRetryResults);
-            DeviceFPGA_FTDI_EnableAdaptivePollingWait(ctxLC, ctx, cAdaptiveEvidence);
+            DeviceFPGA_FTDI_EnableAdaptivePollingWait(ctxLC, ctx, cAdaptiveEvidence, dwRetryTransportGeneration);
             if(ctx->fAdaptivePollingWait) {
                 cRetryPassMax = 2;
             }
