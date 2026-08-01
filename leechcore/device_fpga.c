@@ -245,7 +245,8 @@ typedef struct tdDEVICE_CONTEXT_FPGA {
     BOOL fTransportSetup;
     BOOL fTransportRecoveryInProgress;
     BOOL fOpenPipeTimeoutFailure;
-    BOOL fAdaptivePollingWait;  // disable event waits after retryable completion loss
+    BOOL fAdaptivePollingWait;  // disable event waits after sustained issued completion loss
+    DWORD dwAdaptivePollingGeneration;
     DWORD dwTransportGeneration;
     QWORD cTransportTimeout;
     QWORD cTransportRecoverySuccess;
@@ -2517,15 +2518,35 @@ static BOOL DeviceFPGA_FTDI_CanReadPipeBounded(_In_ PDEVICE_CONTEXT_FPGA ctx)
         ctx->dev.pfnFT_GetOverlappedResult;
 }
 
-static VOID DeviceFPGA_FTDI_EnableAdaptivePollingWait(_In_ PLC_CONTEXT ctxLC, _Inout_ PDEVICE_CONTEXT_FPGA ctx, _In_ DWORD cRetry)
+static VOID DeviceFPGA_FTDI_ReevaluateAdaptivePollingWait(_In_ PLC_CONTEXT ctxLC, _Inout_ PDEVICE_CONTEXT_FPGA ctx)
 {
-    if(!FpgaReadPolicy_ShouldEnableAdaptivePolling(cRetry) || ctx->fAdaptivePollingWait || !DeviceFPGA_FTDI_CanReadPipeBounded(ctx)) {
+    if(!FpgaReadPolicy_ShouldResetAdaptivePolling(
+        ctx->fAdaptivePollingWait,
+        ctx->dwAdaptivePollingGeneration,
+        ctx->dwTransportGeneration)) {
         return;
     }
     EnterCriticalSection(&ctx->Lock);
-    if(!ctx->fAdaptivePollingWait && FpgaReadPolicy_ShouldEnableAdaptivePolling(cRetry) && DeviceFPGA_FTDI_CanReadPipeBounded(ctx)) {
+    if(FpgaReadPolicy_ShouldResetAdaptivePolling(
+        ctx->fAdaptivePollingWait,
+        ctx->dwAdaptivePollingGeneration,
+        ctx->dwTransportGeneration)) {
+        ctx->fAdaptivePollingWait = FALSE;
+        lcprintfv(ctxLC, "Device Info: FPGA: restoring FT601 event waits after transport recovery\n");
+    }
+    LeaveCriticalSection(&ctx->Lock);
+}
+
+static VOID DeviceFPGA_FTDI_EnableAdaptivePollingWait(_In_ PLC_CONTEXT ctxLC, _Inout_ PDEVICE_CONTEXT_FPGA ctx, _In_ DWORD cEvidence)
+{
+    if(!FpgaReadPolicy_ShouldEnableAdaptivePolling(cEvidence) || ctx->fAdaptivePollingWait || !DeviceFPGA_FTDI_CanReadPipeBounded(ctx)) {
+        return;
+    }
+    EnterCriticalSection(&ctx->Lock);
+    if(!ctx->fAdaptivePollingWait && FpgaReadPolicy_ShouldEnableAdaptivePolling(cEvidence) && DeviceFPGA_FTDI_CanReadPipeBounded(ctx)) {
         ctx->fAdaptivePollingWait = TRUE;
-        lcprintfv(ctxLC, "Device Info: FPGA: switching FT601 receive waits to bounded polling after %u retryable pages\n", cRetry);
+        ctx->dwAdaptivePollingGeneration = ctx->dwTransportGeneration;
+        lcprintfv(ctxLC, "Device Info: FPGA: switching FT601 receive waits to bounded polling after %u issued failure pages\n", cEvidence);
     }
     LeaveCriticalSection(&ctx->Lock);
 }
@@ -2981,7 +3002,7 @@ BOOL DeviceFPGA_Synch_ReadScatter_Attempt(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cME
         return FALSE;
     }
     for(i = 0; i < cMEMs; i++) {
-        pResults[i] = LC_READ_PAGE_RESULT_UNSPECIFIED_ERROR;
+        pResults[i] = LC_READ_PAGE_RESULT_NOT_ISSUED;
     }
     if(!cMEMs) {
         return TRUE;
@@ -3024,10 +3045,13 @@ _Success_(return)
 BOOL DeviceFPGA_Synch_ReadScatterEx(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _Inout_ PPMEM_SCATTER ppMEMs, _Out_writes_(cMEMs) PLC_READ_PAGE_RESULT pResults)
 {
     PDEVICE_CONTEXT_FPGA ctx = (PDEVICE_CONTEXT_FPGA)ctxLC->hDevice;
-    DWORD i, cRetry, cRetryPass, cRetryPassMax;
+    DWORD i, cRetry, cRetryPass, cRetryPassMax, cAdaptiveEvidence;
+    DWORD dwAttemptTransportGeneration, dwRetryTransportGeneration;
     PDWORD pRetryIndices = NULL;
     PPMEM_SCATTER ppRetryMEMs = NULL;
     PLC_READ_PAGE_RESULT pRetryResults = NULL;
+    DeviceFPGA_FTDI_ReevaluateAdaptivePollingWait(ctxLC, ctx);
+    dwAttemptTransportGeneration = ctx->dwTransportGeneration;
     if(!DeviceFPGA_Synch_ReadScatter_Attempt(ctxLC, cMEMs, ppMEMs, pResults, FALSE)) {
         return FALSE;
     }
@@ -3043,12 +3067,14 @@ BOOL DeviceFPGA_Synch_ReadScatterEx(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _I
     if(!pRetryIndices || !ppRetryMEMs || !pRetryResults) {
         goto finish;
     }
+    cAdaptiveEvidence = (dwAttemptTransportGeneration == ctx->dwTransportGeneration) ?
+        FpgaReadPolicy_CountAdaptivePollingEvidence(cMEMs, pResults) : 0;
     cRetryPassMax = ctx->fAdaptivePollingWait ? 2 : 1;
     for(cRetryPass = 0; cRetryPass < cRetryPassMax; cRetryPass++) {
         cRetry = FpgaReadPolicy_BuildRetryList(cMEMs, pResults, cMEMs, pRetryIndices);
         if(!cRetry) { break; }
         if(!ctx->fAdaptivePollingWait) {
-            DeviceFPGA_FTDI_EnableAdaptivePollingWait(ctxLC, ctx, cRetry);
+            DeviceFPGA_FTDI_EnableAdaptivePollingWait(ctxLC, ctx, cAdaptiveEvidence);
         }
         if(ctx->fAdaptivePollingWait) {
             cRetryPassMax = 2;
@@ -3056,6 +3082,7 @@ BOOL DeviceFPGA_Synch_ReadScatterEx(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _I
         for(i = 0; i < cRetry; i++) {
             ppRetryMEMs[i] = ppMEMs[pRetryIndices[i]];
         }
+        dwRetryTransportGeneration = ctx->dwTransportGeneration;
         if(!DeviceFPGA_Synch_ReadScatter_Attempt(ctxLC, cRetry, ppRetryMEMs, pRetryResults, TRUE)) {
             break;
         }
@@ -3068,6 +3095,14 @@ BOOL DeviceFPGA_Synch_ReadScatterEx(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _I
             ppMEMs[iOriginal]->f = 
                 (pResults[iOriginal] == LC_READ_PAGE_RESULT_SUCCESS) ||
                 (pResults[iOriginal] == LC_READ_PAGE_RESULT_SUCCESS_AFTER_RETRY);
+        }
+        if(!cRetryPass && !ctx->fAdaptivePollingWait &&
+           (dwRetryTransportGeneration == ctx->dwTransportGeneration)) {
+            cAdaptiveEvidence = FpgaReadPolicy_CountAdaptivePollingEvidence(cRetry, pRetryResults);
+            DeviceFPGA_FTDI_EnableAdaptivePollingWait(ctxLC, ctx, cAdaptiveEvidence);
+            if(ctx->fAdaptivePollingWait) {
+                cRetryPassMax = 2;
+            }
         }
     }
 finish:
@@ -3819,7 +3854,7 @@ BOOL DeviceFPGA_Async2_ReadScatter_Attempt(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cM
         return FALSE;
     }
     for(i = 0; i < cMEMs; i++) {
-        pResults[i] = LC_READ_PAGE_RESULT_UNSPECIFIED_ERROR;
+        pResults[i] = LC_READ_PAGE_RESULT_NOT_ISSUED;
     }
     if(!cMEMs) {
         return TRUE;
@@ -3880,10 +3915,13 @@ _Success_(return)
 BOOL DeviceFPGA_Async2_ReadScatterEx(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _Inout_ PPMEM_SCATTER ppMEMs, _Out_writes_(cMEMs) PLC_READ_PAGE_RESULT pResults)
 {
     PDEVICE_CONTEXT_FPGA ctx = (PDEVICE_CONTEXT_FPGA)ctxLC->hDevice;
-    DWORD i, cRetry, cRetryPass, cRetryPassMax;
+    DWORD i, cRetry, cRetryPass, cRetryPassMax, cAdaptiveEvidence;
+    DWORD dwAttemptTransportGeneration, dwRetryTransportGeneration;
     PDWORD pRetryIndices = NULL;
     PPMEM_SCATTER ppRetryMEMs = NULL;
     PLC_READ_PAGE_RESULT pRetryResults = NULL;
+    DeviceFPGA_FTDI_ReevaluateAdaptivePollingWait(ctxLC, ctx);
+    dwAttemptTransportGeneration = ctx->dwTransportGeneration;
     if(!DeviceFPGA_Async2_ReadScatter_Attempt(ctxLC, cMEMs, ppMEMs, pResults, FALSE)) {
         return FALSE;
     }
@@ -3899,12 +3937,14 @@ BOOL DeviceFPGA_Async2_ReadScatterEx(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _
     if(!pRetryIndices || !ppRetryMEMs || !pRetryResults) {
         goto finish;
     }
+    cAdaptiveEvidence = (dwAttemptTransportGeneration == ctx->dwTransportGeneration) ?
+        FpgaReadPolicy_CountAdaptivePollingEvidence(cMEMs, pResults) : 0;
     cRetryPassMax = ctx->fAdaptivePollingWait ? 2 : 1;
     for(cRetryPass = 0; cRetryPass < cRetryPassMax; cRetryPass++) {
         cRetry = FpgaReadPolicy_BuildRetryList(cMEMs, pResults, cMEMs, pRetryIndices);
         if(!cRetry) { break; }
         if(!ctx->fAdaptivePollingWait) {
-            DeviceFPGA_FTDI_EnableAdaptivePollingWait(ctxLC, ctx, cRetry);
+            DeviceFPGA_FTDI_EnableAdaptivePollingWait(ctxLC, ctx, cAdaptiveEvidence);
         }
         if(ctx->fAdaptivePollingWait) {
             cRetryPassMax = 2;
@@ -3912,6 +3952,7 @@ BOOL DeviceFPGA_Async2_ReadScatterEx(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _
         for(i = 0; i < cRetry; i++) {
             ppRetryMEMs[i] = ppMEMs[pRetryIndices[i]];
         }
+        dwRetryTransportGeneration = ctx->dwTransportGeneration;
         if(!DeviceFPGA_Async2_ReadScatter_Attempt(ctxLC, cRetry, ppRetryMEMs, pRetryResults, TRUE)) {
             break;
         }
@@ -3924,6 +3965,14 @@ BOOL DeviceFPGA_Async2_ReadScatterEx(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _
             ppMEMs[iOriginal]->f =
                 (pResults[iOriginal] == LC_READ_PAGE_RESULT_SUCCESS) ||
                 (pResults[iOriginal] == LC_READ_PAGE_RESULT_SUCCESS_AFTER_RETRY);
+        }
+        if(!cRetryPass && !ctx->fAdaptivePollingWait &&
+           (dwRetryTransportGeneration == ctx->dwTransportGeneration)) {
+            cAdaptiveEvidence = FpgaReadPolicy_CountAdaptivePollingEvidence(cRetry, pRetryResults);
+            DeviceFPGA_FTDI_EnableAdaptivePollingWait(ctxLC, ctx, cAdaptiveEvidence);
+            if(ctx->fAdaptivePollingWait) {
+                cRetryPassMax = 2;
+            }
         }
     }
 finish:

@@ -288,6 +288,8 @@ BOOL LcRead(
 
 /*
 * Per-page result returned by LcReadScatterEx(). Numeric values are ABI-stable.
+* NOT_ISSUED means the backend rejected the page locally and did not send a
+* request to the target.
 */
 typedef DWORD LC_READ_PAGE_RESULT, *PLC_READ_PAGE_RESULT;
 #define LC_READ_PAGE_RESULT_NONE                    0
@@ -300,6 +302,7 @@ typedef DWORD LC_READ_PAGE_RESULT, *PLC_READ_PAGE_RESULT;
 #define LC_READ_PAGE_RESULT_TRANSPORT_ERROR         7
 #define LC_READ_PAGE_RESULT_PROTOCOL_ERROR          8
 #define LC_READ_PAGE_RESULT_UNSPECIFIED_ERROR       9
+#define LC_READ_PAGE_RESULT_NOT_ISSUED              10
 
 /*
 * Read memory in a scattered non-contiguous way and return a typed result for

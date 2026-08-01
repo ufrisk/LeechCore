@@ -43,7 +43,9 @@ LC_READ_PAGE_RESULT FpgaReadPolicy_ClassifyCompletion(_In_ BOOL fHasData, _In_ D
 LC_READ_PAGE_RESULT FpgaReadPolicy_Merge(_In_ LC_READ_PAGE_RESULT current, _In_ LC_READ_PAGE_RESULT observed);
 BOOL FpgaReadPolicy_IsRetryable(_In_ LC_READ_PAGE_RESULT result);
 DWORD FpgaReadPolicy_BuildRetryList(_In_ DWORD cResults, _In_reads_(cResults) PLC_READ_PAGE_RESULT pResults, _In_ DWORD cIndices, _Out_writes_to_(cIndices, return) PDWORD pIndices);
-BOOL FpgaReadPolicy_ShouldEnableAdaptivePolling(_In_ DWORD cRetry);
+DWORD FpgaReadPolicy_CountAdaptivePollingEvidence(_In_ DWORD cResults, _In_reads_(cResults) PLC_READ_PAGE_RESULT pResults);
+BOOL FpgaReadPolicy_ShouldEnableAdaptivePolling(_In_ DWORD cEvidence);
+BOOL FpgaReadPolicy_ShouldResetAdaptivePolling(_In_ BOOL fAdaptivePollingWait, _In_ DWORD dwPollingGeneration, _In_ DWORD dwTransportGeneration);
 LC_READ_PAGE_RESULT FpgaReadPolicy_MergeRetryResult(_In_ LC_READ_PAGE_RESULT firstResult, _In_ LC_READ_PAGE_RESULT retryResult);
 VOID FpgaReadPolicy_PageBegin(_Out_ PFPGA_READ_PAGE_STATE state, _In_ DWORD cbExpected);
 VOID FpgaReadPolicy_TagIssued(_Inout_ PFPGA_READ_PAGE_STATE state);
