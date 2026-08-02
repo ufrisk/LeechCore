@@ -556,6 +556,7 @@ BOOL DeviceFPGA_Session_CloseOverlapped(
             DEVICE_FPGA_SESSION_FT_OK;
     }
     if(ftStatus != DEVICE_FPGA_SESSION_FT_IO_INCOMPLETE) {
+        // Leave uncertain active state handle-owned; callers close or recover the handle before reuse.
         return FALSE;
     }
     // RX only: some callers don't hold the TX fast-write lock, and aborting TX here could cancel an in-flight write on that path.

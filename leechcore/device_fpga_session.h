@@ -289,9 +289,9 @@ BOOL DeviceFPGA_Session_ConfigurePipeTimeouts(
     _In_ PFN_DEVICE_FPGA_SESSION_SET_PIPE_TIMEOUT pfnSetPipeTimeout
 );
 
-_Success_(return)
 // Query completion before cancelling. Release only after completion is
 // observed, either before cancellation or after a bounded cancellation wait.
+_Success_(return)
 BOOL DeviceFPGA_Session_CloseOverlapped(
     _In_ HANDLE hFTDI,
     _In_ LPOVERLAPPED pOverlapped,
