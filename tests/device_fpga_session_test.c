@@ -1093,6 +1093,7 @@ static VOID TestTrackedCloseReleasesIdleReadWithoutCancelling(VOID)
 {
     CLOSE_SCRIPT Script = { 0 };
     OVERLAPPED Overlapped = { 0 };
+    BOOL fReleased = FALSE;
     BYTE pbExpected[] = { EVENT_RELEASE };
     ASSERT_TRUE(DeviceFPGA_Session_TeardownOverlapped(
         &Script,
@@ -1103,7 +1104,9 @@ static VOID TestTrackedCloseReleasesIdleReadWithoutCancelling(VOID)
         ScriptedReleaseOverlapped,
         &Script,
         ScriptedCloseTick,
-        ScriptedCloseSleep));
+        ScriptedCloseSleep,
+        &fReleased));
+    ASSERT_TRUE(fReleased);
     ASSERT_FALSE(Script.fRxAborted);
     ASSERT_FALSE(Script.fTxAborted);
     ASSERT_EQ(Script.cGetCalls, 0);
@@ -1117,6 +1120,7 @@ static VOID TestTrackedCloseCancelsPendingReadBeforeRelease(VOID)
 {
     CLOSE_SCRIPT Script = { 0 };
     OVERLAPPED Overlapped = { 0 };
+    BOOL fReleased = FALSE;
     BYTE pbExpected[] = {
         EVENT_GET_OVERLAPPED, 0x82, EVENT_GET_OVERLAPPED, EVENT_RELEASE
     };
@@ -1130,7 +1134,9 @@ static VOID TestTrackedCloseCancelsPendingReadBeforeRelease(VOID)
         ScriptedReleaseOverlapped,
         &Script,
         ScriptedCloseTick,
-        ScriptedCloseSleep));
+        ScriptedCloseSleep,
+        &fReleased));
+    ASSERT_TRUE(fReleased);
     ASSERT_TRUE(Script.fRxAborted);
     ASSERT_FALSE(Script.fTxAborted);
     ASSERT_TRUE(Script.fWaitedBeforeAbort);
@@ -1142,6 +1148,7 @@ static VOID TestTrackedCloseReleasesCompletedReadWithoutCancelling(VOID)
 {
     CLOSE_SCRIPT Script = { 0 };
     OVERLAPPED Overlapped = { 0 };
+    BOOL fReleased = FALSE;
     BYTE pbExpected[] = { EVENT_GET_OVERLAPPED, EVENT_RELEASE };
     ASSERT_TRUE(DeviceFPGA_Session_TeardownOverlapped(
         &Script,
@@ -1152,7 +1159,9 @@ static VOID TestTrackedCloseReleasesCompletedReadWithoutCancelling(VOID)
         ScriptedReleaseOverlapped,
         &Script,
         ScriptedCloseTick,
-        ScriptedCloseSleep));
+        ScriptedCloseSleep,
+        &fReleased));
+    ASSERT_TRUE(fReleased);
     ASSERT_FALSE(Script.fRxAborted);
     ASSERT_FALSE(Script.fTxAborted);
     ASSERT_TRUE(Script.fWaitedBeforeAbort);
@@ -1166,6 +1175,7 @@ static VOID TestOverlappedReadLifecycleAndCloseOrdering(VOID)
 {
     CLOSE_SCRIPT Script = { 0 };
     OVERLAPPED Overlapped = { 0 };
+    BOOL fReleased = FALSE;
     BYTE pbExpected[] = {
         EVENT_GET_OVERLAPPED, 0x82, EVENT_GET_OVERLAPPED, EVENT_RELEASE
     };
@@ -1184,7 +1194,9 @@ static VOID TestOverlappedReadLifecycleAndCloseOrdering(VOID)
         ScriptedReleaseOverlapped,
         &Script,
         ScriptedCloseTick,
-        ScriptedCloseSleep));
+        ScriptedCloseSleep,
+        &fReleased));
+    ASSERT_TRUE(fReleased);
     ASSERT_TRUE(Script.fWaitedBeforeAbort);
     ASSERT_FALSE(Script.fSawWaitArgument);
     ASSERT_TRUE(Script.fRxAborted);
@@ -1197,6 +1209,7 @@ static VOID TestClosePendingForeverIsBoundedAndDoesNotRelease(VOID)
 {
     CLOSE_SCRIPT Script = { 0 };
     OVERLAPPED Overlapped = { 0 };
+    BOOL fReleased = TRUE;
     Script.ulPreAbortGetStatus = DEVICE_FPGA_SESSION_FT_IO_INCOMPLETE;
     Script.ulGetStatus = DEVICE_FPGA_SESSION_FT_IO_INCOMPLETE;
     ASSERT_FALSE(DeviceFPGA_Session_CloseOverlapped(
@@ -1207,7 +1220,9 @@ static VOID TestClosePendingForeverIsBoundedAndDoesNotRelease(VOID)
         ScriptedReleaseOverlapped,
         &Script,
         ScriptedCloseTick,
-        ScriptedCloseSleep));
+        ScriptedCloseSleep,
+        &fReleased));
+    ASSERT_FALSE(fReleased);
     ASSERT_FALSE(Script.fSawWaitArgument);
     ASSERT_EQ(Script.qwNow, DEVICE_FPGA_SESSION_CANCEL_TIMEOUT_MS);
     ASSERT_EQ(Script.cGetCalls, DEVICE_FPGA_SESSION_CANCEL_TIMEOUT_MS + 2);
@@ -1218,6 +1233,7 @@ static VOID TestCloseReportsAbortErrorAfterAttemptingCleanup(VOID)
 {
     CLOSE_SCRIPT Script = { 0 };
     OVERLAPPED Overlapped = { 0 };
+    BOOL fReleased = FALSE;
     Script.ulPreAbortGetStatus = DEVICE_FPGA_SESSION_FT_IO_INCOMPLETE;
     Script.ulRxAbortStatus = 1;
     ASSERT_FALSE(DeviceFPGA_Session_CloseOverlapped(
@@ -1228,10 +1244,59 @@ static VOID TestCloseReportsAbortErrorAfterAttemptingCleanup(VOID)
         ScriptedReleaseOverlapped,
         &Script,
         ScriptedCloseTick,
-        ScriptedCloseSleep));
+        ScriptedCloseSleep,
+        &fReleased));
+    ASSERT_TRUE(fReleased);
     ASSERT_TRUE(Script.fRxAborted);
     ASSERT_FALSE(Script.fTxAborted);
     ASSERT_EQ(Script.cGetCalls, 2);
+    ASSERT_EQ(Script.cReleaseCalls, 1);
+}
+
+static VOID TestCloseUnexpectedQueryErrorStillAbortsAndReleases(VOID)
+{
+    CLOSE_SCRIPT Script = { 0 };
+    OVERLAPPED Overlapped = { 0 };
+    BOOL fReleased = FALSE;
+    BYTE pbExpected[] = {
+        EVENT_GET_OVERLAPPED, 0x82, EVENT_GET_OVERLAPPED, EVENT_RELEASE
+    };
+    Script.ulPreAbortGetStatus = 1;
+    ASSERT_TRUE(DeviceFPGA_Session_CloseOverlapped(
+        &Script,
+        &Overlapped,
+        ScriptedAbortPipe,
+        ScriptedGetOverlappedResult,
+        ScriptedReleaseOverlapped,
+        &Script,
+        ScriptedCloseTick,
+        ScriptedCloseSleep,
+        &fReleased));
+    ASSERT_TRUE(fReleased);
+    ASSERT_TRUE(Script.fRxAborted);
+    ASSERT_FALSE(Script.fTxAborted);
+    ASSERT_EQ(Script.cEvents, sizeof(pbExpected));
+    ASSERT_BYTES(Script.pbEvents, pbExpected, sizeof(pbExpected));
+}
+
+static VOID TestCloseReleaseFailureKeepsHandleOwnership(VOID)
+{
+    CLOSE_SCRIPT Script = { 0 };
+    OVERLAPPED Overlapped = { 0 };
+    BOOL fReleased = TRUE;
+    Script.ulReleaseStatus = 1;
+    ASSERT_FALSE(DeviceFPGA_Session_CloseOverlapped(
+        &Script,
+        &Overlapped,
+        ScriptedAbortPipe,
+        ScriptedGetOverlappedResult,
+        ScriptedReleaseOverlapped,
+        &Script,
+        ScriptedCloseTick,
+        ScriptedCloseSleep,
+        &fReleased));
+    ASSERT_FALSE(fReleased);
+    ASSERT_FALSE(Script.fRxAborted);
     ASSERT_EQ(Script.cReleaseCalls, 1);
 }
 
@@ -1713,6 +1778,8 @@ int main(void)
     RUN_TEST(TestOverlappedReadLifecycleAndCloseOrdering);
     RUN_TEST(TestClosePendingForeverIsBoundedAndDoesNotRelease);
     RUN_TEST(TestCloseReportsAbortErrorAfterAttemptingCleanup);
+    RUN_TEST(TestCloseUnexpectedQueryErrorStillAbortsAndReleases);
+    RUN_TEST(TestCloseReleaseFailureKeepsHandleOwnership);
     RUN_TEST(TestConfigurePipeTimeoutsConfiguresBothDirections);
     RUN_TEST(TestConfigurePipeTimeoutsReportsEitherFailure);
     RUN_TEST(TestRecoveryCoordinatorExecutesOneOrderedAttempt);

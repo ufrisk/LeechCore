@@ -291,6 +291,8 @@ BOOL DeviceFPGA_Session_ConfigurePipeTimeouts(
 
 // Query completion before cancelling. Release only after completion is
 // observed, either before cancellation or after a bounded cancellation wait.
+// pfOverlappedReleased distinguishes cleanup success from resource ownership;
+// FALSE means the initialized object must remain handle-owned until close.
 _Success_(return)
 BOOL DeviceFPGA_Session_CloseOverlapped(
     _In_ HANDLE hFTDI,
@@ -300,7 +302,8 @@ BOOL DeviceFPGA_Session_CloseOverlapped(
     _In_ PFN_DEVICE_FPGA_SESSION_RELEASE_OVERLAPPED pfnReleaseOverlapped,
     _In_opt_ PVOID pvTimingContext,
     _In_opt_ PFN_DEVICE_FPGA_SESSION_TICK pfnTick,
-    _In_opt_ PFN_DEVICE_FPGA_SESSION_SLEEP pfnSleep
+    _In_opt_ PFN_DEVICE_FPGA_SESSION_SLEEP pfnSleep,
+    _Out_ PBOOL pfOverlappedReleased
 );
 
 // Release an initialized idle OVERLAPPED object directly. If a read was
@@ -315,7 +318,8 @@ BOOL DeviceFPGA_Session_TeardownOverlapped(
     _In_ PFN_DEVICE_FPGA_SESSION_RELEASE_OVERLAPPED pfnReleaseOverlapped,
     _In_opt_ PVOID pvTimingContext,
     _In_opt_ PFN_DEVICE_FPGA_SESSION_TICK pfnTick,
-    _In_opt_ PFN_DEVICE_FPGA_SESSION_SLEEP pfnSleep
+    _In_opt_ PFN_DEVICE_FPGA_SESSION_SLEEP pfnSleep,
+    _Out_ PBOOL pfOverlappedReleased
 );
 
 #endif /* __DEVICE_FPGA_SESSION_H__ */

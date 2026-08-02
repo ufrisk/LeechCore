@@ -534,13 +534,19 @@ BOOL DeviceFPGA_Session_CloseOverlapped(
     _In_ PFN_DEVICE_FPGA_SESSION_RELEASE_OVERLAPPED pfnReleaseOverlapped,
     _In_opt_ PVOID pvTimingContext,
     _In_opt_ PFN_DEVICE_FPGA_SESSION_TICK pfnTick,
-    _In_opt_ PFN_DEVICE_FPGA_SESSION_SLEEP pfnSleep
+    _In_opt_ PFN_DEVICE_FPGA_SESSION_SLEEP pfnSleep,
+    _Out_ PBOOL pfOverlappedReleased
 )
 {
     BOOL fResult = TRUE;
     ULONG ftStatus, cbTransferred = 0;
     DEVICE_FPGA_SESSION_WAIT_RESULT WaitResult;
-    if(!hFTDI || !pOverlapped) { return TRUE; }
+    if(!pfOverlappedReleased) { return FALSE; }
+    *pfOverlappedReleased = FALSE;
+    if(!hFTDI || !pOverlapped) {
+        *pfOverlappedReleased = TRUE;
+        return TRUE;
+    }
     if(!pfnAbortPipe || !pfnGetOverlappedResult || !pfnReleaseOverlapped) {
         return FALSE;
     }
@@ -552,13 +558,12 @@ BOOL DeviceFPGA_Session_CloseOverlapped(
         &cbTransferred,
         FALSE);
     if(ftStatus == DEVICE_FPGA_SESSION_FT_OK) {
-        return pfnReleaseOverlapped(hFTDI, pOverlapped) ==
+        *pfOverlappedReleased = pfnReleaseOverlapped(hFTDI, pOverlapped) ==
             DEVICE_FPGA_SESSION_FT_OK;
+        return *pfOverlappedReleased;
     }
-    if(ftStatus != DEVICE_FPGA_SESSION_FT_IO_INCOMPLETE) {
-        // Leave uncertain active state handle-owned; callers close or recover the handle before reuse.
-        return FALSE;
-    }
+    // FTDI recommends aborting the pipe after any non-success query status.
+    // This also preserves the upstream recovery attempt for unexpected errors.
     // RX only: some callers don't hold the TX fast-write lock, and aborting TX here could cancel an in-flight write on that path.
     ftStatus = pfnAbortPipe(hFTDI, 0x82);
     fResult &= ftStatus == DEVICE_FPGA_SESSION_FT_OK;
@@ -575,9 +580,9 @@ BOOL DeviceFPGA_Session_CloseOverlapped(
     if(WaitResult.outcome != DEVICE_FPGA_SESSION_WAIT_COMPLETED) {
         return FALSE;
     }
-    fResult &= pfnReleaseOverlapped(hFTDI, pOverlapped) ==
+    *pfOverlappedReleased = pfnReleaseOverlapped(hFTDI, pOverlapped) ==
         DEVICE_FPGA_SESSION_FT_OK;
-    return fResult;
+    return fResult && *pfOverlappedReleased;
 }
 
 _Success_(return)
@@ -590,14 +595,21 @@ BOOL DeviceFPGA_Session_TeardownOverlapped(
     _In_ PFN_DEVICE_FPGA_SESSION_RELEASE_OVERLAPPED pfnReleaseOverlapped,
     _In_opt_ PVOID pvTimingContext,
     _In_opt_ PFN_DEVICE_FPGA_SESSION_TICK pfnTick,
-    _In_opt_ PFN_DEVICE_FPGA_SESSION_SLEEP pfnSleep
+    _In_opt_ PFN_DEVICE_FPGA_SESSION_SLEEP pfnSleep,
+    _Out_ PBOOL pfOverlappedReleased
 )
 {
-    if(!hFTDI || !pOverlapped) { return TRUE; }
+    if(!pfOverlappedReleased) { return FALSE; }
+    *pfOverlappedReleased = FALSE;
+    if(!hFTDI || !pOverlapped) {
+        *pfOverlappedReleased = TRUE;
+        return TRUE;
+    }
     if(!fReadPending) {
-        return pfnReleaseOverlapped &&
+        *pfOverlappedReleased = pfnReleaseOverlapped &&
             (pfnReleaseOverlapped(hFTDI, pOverlapped) ==
              DEVICE_FPGA_SESSION_FT_OK);
+        return *pfOverlappedReleased;
     }
     return DeviceFPGA_Session_CloseOverlapped(
         hFTDI,
@@ -607,5 +619,6 @@ BOOL DeviceFPGA_Session_TeardownOverlapped(
         pfnReleaseOverlapped,
         pvTimingContext,
         pfnTick,
-        pfnSleep);
+        pfnSleep,
+        pfOverlappedReleased);
 }
