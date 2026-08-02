@@ -312,6 +312,22 @@ BOOL DeviceFPGA_Session_ParsePCIeConfigReply(
     _Inout_updates_(DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE) PBYTE pbCoverage
 );
 
+_Success_(return)
+BOOL DeviceFPGA_Session_ReadPCIeConfigBatchMatching(
+    _In_ HANDLE hFTDI,
+    _Out_writes_to_(cbBuffer, *pcbRead) PBYTE pbBuffer,
+    _In_ DWORD cbBuffer,
+    _Out_ PDWORD pcbRead,
+    _In_ PFN_DEVICE_FPGA_SESSION_READ_PIPE pfnReadPipe,
+    _In_ DWORD iDWord,
+    _In_ DWORD cDWords,
+    _Inout_updates_(DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE) PBYTE pbResult,
+    _Inout_updates_(DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE) PBYTE pbCoverage,
+    _In_ DWORD dwTimeoutMs,
+    _In_opt_ PVOID pvTimingContext,
+    _In_opt_ PFN_DEVICE_FPGA_SESSION_TICK pfnTick
+);
+
 BOOL DeviceFPGA_Session_IsPCIeConfigComplete(
     _In_reads_(DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE) PBYTE pbCoverage,
     _In_opt_ DWORD raSingleDW

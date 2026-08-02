@@ -1509,13 +1509,16 @@ static BOOL DeviceFPGA_PCIeCfgSpaceCoreReadAttempt(
     PDEVICE_FPGA_PCIE_CONFIG_READ_CONTEXT pReadContext =
         (PDEVICE_FPGA_PCIE_CONFIG_READ_CONTEXT)pvContext;
     PDEVICE_CONTEXT_FPGA ctx;
-    BYTE pbRxTx[0x1000], pbCoverage[DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE];
-    DWORD status, cbRxTx, cBatchDWords, raSingleDW;
+    BYTE pbRxTx[0x1000];
+    BYTE pbStaged[DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE];
+    BYTE pbCoverage[DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE];
+    DWORD status, cbRxTx, cBatchDWords, iBatchDWord, raSingleDW;
     WORD wDWordAddr;
     if(!pReadContext || !pReadContext->ctx || !pb) { return FALSE; }
     ctx = pReadContext->ctx;
     raSingleDW = pReadContext->raSingleDW;
     if(!DeviceFPGA_TransportIOAllowed(ctx)) { return FALSE; }
+    ZeroMemory(pbStaged, sizeof(pbStaged));
     ZeroMemory(pbCoverage, sizeof(pbCoverage));
     // A 32-DWORD reply can cross the FT601's effective 1 KiB receive
     // boundary and lose its final framed result. Keep each reply below it.
@@ -1535,24 +1538,30 @@ static BOOL DeviceFPGA_PCIeCfgSpaceCoreReadAttempt(
         status = ctx->dev.pfnFT_WritePipe(ctx->dev.hFTDI, 0x02, pbRxTx, cbRxTx, &cbRxTx, NULL);
         if(status) { return FALSE; }
         Sleep(10);
-        if(!DeviceFPGA_Session_ReadConfigReply(
+        iBatchDWord = raSingleDW ?
+            (raSingleDW & 0x7fffffff) : wDWordAddr;
+        if(!DeviceFPGA_Session_ReadPCIeConfigBatchMatching(
             ctx->dev.hFTDI,
             pbRxTx,
             sizeof(pbRxTx),
             &cbRxTx,
             ctx->dev.pfnFT_ReadPipe,
+            iBatchDWord,
+            cBatchDWords,
+            pbStaged,
+            pbCoverage,
             DEVICE_FPGA_SESSION_CONFIG_REPLY_TIMEOUT_MS,
             NULL,
             NULL)) {
             return FALSE;
         }
-        if(!DeviceFPGA_Session_ParsePCIeConfigReply(
-            pbRxTx, cbRxTx, pb, pbCoverage)) {
-            return FALSE;
-        }
         if(raSingleDW) { break; }
     }
-    return DeviceFPGA_Session_IsPCIeConfigComplete(pbCoverage, raSingleDW);
+    if(!DeviceFPGA_Session_IsPCIeConfigComplete(pbCoverage, raSingleDW)) {
+        return FALSE;
+    }
+    memcpy(pb, pbStaged, sizeof(pbStaged));
+    return TRUE;
 }
 
 /*
@@ -1741,10 +1750,11 @@ VOID DeviceFPGA_ConfigPrint(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ct
     if(ctx->wFpgaVersionMajor < 4) { return; }
     for(i = 0; i < 4; i++) {
         if(DeviceFPGA_ConfigRead(ctx, 0x0004, (PBYTE)&cb, 2, flags[i])) {
-            lcprintf(ctxLC, "\n----- FPGA DEVICE CONFIG REGISTERS: %s    SIZE: %i BYTES -----\n", szNAME[i], cb);
             cb = min(cb, sizeof(pb));
-            DeviceFPGA_ConfigRead(ctx, 0x0000, pb, cb, flags[i]);
-            Util_PrintHexAscii(ctxLC, pb, cb, 0);
+            if(DeviceFPGA_ConfigRead(ctx, 0x0000, pb, cb, flags[i])) {
+                lcprintf(ctxLC, "\n----- FPGA DEVICE CONFIG REGISTERS: %s    SIZE: %i BYTES -----\n", szNAME[i], cb);
+                Util_PrintHexAscii(ctxLC, pb, cb, 0);
+            }
         }
     }
     if(DeviceFPGA_PCIeDrpRead(ctx, pb)) {
@@ -4746,9 +4756,14 @@ BOOL DeviceFPGA_Command(
             return TRUE;
         case LC_CMD_FPGA_PCIECFGSPACE:
             if(!ppbDataOut || (ctx->wFpgaVersionMajor < 4)) { return FALSE; }
-            if(!(*ppbDataOut = LocalAlloc(LMEM_ZEROINIT, 0x1000))) { return FALSE; }
+            if(!(pb = LocalAlloc(LMEM_ZEROINIT, 0x1000))) { return FALSE; }
+            if(!DeviceFPGA_PCIeCfgSpaceCoreRead(ctx, pb, 0)) {
+                LocalFree(pb);
+                return FALSE;
+            }
+            *ppbDataOut = pb;
             if(pcbDataOut) { *pcbDataOut = 0x1000; };
-            return DeviceFPGA_PCIeCfgSpaceCoreRead(ctx, *ppbDataOut, 0);
+            return TRUE;
         case LC_CMD_FPGA_CFGREGCFG:
         case LC_CMD_FPGA_CFGREGPCIE:
             if(ctx->wFpgaVersionMajor < 4) { return FALSE; }

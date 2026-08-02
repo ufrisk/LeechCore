@@ -589,6 +589,96 @@ BOOL DeviceFPGA_Session_ParsePCIeConfigReply(
     return fSawRecord;
 }
 
+static BOOL DeviceFPGA_Session_IsPCIeConfigBatchComplete(
+    _In_reads_(DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE) PBYTE pbCoverage,
+    _In_ DWORD iDWord,
+    _In_ DWORD cDWords
+)
+{
+    DWORD i, iLimit;
+    if(!pbCoverage || !cDWords ||
+       (iDWord >= DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE / sizeof(DWORD)) ||
+       (cDWords >
+        (DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE / sizeof(DWORD)) - iDWord)) {
+        return FALSE;
+    }
+    i = iDWord * sizeof(DWORD);
+    iLimit = i + (cDWords * sizeof(DWORD));
+    for(; i < iLimit; i++) {
+        if(!pbCoverage[i]) { return FALSE; }
+    }
+    return TRUE;
+}
+
+_Success_(return)
+BOOL DeviceFPGA_Session_ReadPCIeConfigBatchMatching(
+    _In_ HANDLE hFTDI,
+    _Out_writes_to_(cbBuffer, *pcbRead) PBYTE pbBuffer,
+    _In_ DWORD cbBuffer,
+    _Out_ PDWORD pcbRead,
+    _In_ PFN_DEVICE_FPGA_SESSION_READ_PIPE pfnReadPipe,
+    _In_ DWORD iDWord,
+    _In_ DWORD cDWords,
+    _Inout_updates_(DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE) PBYTE pbResult,
+    _Inout_updates_(DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE) PBYTE pbCoverage,
+    _In_ DWORD dwTimeoutMs,
+    _In_opt_ PVOID pvTimingContext,
+    _In_opt_ PFN_DEVICE_FPGA_SESSION_TICK pfnTick
+)
+{
+    DWORD i, cbAccumulated = 0, cbReadMax;
+    QWORD qwStart;
+    ULONG cbRead;
+    if(!pcbRead) { return FALSE; }
+    *pcbRead = 0;
+    if(!hFTDI || !pbBuffer || !cbBuffer || !pfnReadPipe ||
+       !pbResult || !pbCoverage || !dwTimeoutMs || !cDWords ||
+       (iDWord >= DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE / sizeof(DWORD)) ||
+       (cDWords >
+        (DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE / sizeof(DWORD)) - iDWord)) {
+        return FALSE;
+    }
+    if(!pfnTick) { pfnTick = DeviceFPGA_Session_DefaultTick; }
+    qwStart = pfnTick(pvTimingContext);
+    for(i = 0; i < DEVICE_FPGA_SESSION_CONFIG_REPLY_MAX_READS; i++) {
+        if(pfnTick(pvTimingContext) - qwStart >= dwTimeoutMs) {
+            return FALSE;
+        }
+        if(cbAccumulated >= cbBuffer) { return FALSE; }
+        cbReadMax = cbBuffer - cbAccumulated;
+        cbRead = 0;
+        if(pfnReadPipe(
+            hFTDI,
+            0x82,
+            pbBuffer + cbAccumulated,
+            cbReadMax,
+            &cbRead,
+            NULL) ||
+           (cbRead > cbReadMax)) {
+            return FALSE;
+        }
+        if(!cbRead) { return FALSE; }
+        if(pfnTick(pvTimingContext) - qwStart >= dwTimeoutMs) {
+            return FALSE;
+        }
+        if(DeviceFPGA_Session_IsFillerOnly(
+            pbBuffer + cbAccumulated, cbRead)) {
+            continue;
+        }
+        cbAccumulated += cbRead;
+        if(!DeviceFPGA_Session_ParsePCIeConfigReply(
+            pbBuffer, cbAccumulated, pbResult, pbCoverage)) {
+            continue;
+        }
+        if(DeviceFPGA_Session_IsPCIeConfigBatchComplete(
+            pbCoverage, iDWord, cDWords)) {
+            *pcbRead = cbAccumulated;
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
 static BOOL DeviceFPGA_Session_IsPCIeConfigRequestValid(_In_opt_ DWORD raSingleDW)
 {
     return !raSingleDW ||
@@ -700,6 +790,7 @@ BOOL DeviceFPGA_Session_ReadPCIeConfigWithRetry(
             return TRUE;
         }
     }
+    ZeroMemory(pbResult, DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE);
     return FALSE;
 }
 

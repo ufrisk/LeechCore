@@ -355,6 +355,106 @@ static VOID TestPCIeConfigBatchBuilderPreservesSingleDwordRequest(VOID)
     ASSERT_EQ(cbBatch, 0);
 }
 
+#define PCIE_CONFIG_BATCH_REPLY_SIZE \
+    (DEVICE_FPGA_SESSION_PCIE_CONFIG_BATCH_DWORDS * 32)
+
+typedef struct tdPCIE_CONFIG_BATCH_REPLY_SCRIPT {
+    BYTE apbReply[9][PCIE_CONFIG_BATCH_REPLY_SIZE];
+    DWORD cReplies;
+    DWORD cCalls;
+} PCIE_CONFIG_BATCH_REPLY_SCRIPT, *PPCIE_CONFIG_BATCH_REPLY_SCRIPT;
+
+static VOID BuildPCIeConfigBatchReply(
+    _Out_writes_(PCIE_CONFIG_BATCH_REPLY_SIZE) PBYTE pbReply,
+    _In_ DWORD iStartDWord,
+    _In_ BYTE bOverride
+)
+{
+    DWORD i, oByte, dwStatus = 0xe0000111;
+    DWORD dwMeta, dwDataLo, dwDataHi;
+    for(i = 0; i < DEVICE_FPGA_SESSION_PCIE_CONFIG_BATCH_DWORDS; i++) {
+        oByte = (iStartDWord + i) * sizeof(DWORD);
+        dwMeta = 0x08002a00 | ((iStartDWord + i) << 16);
+        dwDataLo =
+            ((DWORD)(bOverride ? bOverride : ((oByte + 1) & 0xff)) << 24) |
+            ((DWORD)(bOverride ? bOverride : (oByte & 0xff)) << 16) |
+            0x2c00;
+        dwDataHi =
+            ((DWORD)(bOverride ? bOverride : ((oByte + 3) & 0xff)) << 24) |
+            ((DWORD)(bOverride ? bOverride : ((oByte + 2) & 0xff)) << 16) |
+            0x2e00;
+        ZeroMemory(pbReply + (i * 32), 32);
+        memcpy(pbReply + (i * 32), &dwStatus, sizeof(dwStatus));
+        memcpy(pbReply + (i * 32) + 4, &dwMeta, sizeof(dwMeta));
+        memcpy(pbReply + (i * 32) + 8, &dwDataLo, sizeof(dwDataLo));
+        memcpy(pbReply + (i * 32) + 12, &dwDataHi, sizeof(dwDataHi));
+    }
+}
+
+static ULONG WINAPI ScriptedPCIeConfigBatchRead(
+    _In_ HANDLE hFTDI,
+    _In_ UCHAR ucPipeID,
+    _Out_writes_(cbBuffer) PUCHAR pbBuffer,
+    _In_ ULONG cbBuffer,
+    _Out_ PULONG pcbTransferred,
+    _In_opt_ LPOVERLAPPED pOverlapped
+)
+{
+    PPCIE_CONFIG_BATCH_REPLY_SCRIPT pScript =
+        (PPCIE_CONFIG_BATCH_REPLY_SCRIPT)hFTDI;
+    UNREFERENCED_PARAMETER(pOverlapped);
+    if((ucPipeID != 0x82) ||
+       (cbBuffer < PCIE_CONFIG_BATCH_REPLY_SIZE)) {
+        *pcbTransferred = 0;
+        return 1;
+    }
+    if(pScript->cCalls >= pScript->cReplies) {
+        *pcbTransferred = 0;
+        return 0;
+    }
+    memcpy(pbBuffer, pScript->apbReply[pScript->cCalls],
+        PCIE_CONFIG_BATCH_REPLY_SIZE);
+    pScript->cCalls++;
+    *pcbTransferred = PCIE_CONFIG_BATCH_REPLY_SIZE;
+    return 0;
+}
+
+static VOID TestPCIeConfigBatchReadDoesNotAdvanceOnShiftedStaleReply(VOID)
+{
+    PCIE_CONFIG_BATCH_REPLY_SCRIPT Script = { 0 };
+    BYTE pbBuffer[0x1000] = { 0 };
+    BYTE pbResult[DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE] = { 0 };
+    BYTE pbCoverage[DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE] = { 0 };
+    DWORD i, iBatch, cbRead;
+    BuildPCIeConfigBatchReply(Script.apbReply[0], 112, 0xee);
+    for(iBatch = 0; iBatch < 8; iBatch++) {
+        BuildPCIeConfigBatchReply(
+            Script.apbReply[iBatch + 1], iBatch * 16, 0);
+    }
+    Script.cReplies = 9;
+    for(iBatch = 0; iBatch < 8; iBatch++) {
+        cbRead = 0;
+        ASSERT_TRUE(DeviceFPGA_Session_ReadPCIeConfigBatchMatching(
+            &Script,
+            pbBuffer,
+            sizeof(pbBuffer),
+            &cbRead,
+            ScriptedPCIeConfigBatchRead,
+            iBatch * 16,
+            16,
+            pbResult,
+            pbCoverage,
+            DEVICE_FPGA_SESSION_CONFIG_REPLY_TIMEOUT_MS,
+            NULL,
+            NULL));
+    }
+    ASSERT_EQ(Script.cCalls, 9);
+    ASSERT_TRUE(DeviceFPGA_Session_IsPCIeConfigComplete(pbCoverage, 0));
+    for(i = 0; i < sizeof(pbResult); i++) {
+        ASSERT_EQ(pbResult[i], i & 0xff);
+    }
+}
+
 typedef struct tdPCIE_CONFIG_READ_SCRIPT {
     BOOL afSuccess[2];
     BYTE abWrite[2];
@@ -410,11 +510,13 @@ static VOID TestPCIeConfigRetryStopsAfterTwoFailures(VOID)
 {
     PCIE_CONFIG_READ_SCRIPT Script = { { FALSE, FALSE }, { 0xaa, 0x22 }, 0, TRUE };
     BYTE pbResult[DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE];
+    BYTE pbExpected[DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE] = { 0 };
     memset(pbResult, 0xff, sizeof(pbResult));
     ASSERT_FALSE(DeviceFPGA_Session_ReadPCIeConfigWithRetry(
         &Script, ScriptedPCIeConfigReadAttempt, pbResult, 0));
     ASSERT_EQ(Script.cCalls, 2);
     ASSERT_TRUE(Script.fSecondOutputWasCleared);
+    ASSERT_BYTES(pbResult, pbExpected, sizeof(pbResult));
 }
 
 static VOID TestPCIeConfigRetryRejectsOutOfRangeRequestWithoutAttempt(VOID)
@@ -2306,6 +2408,7 @@ int main(void)
     RUN_TEST(TestPCIeConfigBatchSizingBoundsRepliesBelowTransportBoundary);
     RUN_TEST(TestPCIeConfigBatchBuilderKeepsRealRequestsBelowBoundary);
     RUN_TEST(TestPCIeConfigBatchBuilderPreservesSingleDwordRequest);
+    RUN_TEST(TestPCIeConfigBatchReadDoesNotAdvanceOnShiftedStaleReply);
     RUN_TEST(TestPCIeConfigRetryReturnsFirstAttemptSuccess);
     RUN_TEST(TestPCIeConfigRetryClearsOutputBeforeSecondAttempt);
     RUN_TEST(TestPCIeConfigRetryStopsAfterTwoFailures);
