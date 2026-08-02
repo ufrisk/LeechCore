@@ -2317,16 +2317,14 @@ static BOOL DeviceFPGA_FTDI_RecoveryQuiesce(_Inout_ PVOID pvContext)
             ZeroMemory(&ctx->async2.oOverlapped, sizeof(ctx->async2.oOverlapped));
         }
     } else if(ctx->async2.fReadPending) {
-        fResult = ctx->dev.pfnFT_AbortPipe &&
-            (ctx->dev.pfnFT_AbortPipe(ctx->dev.hFTDI, 0x82) == DEVICE_FPGA_SESSION_FT_OK);
+        fResult = ctx->dev.pfnFT_AbortPipe && (ctx->dev.pfnFT_AbortPipe(ctx->dev.hFTDI, 0x82) == DEVICE_FPGA_SESSION_FT_OK);
     }
     status = ctx->dev.pfnFT_Close(ctx->dev.hFTDI);
     if(status) {
         return FALSE;
     }
     ctx->dev.hFTDI = NULL;
-    if(!fOverlappedReleased &&
-       (ctx->async2.fOverlappedInitialized || ctx->async2.fReadPending)) {
+    if(!fOverlappedReleased && (ctx->async2.fOverlappedInitialized || ctx->async2.fReadPending)) {
         ctx->async2.fOverlappedInitialized = FALSE;
         ctx->async2.fReadPending = FALSE;
         ZeroMemory(&ctx->async2.oOverlapped, sizeof(ctx->async2.oOverlapped));
