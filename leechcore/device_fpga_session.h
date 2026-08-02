@@ -168,6 +168,25 @@ typedef struct tdDEVICE_FPGA_SESSION_READ_RESULT {
     ULONG cbTransferred;
 } DEVICE_FPGA_SESSION_READ_RESULT, *PDEVICE_FPGA_SESSION_READ_RESULT;
 
+typedef struct tdDEVICE_FPGA_SESSION_OPPORTUNISTIC_READ_CONTEXT {
+    HANDLE hFTDI;
+    UCHAR ucPipeID;
+    LPOVERLAPPED pOverlapped;
+    PFN_DEVICE_FPGA_SESSION_READ_PIPE pfnReadPipe;
+    PFN_DEVICE_FPGA_SESSION_GET_OVERLAPPED_RESULT pfnGetOverlappedResult;
+    PFN_DEVICE_FPGA_SESSION_ABORT_PIPE pfnAbortPipe;
+    PFN_DEVICE_FPGA_SESSION_RELEASE_OVERLAPPED pfnReleaseOverlapped;
+    PFN_DEVICE_FPGA_SESSION_INITIALIZE_OVERLAPPED pfnInitializeOverlapped;
+    DWORD dwTimeoutMs;
+    DWORD dwPollMs;
+    PVOID pvTimingContext;
+    PFN_DEVICE_FPGA_SESSION_TICK pfnTick;
+    PFN_DEVICE_FPGA_SESSION_SLEEP pfnSleep;
+    PBOOL pfOverlappedInitialized;
+    PBOOL pfReadPending;
+} DEVICE_FPGA_SESSION_OPPORTUNISTIC_READ_CONTEXT,
+    *PDEVICE_FPGA_SESSION_OPPORTUNISTIC_READ_CONTEXT;
+
 ULONG DeviceFPGA_Session_StartOverlappedRead(
     _In_ HANDLE hFTDI,
     _In_ UCHAR ucPipeID,
@@ -250,23 +269,9 @@ DEVICE_FPGA_SESSION_WAIT_RESULT DeviceFPGA_Session_ReadPipeBounded(
 );
 
 DEVICE_FPGA_SESSION_READ_RESULT DeviceFPGA_Session_ReadPipeOpportunistic(
-    _In_ HANDLE hFTDI,
-    _In_ UCHAR ucPipeID,
+    _Inout_ PDEVICE_FPGA_SESSION_OPPORTUNISTIC_READ_CONTEXT pContext,
     _Out_writes_(cbBuffer) PUCHAR pbBuffer,
-    _In_ ULONG cbBuffer,
-    _In_ LPOVERLAPPED pOverlapped,
-    _In_ PFN_DEVICE_FPGA_SESSION_READ_PIPE pfnReadPipe,
-    _In_ PFN_DEVICE_FPGA_SESSION_GET_OVERLAPPED_RESULT pfnGetOverlappedResult,
-    _In_ PFN_DEVICE_FPGA_SESSION_ABORT_PIPE pfnAbortPipe,
-    _In_ PFN_DEVICE_FPGA_SESSION_RELEASE_OVERLAPPED pfnReleaseOverlapped,
-    _In_ PFN_DEVICE_FPGA_SESSION_INITIALIZE_OVERLAPPED pfnInitializeOverlapped,
-    _In_ DWORD dwTimeoutMs,
-    _In_ DWORD dwPollMs,
-    _In_opt_ PVOID pvTimingContext,
-    _In_ PFN_DEVICE_FPGA_SESSION_TICK pfnTick,
-    _In_ PFN_DEVICE_FPGA_SESSION_SLEEP pfnSleep,
-    _Inout_ PBOOL pfOverlappedInitialized,
-    _Inout_ PBOOL pfReadPending
+    _In_ ULONG cbBuffer
 );
 
 DEVICE_FPGA_SESSION_RECOVERY_STAGE DeviceFPGA_Session_Recover(

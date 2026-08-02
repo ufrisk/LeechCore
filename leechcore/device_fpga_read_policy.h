@@ -46,7 +46,7 @@ DWORD FpgaReadPolicy_BuildRetryList(_In_ DWORD cResults, _In_reads_(cResults) PL
 DWORD FpgaReadPolicy_CountAdaptivePollingEvidence(_In_ DWORD cResults, _In_reads_(cResults) PLC_READ_PAGE_RESULT pResults);
 BOOL FpgaReadPolicy_ShouldEnableAdaptivePolling(_In_ DWORD cEvidence, _In_ DWORD dwEvidenceGeneration, _In_ DWORD dwTransportGeneration);
 BOOL FpgaReadPolicy_ShouldResetAdaptivePolling(_In_ BOOL fAdaptivePollingWait, _In_ DWORD dwPollingGeneration, _In_ DWORD dwTransportGeneration);
-DWORD FpgaReadPolicy_ProbeReceiveMaxReads(_In_ BOOL fNativeFT601);
+DWORD FpgaReadPolicy_ProbeReceiveMaxReads(_In_ BOOL fCanReadPipeBounded);
 LC_READ_PAGE_RESULT FpgaReadPolicy_MergeRetryResult(_In_ LC_READ_PAGE_RESULT firstResult, _In_ LC_READ_PAGE_RESULT retryResult);
 VOID FpgaReadPolicy_PageBegin(_Out_ PFPGA_READ_PAGE_STATE state, _In_ DWORD cbExpected);
 VOID FpgaReadPolicy_TagIssued(_Inout_ PFPGA_READ_PAGE_STATE state);

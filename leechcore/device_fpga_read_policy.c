@@ -143,12 +143,12 @@ BOOL FpgaReadPolicy_ShouldResetAdaptivePolling(_In_ BOOL fAdaptivePollingWait, _
     return fAdaptivePollingWait && (dwPollingGeneration != dwTransportGeneration);
 }
 
-DWORD FpgaReadPolicy_ProbeReceiveMaxReads(_In_ BOOL fNativeFT601)
+DWORD FpgaReadPolicy_ProbeReceiveMaxReads(_In_ BOOL fCanReadPipeBounded)
 {
-    // Native FT601 receives use one initial read plus two bounded follow-ups so
-    // a delayed completion batch may itself arrive split across reads. Preserve
-    // the legacy single receive on transports for which this is unproven.
-    return fNativeFT601 ?
+    // Bounded-pipe reads use one initial read plus two bounded follow-ups so a
+    // delayed completion batch may itself arrive split across reads. Preserve
+    // the legacy single receive when bounded follow-ups are unavailable.
+    return fCanReadPipeBounded ?
         FPGA_PROBE_RECEIVE_MAX_READS_FT601 :
         FPGA_PROBE_RECEIVE_MAX_READS_LEGACY;
 }

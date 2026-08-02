@@ -238,32 +238,49 @@ static DEVICE_FPGA_SESSION_READ_RESULT DeviceFPGA_Session_ReadResult(
 }
 
 DEVICE_FPGA_SESSION_READ_RESULT DeviceFPGA_Session_ReadPipeOpportunistic(
-    _In_ HANDLE hFTDI,
-    _In_ UCHAR ucPipeID,
+    _Inout_ PDEVICE_FPGA_SESSION_OPPORTUNISTIC_READ_CONTEXT pContext,
     _Out_writes_(cbBuffer) PUCHAR pbBuffer,
-    _In_ ULONG cbBuffer,
-    _In_ LPOVERLAPPED pOverlapped,
-    _In_ PFN_DEVICE_FPGA_SESSION_READ_PIPE pfnReadPipe,
-    _In_ PFN_DEVICE_FPGA_SESSION_GET_OVERLAPPED_RESULT pfnGetOverlappedResult,
-    _In_ PFN_DEVICE_FPGA_SESSION_ABORT_PIPE pfnAbortPipe,
-    _In_ PFN_DEVICE_FPGA_SESSION_RELEASE_OVERLAPPED pfnReleaseOverlapped,
-    _In_ PFN_DEVICE_FPGA_SESSION_INITIALIZE_OVERLAPPED pfnInitializeOverlapped,
-    _In_ DWORD dwTimeoutMs,
-    _In_ DWORD dwPollMs,
-    _In_opt_ PVOID pvTimingContext,
-    _In_ PFN_DEVICE_FPGA_SESSION_TICK pfnTick,
-    _In_ PFN_DEVICE_FPGA_SESSION_SLEEP pfnSleep,
-    _Inout_ PBOOL pfOverlappedInitialized,
-    _Inout_ PBOOL pfReadPending
+    _In_ ULONG cbBuffer
 )
 {
     ULONG status, abortStatus, releaseStatus, cbTransferred = 0;
+    HANDLE hFTDI;
+    UCHAR ucPipeID;
+    LPOVERLAPPED pOverlapped;
+    PFN_DEVICE_FPGA_SESSION_READ_PIPE pfnReadPipe;
+    PFN_DEVICE_FPGA_SESSION_GET_OVERLAPPED_RESULT pfnGetOverlappedResult;
+    PFN_DEVICE_FPGA_SESSION_ABORT_PIPE pfnAbortPipe;
+    PFN_DEVICE_FPGA_SESSION_RELEASE_OVERLAPPED pfnReleaseOverlapped;
+    PFN_DEVICE_FPGA_SESSION_INITIALIZE_OVERLAPPED pfnInitializeOverlapped;
+    DWORD dwTimeoutMs, dwPollMs;
+    PVOID pvTimingContext;
+    PFN_DEVICE_FPGA_SESSION_TICK pfnTick;
+    PFN_DEVICE_FPGA_SESSION_SLEEP pfnSleep;
+    PBOOL pfOverlappedInitialized, pfReadPending;
     DEVICE_FPGA_SESSION_WAIT_RESULT WaitResult;
     DEVICE_FPGA_SESSION_READ_RESULT ErrorResult = {
         DEVICE_FPGA_SESSION_READ_DRIVER_ERROR,
         (ULONG)-1,
         0
     };
+    if(!pContext) {
+        return ErrorResult;
+    }
+    hFTDI = pContext->hFTDI;
+    ucPipeID = pContext->ucPipeID;
+    pOverlapped = pContext->pOverlapped;
+    pfnReadPipe = pContext->pfnReadPipe;
+    pfnGetOverlappedResult = pContext->pfnGetOverlappedResult;
+    pfnAbortPipe = pContext->pfnAbortPipe;
+    pfnReleaseOverlapped = pContext->pfnReleaseOverlapped;
+    pfnInitializeOverlapped = pContext->pfnInitializeOverlapped;
+    dwTimeoutMs = pContext->dwTimeoutMs;
+    dwPollMs = pContext->dwPollMs;
+    pvTimingContext = pContext->pvTimingContext;
+    pfnTick = pContext->pfnTick;
+    pfnSleep = pContext->pfnSleep;
+    pfOverlappedInitialized = pContext->pfOverlappedInitialized;
+    pfReadPending = pContext->pfReadPending;
     if(!hFTDI || !pbBuffer || !cbBuffer || !pOverlapped || !pfnReadPipe ||
        !pfnGetOverlappedResult || !pfnAbortPipe || !pfnReleaseOverlapped ||
        !pfnInitializeOverlapped || !dwTimeoutMs || !dwPollMs || !pfnTick ||

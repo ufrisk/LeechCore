@@ -990,11 +990,9 @@ static DEVICE_FPGA_SESSION_READ_RESULT RunOpportunisticRead(
 {
     BYTE pbBuffer[64] = { 0 };
     OVERLAPPED Overlapped = { 0 };
-    return DeviceFPGA_Session_ReadPipeOpportunistic(
+    DEVICE_FPGA_SESSION_OPPORTUNISTIC_READ_CONTEXT Context = {
         pScript,
         0x82,
-        pbBuffer,
-        sizeof(pbBuffer),
         &Overlapped,
         ScriptedOpportunisticRead,
         ScriptedWaitGetOverlappedResult,
@@ -1007,7 +1005,12 @@ static DEVICE_FPGA_SESSION_READ_RESULT RunOpportunisticRead(
         ScriptedWaitTick,
         ScriptedWaitSleep,
         pfOverlappedInitialized,
-        pfReadPending);
+        pfReadPending
+    };
+    return DeviceFPGA_Session_ReadPipeOpportunistic(
+        &Context,
+        pbBuffer,
+        sizeof(pbBuffer));
 }
 
 static VOID TestOpportunisticReadReturnsDelayedDataWithoutCancelling(VOID)

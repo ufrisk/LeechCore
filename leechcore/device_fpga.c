@@ -2593,11 +2593,9 @@ static DEVICE_FPGA_SESSION_READ_RESULT DeviceFPGA_FTDI_ReadPipeOpportunistic(
     _In_ DWORD cbBuffer
 )
 {
-    return DeviceFPGA_Session_ReadPipeOpportunistic(
+    DEVICE_FPGA_SESSION_OPPORTUNISTIC_READ_CONTEXT Context = {
         ctx->dev.hFTDI,
         0x82,
-        pbBuffer,
-        cbBuffer,
         &ctx->async2.oOverlapped,
         ctx->dev.pfnFT_ReadPipe,
         ctx->dev.pfnFT_GetOverlappedResult,
@@ -2610,7 +2608,12 @@ static DEVICE_FPGA_SESSION_READ_RESULT DeviceFPGA_FTDI_ReadPipeOpportunistic(
         DeviceFPGA_FTDI_GetTickCount,
         DeviceFPGA_FTDI_Sleep,
         &ctx->async2.fOverlappedInitialized,
-        &ctx->async2.fReadPending);
+        &ctx->async2.fReadPending
+    };
+    return DeviceFPGA_Session_ReadPipeOpportunistic(
+        &Context,
+        pbBuffer,
+        cbBuffer);
 }
 
 static DEVICE_FPGA_SESSION_WAIT_RESULT DeviceFPGA_FTDI_WaitActiveRead(_In_ PDEVICE_CONTEXT_FPGA ctx, _Out_ PULONG pcbRead)
