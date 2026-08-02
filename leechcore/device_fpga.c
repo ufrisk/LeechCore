@@ -2273,6 +2273,7 @@ VOID DeviceFPGA_Bar_RxTlp(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx,
 #define DEVICE_FPGA_RECOVERY_DRAIN_TIMEOUT_MS  5000
 #define DEVICE_FPGA_RECOVERY_DRAIN_POLL_MS     10
 #define DEVICE_FPGA_RECOVERY_DRAIN_MAX_BYTES   0x00100000
+#define DEVICE_FPGA_PROBE_FOLLOWUP_TIMEOUT_MS  10
 
 BOOL DeviceFPGA_SynchOldAsync_RxTlpAsynchronous(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx, _In_opt_ DWORD cbBytesToRead);
 static QWORD DeviceFPGA_FTDI_GetTickCount(_In_ PVOID pvContext);
@@ -2586,6 +2587,32 @@ static DEVICE_FPGA_SESSION_WAIT_RESULT DeviceFPGA_FTDI_ReadPipeBounded(_In_ PDEV
         DeviceFPGA_FTDI_Sleep);
 }
 
+static DEVICE_FPGA_SESSION_READ_RESULT DeviceFPGA_FTDI_ReadPipeOpportunistic(
+    _Inout_ PDEVICE_CONTEXT_FPGA ctx,
+    _Out_writes_(cbBuffer) PBYTE pbBuffer,
+    _In_ DWORD cbBuffer
+)
+{
+    return DeviceFPGA_Session_ReadPipeOpportunistic(
+        ctx->dev.hFTDI,
+        0x82,
+        pbBuffer,
+        cbBuffer,
+        &ctx->async2.oOverlapped,
+        ctx->dev.pfnFT_ReadPipe,
+        ctx->dev.pfnFT_GetOverlappedResult,
+        ctx->dev.pfnFT_AbortPipe,
+        ctx->dev.pfnFT_ReleaseOverlapped,
+        ctx->dev.pfnFT_InitializeOverlapped,
+        DEVICE_FPGA_PROBE_FOLLOWUP_TIMEOUT_MS,
+        DEVICE_FPGA_SESSION_WAIT_POLL_MS,
+        NULL,
+        DeviceFPGA_FTDI_GetTickCount,
+        DeviceFPGA_FTDI_Sleep,
+        &ctx->async2.fOverlappedInitialized,
+        &ctx->async2.fReadPending);
+}
+
 static DEVICE_FPGA_SESSION_WAIT_RESULT DeviceFPGA_FTDI_WaitActiveRead(_In_ PDEVICE_CONTEXT_FPGA ctx, _Out_ PULONG pcbRead)
 {
     DEVICE_FPGA_SESSION_WAIT_RESULT Result;
@@ -2773,7 +2800,12 @@ VOID DeviceFPGA_RxTlp_QueueUserCallback(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ SIZE
     ObByteQueue_Push(ctx->tlp_callback.pBqRx, 0, cbTlp, pbTlp);
 }
 
-BOOL DeviceFPGA_Synch_RxTlpSynchronous(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx, _In_opt_ DWORD dwBytesToRead)
+static DEVICE_FPGA_SESSION_READ_OUTCOME DeviceFPGA_Synch_RxTlpSynchronousInternal(
+    _In_ PLC_CONTEXT ctxLC,
+    _Inout_ PDEVICE_CONTEXT_FPGA ctx,
+    _In_opt_ DWORD dwBytesToRead,
+    _In_ BOOL fOpportunistic
+)
 {
     DWORD status;
     BOOL fRetry = FALSE, fTimedOut, fTransportError = FALSE;
@@ -2783,8 +2815,11 @@ BOOL DeviceFPGA_Synch_RxTlpSynchronous(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONT
     DWORD dwStatus, *pdwData, cbRx;
     DEVICE_FPGA_SESSION_TLP_FRAME_STATE TlpFrame = { 0 };
     DEVICE_FPGA_SESSION_TLP_FRAME_ACTION FrameAction;
+    DEVICE_FPGA_SESSION_READ_RESULT OpportunisticResult;
     DEVICE_FPGA_SESSION_WAIT_RESULT ReadResult;
-    if(!ctx->fTransportUsable) { return TRUE; }
+    if(!ctx->fTransportUsable) {
+        return DEVICE_FPGA_SESSION_READ_DRIVER_ERROR;
+    }
     TlpFrame.fRequireFirst = (ctx->wFpgaVersionMajor > 4) || ((ctx->wFpgaVersionMajor == 4) && (ctx->wFpgaVersionMinor >= 13));
     // larger read buffer slows down FT_ReadPipe so set it fairly tight if possible.
     ctx->rxbuf.cb = 0;
@@ -2794,26 +2829,47 @@ BOOL DeviceFPGA_Synch_RxTlpSynchronous(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONT
     while(TRUE) {
         // read data:
         if(DeviceFPGA_FTDI_CanReadPipeBounded(ctx)) {
-            ReadResult = DeviceFPGA_FTDI_ReadPipeBounded(
-                ctx,
-                ctx->rxbuf.pb + ctx->rxbuf.cb,
-                cbReadRxBuf - ctx->rxbuf.cb,
-                DEVICE_FPGA_SESSION_WAIT_TIMEOUT_MS
-            );
-            status = ReadResult.status;
-            cbRx = ReadResult.cbTransferred;
-            if(ReadResult.outcome != DEVICE_FPGA_SESSION_WAIT_COMPLETED) {
-                fTransportError = TRUE;
-                fTimedOut = ReadResult.outcome == DEVICE_FPGA_SESSION_WAIT_TIMED_OUT;
-                DeviceFPGA_FTDI_RxRecover(ctxLC, ctx, status, fTimedOut);
-                return TRUE;
+            if(fOpportunistic) {
+                OpportunisticResult = DeviceFPGA_FTDI_ReadPipeOpportunistic(
+                    ctx,
+                    ctx->rxbuf.pb + ctx->rxbuf.cb,
+                    cbReadRxBuf - ctx->rxbuf.cb);
+                status = OpportunisticResult.status;
+                cbRx = OpportunisticResult.cbTransferred;
+                if(OpportunisticResult.outcome ==
+                   DEVICE_FPGA_SESSION_READ_QUIET) {
+                    return DEVICE_FPGA_SESSION_READ_QUIET;
+                }
+                if(OpportunisticResult.outcome ==
+                   DEVICE_FPGA_SESSION_READ_DRIVER_ERROR) {
+                    DeviceFPGA_FTDI_RxRecover(ctxLC, ctx, status, FALSE);
+                    return DEVICE_FPGA_SESSION_READ_DRIVER_ERROR;
+                }
+            } else {
+                ReadResult = DeviceFPGA_FTDI_ReadPipeBounded(
+                    ctx,
+                    ctx->rxbuf.pb + ctx->rxbuf.cb,
+                    cbReadRxBuf - ctx->rxbuf.cb,
+                    DEVICE_FPGA_SESSION_WAIT_TIMEOUT_MS
+                );
+                status = ReadResult.status;
+                cbRx = ReadResult.cbTransferred;
+                if(ReadResult.outcome != DEVICE_FPGA_SESSION_WAIT_COMPLETED) {
+                    fTransportError = TRUE;
+                    fTimedOut = ReadResult.outcome == DEVICE_FPGA_SESSION_WAIT_TIMED_OUT;
+                    DeviceFPGA_FTDI_RxRecover(ctxLC, ctx, status, fTimedOut);
+                    return DEVICE_FPGA_SESSION_READ_DRIVER_ERROR;
+                }
             }
         } else {
+            if(fOpportunistic) {
+                return DEVICE_FPGA_SESSION_READ_DRIVER_ERROR;
+            }
             status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, ctx->rxbuf.pb + ctx->rxbuf.cb, cbReadRxBuf - ctx->rxbuf.cb, &cbRx, NULL);
             if(status) {
                 fTransportError = TRUE;
                 DeviceFPGA_FTDI_RxRecover(ctxLC, ctx, status, FALSE);
-                return TRUE;
+                return DEVICE_FPGA_SESSION_READ_DRIVER_ERROR;
             }
         }
         ctx->rxbuf.cb += cbRx;
@@ -2861,7 +2917,9 @@ BOOL DeviceFPGA_Synch_RxTlpSynchronous(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONT
         }
         // return upon (successful) finish!
         if((TlpFrame.cdwTlp == 0) || fRetry || (ctx->rxbuf.cbMax - ctx->rxbuf.cb < 0x400)) {
-            return fTransportError;
+            return fTransportError ?
+                DEVICE_FPGA_SESSION_READ_DRIVER_ERROR :
+                DEVICE_FPGA_SESSION_READ_DATA;
         }
         // read retry should be attempted (in case of partial tlp received at the end)
         lcprintfvv(ctxLC, "Device Info: FPGA: Partial read - read retry attempted!\n");
@@ -2869,6 +2927,19 @@ BOOL DeviceFPGA_Synch_RxTlpSynchronous(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONT
         BusySleep(min(20, ctx->perf.DELAY_READ));
         fRetry = TRUE;
     }
+}
+
+BOOL DeviceFPGA_Synch_RxTlpSynchronous(
+    _In_ PLC_CONTEXT ctxLC,
+    _In_ PDEVICE_CONTEXT_FPGA ctx,
+    _In_opt_ DWORD dwBytesToRead
+)
+{
+    return DeviceFPGA_Synch_RxTlpSynchronousInternal(
+        ctxLC,
+        ctx,
+        dwBytesToRead,
+        FALSE) == DEVICE_FPGA_SESSION_READ_DRIVER_ERROR;
 }
 
 static BOOL DeviceFPGA_Synch_IsValidRead(_In_ PMEM_SCATTER pMEM)
@@ -4490,15 +4561,24 @@ BOOL DeviceFPGA_ProbeMEM_Attempt(_In_ PLC_CONTEXT ctxLC, _In_ QWORD qwAddr, _In_
         }
         BusySleep(ctx->perf.DELAY_PROBE_READ);
         cReceiveMax = FpgaReadPolicy_ProbeReceiveMaxReads(
-            ctx->fFT601 && !ctx->fCustomDriver && !ctx->dev.f2232h);
+            DeviceFPGA_FTDI_CanReadPipeBounded(ctx));
         for(cReceive = 0; cReceive < cReceiveMax; cReceive++) {
+            DEVICE_FPGA_SESSION_READ_OUTCOME ReceiveOutcome;
             if(cReceive) {
                 BusySleep(ctx->perf.DELAY_PROBE_READ);
             }
-            if(DeviceFPGA_Synch_RxTlpSynchronous(ctxLC, ctx, 0)) {
+            ReceiveOutcome = DeviceFPGA_Synch_RxTlpSynchronousInternal(
+                ctxLC,
+                ctx,
+                0,
+                cReceive != 0);
+            if(ReceiveOutcome == DEVICE_FPGA_SESSION_READ_DRIVER_ERROR) {
                 fBatchTransportError = TRUE;
             }
-            if(fBatchTransportError || !Probe.TagMap.cActive) { break; }
+            if(fBatchTransportError || !Probe.TagMap.cActive ||
+               (ReceiveOutcome == DEVICE_FPGA_SESSION_READ_QUIET)) {
+                break;
+            }
         }
         for(i = iBatchStart; i < iSelected; i++) {
             iPage = pSelected[i];
