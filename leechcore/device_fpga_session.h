@@ -289,6 +289,8 @@ BOOL DeviceFPGA_Session_ConfigurePipeTimeouts(
 );
 
 _Success_(return)
+// Query completion before cancelling. Release only after completion is
+// observed, either before cancellation or after a bounded cancellation wait.
 BOOL DeviceFPGA_Session_CloseOverlapped(
     _In_ HANDLE hFTDI,
     _In_ LPOVERLAPPED pOverlapped,
@@ -300,8 +302,8 @@ BOOL DeviceFPGA_Session_CloseOverlapped(
     _In_opt_ PFN_DEVICE_FPGA_SESSION_SLEEP pfnSleep
 );
 
-// Release an initialized idle OVERLAPPED object directly. If a read is
-// pending, cancel and wait for it before releasing the object.
+// Release an initialized idle OVERLAPPED object directly. If a read was
+// submitted, query it before deciding whether cancellation is required.
 _Success_(return)
 BOOL DeviceFPGA_Session_TeardownOverlapped(
     _In_ HANDLE hFTDI,

@@ -992,6 +992,7 @@ typedef struct tdCLOSE_SCRIPT {
     QWORD qwNow;
     ULONG ulRxAbortStatus;
     ULONG ulTxAbortStatus;
+    ULONG ulPreAbortGetStatus;
     ULONG ulGetStatus;
     ULONG ulReleaseStatus;
     BOOL fRxAborted;
@@ -1024,15 +1025,18 @@ static ULONG WINAPI ScriptedGetOverlappedResult(
 )
 {
     PCLOSE_SCRIPT pScript = (PCLOSE_SCRIPT)hFTDI;
+    BOOL fBeforeAbort = !pScript->fRxAborted;
     UNREFERENCED_PARAMETER(pOverlapped);
     *pulLengthTransferred = 0;
     pScript->cGetCalls++;
-    pScript->fWaitedBeforeAbort = !pScript->fRxAborted;
+    pScript->fWaitedBeforeAbort |= fBeforeAbort;
     pScript->fSawWaitArgument |= fWait;
     if(pScript->cEvents < sizeof(pScript->pbEvents)) {
         pScript->pbEvents[pScript->cEvents++] = EVENT_GET_OVERLAPPED;
     }
-    return pScript->fWaitedBeforeAbort ? 1 : pScript->ulGetStatus;
+    return fBeforeAbort ?
+        pScript->ulPreAbortGetStatus :
+        pScript->ulGetStatus;
 }
 
 static ULONG WINAPI ScriptedReleaseOverlapped(
@@ -1089,7 +1093,10 @@ static VOID TestTrackedCloseCancelsPendingReadBeforeRelease(VOID)
 {
     CLOSE_SCRIPT Script = { 0 };
     OVERLAPPED Overlapped = { 0 };
-    BYTE pbExpected[] = { 0x82, EVENT_GET_OVERLAPPED, EVENT_RELEASE };
+    BYTE pbExpected[] = {
+        EVENT_GET_OVERLAPPED, 0x82, EVENT_GET_OVERLAPPED, EVENT_RELEASE
+    };
+    Script.ulPreAbortGetStatus = DEVICE_FPGA_SESSION_FT_IO_INCOMPLETE;
     ASSERT_TRUE(DeviceFPGA_Session_TeardownOverlapped(
         &Script,
         &Overlapped,
@@ -1102,7 +1109,31 @@ static VOID TestTrackedCloseCancelsPendingReadBeforeRelease(VOID)
         ScriptedCloseSleep));
     ASSERT_TRUE(Script.fRxAborted);
     ASSERT_FALSE(Script.fTxAborted);
-    ASSERT_FALSE(Script.fWaitedBeforeAbort);
+    ASSERT_TRUE(Script.fWaitedBeforeAbort);
+    ASSERT_EQ(Script.cEvents, sizeof(pbExpected));
+    ASSERT_BYTES(Script.pbEvents, pbExpected, sizeof(pbExpected));
+}
+
+static VOID TestTrackedCloseReleasesCompletedReadWithoutCancelling(VOID)
+{
+    CLOSE_SCRIPT Script = { 0 };
+    OVERLAPPED Overlapped = { 0 };
+    BYTE pbExpected[] = { EVENT_GET_OVERLAPPED, EVENT_RELEASE };
+    ASSERT_TRUE(DeviceFPGA_Session_TeardownOverlapped(
+        &Script,
+        &Overlapped,
+        TRUE,
+        ScriptedAbortPipe,
+        ScriptedGetOverlappedResult,
+        ScriptedReleaseOverlapped,
+        &Script,
+        ScriptedCloseTick,
+        ScriptedCloseSleep));
+    ASSERT_FALSE(Script.fRxAborted);
+    ASSERT_FALSE(Script.fTxAborted);
+    ASSERT_TRUE(Script.fWaitedBeforeAbort);
+    ASSERT_EQ(Script.cGetCalls, 1);
+    ASSERT_EQ(Script.cReleaseCalls, 1);
     ASSERT_EQ(Script.cEvents, sizeof(pbExpected));
     ASSERT_BYTES(Script.pbEvents, pbExpected, sizeof(pbExpected));
 }
@@ -1111,12 +1142,16 @@ static VOID TestOverlappedReadLifecycleAndCloseOrdering(VOID)
 {
     CLOSE_SCRIPT Script = { 0 };
     OVERLAPPED Overlapped = { 0 };
-    BYTE pbExpected[] = { 0x82, EVENT_GET_OVERLAPPED, EVENT_RELEASE };
+    BYTE pbExpected[] = {
+        EVENT_GET_OVERLAPPED, 0x82, EVENT_GET_OVERLAPPED, EVENT_RELEASE
+    };
 
     TestOverlappedReadSubmissionTracksOnlyPendingStatus();
     TestTrackedCloseReleasesIdleReadWithoutCancelling();
+    TestTrackedCloseReleasesCompletedReadWithoutCancelling();
     TestTrackedCloseCancelsPendingReadBeforeRelease();
 
+    Script.ulPreAbortGetStatus = DEVICE_FPGA_SESSION_FT_IO_INCOMPLETE;
     ASSERT_TRUE(DeviceFPGA_Session_CloseOverlapped(
         &Script,
         &Overlapped,
@@ -1126,7 +1161,7 @@ static VOID TestOverlappedReadLifecycleAndCloseOrdering(VOID)
         &Script,
         ScriptedCloseTick,
         ScriptedCloseSleep));
-    ASSERT_FALSE(Script.fWaitedBeforeAbort);
+    ASSERT_TRUE(Script.fWaitedBeforeAbort);
     ASSERT_FALSE(Script.fSawWaitArgument);
     ASSERT_TRUE(Script.fRxAborted);
     ASSERT_FALSE(Script.fTxAborted);
@@ -1134,10 +1169,11 @@ static VOID TestOverlappedReadLifecycleAndCloseOrdering(VOID)
     ASSERT_BYTES(Script.pbEvents, pbExpected, sizeof(pbExpected));
 }
 
-static VOID TestClosePendingForeverIsBoundedAndStillReleases(VOID)
+static VOID TestClosePendingForeverIsBoundedAndDoesNotRelease(VOID)
 {
     CLOSE_SCRIPT Script = { 0 };
     OVERLAPPED Overlapped = { 0 };
+    Script.ulPreAbortGetStatus = DEVICE_FPGA_SESSION_FT_IO_INCOMPLETE;
     Script.ulGetStatus = DEVICE_FPGA_SESSION_FT_IO_INCOMPLETE;
     ASSERT_FALSE(DeviceFPGA_Session_CloseOverlapped(
         &Script,
@@ -1150,14 +1186,15 @@ static VOID TestClosePendingForeverIsBoundedAndStillReleases(VOID)
         ScriptedCloseSleep));
     ASSERT_FALSE(Script.fSawWaitArgument);
     ASSERT_EQ(Script.qwNow, DEVICE_FPGA_SESSION_CANCEL_TIMEOUT_MS);
-    ASSERT_EQ(Script.cGetCalls, DEVICE_FPGA_SESSION_CANCEL_TIMEOUT_MS + 1);
-    ASSERT_EQ(Script.cReleaseCalls, 1);
+    ASSERT_EQ(Script.cGetCalls, DEVICE_FPGA_SESSION_CANCEL_TIMEOUT_MS + 2);
+    ASSERT_EQ(Script.cReleaseCalls, 0);
 }
 
 static VOID TestCloseReportsAbortErrorAfterAttemptingCleanup(VOID)
 {
     CLOSE_SCRIPT Script = { 0 };
     OVERLAPPED Overlapped = { 0 };
+    Script.ulPreAbortGetStatus = DEVICE_FPGA_SESSION_FT_IO_INCOMPLETE;
     Script.ulRxAbortStatus = 1;
     ASSERT_FALSE(DeviceFPGA_Session_CloseOverlapped(
         &Script,
@@ -1170,7 +1207,7 @@ static VOID TestCloseReportsAbortErrorAfterAttemptingCleanup(VOID)
         ScriptedCloseSleep));
     ASSERT_TRUE(Script.fRxAborted);
     ASSERT_FALSE(Script.fTxAborted);
-    ASSERT_EQ(Script.cGetCalls, 1);
+    ASSERT_EQ(Script.cGetCalls, 2);
     ASSERT_EQ(Script.cReleaseCalls, 1);
 }
 
@@ -1650,7 +1687,7 @@ int main(void)
     RUN_TEST(TestWaitPendingForeverTimesOutAtDeadline);
     RUN_TEST(TestWaitReturnsDriverErrorWithoutRetry);
     RUN_TEST(TestOverlappedReadLifecycleAndCloseOrdering);
-    RUN_TEST(TestClosePendingForeverIsBoundedAndStillReleases);
+    RUN_TEST(TestClosePendingForeverIsBoundedAndDoesNotRelease);
     RUN_TEST(TestCloseReportsAbortErrorAfterAttemptingCleanup);
     RUN_TEST(TestConfigurePipeTimeoutsConfiguresBothDirections);
     RUN_TEST(TestConfigurePipeTimeoutsReportsEitherFailure);

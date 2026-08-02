@@ -530,7 +530,7 @@ BOOL DeviceFPGA_Session_CloseOverlapped(
 )
 {
     BOOL fResult = TRUE;
-    ULONG ftStatus;
+    ULONG ftStatus, cbTransferred = 0;
     DEVICE_FPGA_SESSION_WAIT_RESULT WaitResult;
     if(!hFTDI || !pOverlapped) { return TRUE; }
     if(!pfnAbortPipe || !pfnGetOverlappedResult || !pfnReleaseOverlapped) {
@@ -538,6 +538,18 @@ BOOL DeviceFPGA_Session_CloseOverlapped(
     }
     if(!pfnTick) { pfnTick = DeviceFPGA_Session_DefaultTick; }
     if(!pfnSleep) { pfnSleep = DeviceFPGA_Session_DefaultSleep; }
+    ftStatus = pfnGetOverlappedResult(
+        hFTDI,
+        pOverlapped,
+        &cbTransferred,
+        FALSE);
+    if(ftStatus == DEVICE_FPGA_SESSION_FT_OK) {
+        return pfnReleaseOverlapped(hFTDI, pOverlapped) ==
+            DEVICE_FPGA_SESSION_FT_OK;
+    }
+    if(ftStatus != DEVICE_FPGA_SESSION_FT_IO_INCOMPLETE) {
+        return FALSE;
+    }
     // RX only: some callers don't hold the TX fast-write lock, and aborting TX here could cancel an in-flight write on that path.
     ftStatus = pfnAbortPipe(hFTDI, 0x82);
     fResult &= ftStatus == DEVICE_FPGA_SESSION_FT_OK;
@@ -551,7 +563,9 @@ BOOL DeviceFPGA_Session_CloseOverlapped(
         pvTimingContext,
         pfnTick,
         pfnSleep);
-    fResult &= WaitResult.outcome == DEVICE_FPGA_SESSION_WAIT_COMPLETED;
+    if(WaitResult.outcome != DEVICE_FPGA_SESSION_WAIT_COMPLETED) {
+        return FALSE;
+    }
     fResult &= pfnReleaseOverlapped(hFTDI, pOverlapped) ==
         DEVICE_FPGA_SESSION_FT_OK;
     return fResult;

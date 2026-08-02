@@ -2290,9 +2290,10 @@ static BOOL DeviceFPGA_FTDI_RecoveryQuiesce(_Inout_ PVOID pvContext)
     PDEVICE_CONTEXT_FPGA ctx = pRecovery->ctx;
     if(!ctx->dev.hFTDI) { return TRUE; }
     if(ctx->async2.fOverlappedInitialized) {
-        fResult = DeviceFPGA_Session_CloseOverlapped(
+        fResult = DeviceFPGA_Session_TeardownOverlapped(
             ctx->dev.hFTDI,
             &ctx->async2.oOverlapped,
+            ctx->async2.fReadPending,
             ctx->dev.pfnFT_AbortPipe,
             ctx->dev.pfnFT_GetOverlappedResult,
             ctx->dev.pfnFT_ReleaseOverlapped,
