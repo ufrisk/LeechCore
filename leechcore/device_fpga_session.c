@@ -170,6 +170,7 @@ DEVICE_FPGA_SESSION_WAIT_RESULT DeviceFPGA_Session_ReadPipeBounded(
     _In_ LPOVERLAPPED pOverlapped,
     _In_ PFN_DEVICE_FPGA_SESSION_READ_PIPE pfnReadPipe,
     _In_ PFN_DEVICE_FPGA_SESSION_GET_OVERLAPPED_RESULT pfnGetOverlappedResult,
+    _Out_ PBOOL pfReadPending,
     _In_ BOOL fUseEventWait,
     _In_ DWORD dwTimeoutMs,
     _In_ DWORD dwPollMs,
@@ -183,18 +184,21 @@ DEVICE_FPGA_SESSION_WAIT_RESULT DeviceFPGA_Session_ReadPipeBounded(
         (ULONG)-1,
         0
     };
+    if(pfReadPending) { *pfReadPending = FALSE; }
     if(!hFTDI || !pbBuffer || !cbBuffer || !pOverlapped || !pfnReadPipe ||
-       !pfnGetOverlappedResult || !dwTimeoutMs || !dwPollMs ||
+       !pfnGetOverlappedResult || !pfReadPending || !dwTimeoutMs || !dwPollMs ||
        !pfnTick || !pfnSleep) {
         return Result;
     }
-    Result.status = pfnReadPipe(
+    Result.status = DeviceFPGA_Session_StartOverlappedRead(
         hFTDI,
         ucPipeID,
         pbBuffer,
         cbBuffer,
         &Result.cbTransferred,
-        pOverlapped);
+        pOverlapped,
+        pfnReadPipe,
+        pfReadPending);
     if(Result.status == DEVICE_FPGA_SESSION_FT_OK) {
         Result.outcome = DEVICE_FPGA_SESSION_WAIT_COMPLETED;
         return Result;
@@ -203,7 +207,7 @@ DEVICE_FPGA_SESSION_WAIT_RESULT DeviceFPGA_Session_ReadPipeBounded(
     if(Result.status != DEVICE_FPGA_SESSION_FT_IO_PENDING) {
         return Result;
     }
-    return DeviceFPGA_Session_WaitOverlapped(
+    Result = DeviceFPGA_Session_WaitOverlapped(
         hFTDI,
         pOverlapped,
         pfnGetOverlappedResult,
@@ -213,6 +217,10 @@ DEVICE_FPGA_SESSION_WAIT_RESULT DeviceFPGA_Session_ReadPipeBounded(
         pvTimingContext,
         pfnTick,
         pfnSleep);
+    if(Result.outcome == DEVICE_FPGA_SESSION_WAIT_COMPLETED) {
+        *pfReadPending = FALSE;
+    }
+    return Result;
 }
 
 ULONG DeviceFPGA_Session_StartOverlappedRead(

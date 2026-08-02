@@ -223,6 +223,7 @@ DEVICE_FPGA_SESSION_WAIT_RESULT DeviceFPGA_Session_ReadPipeBounded(
     _In_ LPOVERLAPPED pOverlapped,
     _In_ PFN_DEVICE_FPGA_SESSION_READ_PIPE pfnReadPipe,
     _In_ PFN_DEVICE_FPGA_SESSION_GET_OVERLAPPED_RESULT pfnGetOverlappedResult,
+    _Out_ PBOOL pfReadPending,
     _In_ BOOL fUseEventWait,
     _In_ DWORD dwTimeoutMs,
     _In_ DWORD dwPollMs,

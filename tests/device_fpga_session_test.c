@@ -689,6 +689,7 @@ static VOID TestBoundedReadReturnsImmediateCompletion(VOID)
     OVERLAPPED Overlapped = { 0 };
     READ_PIPE_SCRIPT Script = { 0 };
     DEVICE_FPGA_SESSION_WAIT_RESULT Result;
+    BOOL fReadPending = TRUE;
     Script.cbImmediate = 0x2345;
     Result = DeviceFPGA_Session_ReadPipeBounded(
         &Script,
@@ -698,6 +699,7 @@ static VOID TestBoundedReadReturnsImmediateCompletion(VOID)
         &Overlapped,
         ScriptedReadPipe,
         ScriptedWaitGetOverlappedResult,
+        &fReadPending,
         TRUE,
         1000,
         1,
@@ -710,6 +712,7 @@ static VOID TestBoundedReadReturnsImmediateCompletion(VOID)
     ASSERT_EQ(Script.cReadCalls, 1);
     ASSERT_EQ(Script.Wait.cGetCalls, 0);
     ASSERT_EQ(Script.Wait.cSleepCalls, 0);
+    ASSERT_FALSE(fReadPending);
     ASSERT_EQ(Script.ucPipeID, 0x82);
     ASSERT_EQ(Script.cbBuffer, sizeof(pbBuffer));
     ASSERT_TRUE(Script.pbBuffer == pbBuffer);
@@ -722,6 +725,7 @@ static VOID TestBoundedReadWaitsForPendingCompletion(VOID)
     OVERLAPPED Overlapped = { 0 };
     READ_PIPE_SCRIPT Script = { 0 };
     DEVICE_FPGA_SESSION_WAIT_RESULT Result;
+    BOOL fReadPending = FALSE;
     HANDLE hSignalThread;
     WAIT_EVENT_SIGNAL Signal;
     Overlapped.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
@@ -762,6 +766,7 @@ static VOID TestBoundedReadWaitsForPendingCompletion(VOID)
         &Overlapped,
         ScriptedReadPipe,
         ScriptedWaitGetOverlappedResult,
+        &fReadPending,
         TRUE,
         1000,
         1,
@@ -775,6 +780,7 @@ static VOID TestBoundedReadWaitsForPendingCompletion(VOID)
     ASSERT_EQ(Script.Wait.cGetCalls, 1);
     ASSERT_EQ(Script.Wait.cSleepCalls, 0);
     ASSERT_FALSE(Script.Wait.fWaitArgument);
+    ASSERT_FALSE(fReadPending);
     ASSERT_TRUE(Script.pOverlapped == &Overlapped);
     ASSERT_EQ(WaitForSingleObject(hSignalThread, 1000), WAIT_OBJECT_0);
     CloseHandle(hSignalThread);
@@ -788,6 +794,7 @@ static VOID TestBoundedReadPendingForeverTimesOut(VOID)
     OVERLAPPED Overlapped = { 0 };
     READ_PIPE_SCRIPT Script = { 0 };
     DEVICE_FPGA_SESSION_WAIT_RESULT Result;
+    BOOL fReadPending = FALSE;
     Overlapped.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
     ASSERT_TRUE(Overlapped.hEvent != NULL);
     if(!Overlapped.hEvent) { return; }
@@ -801,6 +808,7 @@ static VOID TestBoundedReadPendingForeverTimesOut(VOID)
         &Overlapped,
         ScriptedReadPipe,
         ScriptedWaitGetOverlappedResult,
+        &fReadPending,
         TRUE,
         5,
         1,
@@ -815,6 +823,7 @@ static VOID TestBoundedReadPendingForeverTimesOut(VOID)
     ASSERT_EQ(Script.Wait.cGetCalls, 0);
     ASSERT_EQ(Script.Wait.cSleepCalls, 0);
     ASSERT_FALSE(Script.Wait.fWaitArgument);
+    ASSERT_TRUE(fReadPending);
     CloseHandle(Overlapped.hEvent);
 }
 
@@ -824,6 +833,7 @@ static VOID TestBoundedReadReturnsSubmissionErrorWithoutPolling(VOID)
     OVERLAPPED Overlapped = { 0 };
     READ_PIPE_SCRIPT Script = { 0 };
     DEVICE_FPGA_SESSION_WAIT_RESULT Result;
+    BOOL fReadPending = TRUE;
     Script.ulReadStatus = 0x20;
     Script.cbImmediate = 0x9999;
     Result = DeviceFPGA_Session_ReadPipeBounded(
@@ -834,6 +844,7 @@ static VOID TestBoundedReadReturnsSubmissionErrorWithoutPolling(VOID)
         &Overlapped,
         ScriptedReadPipe,
         ScriptedWaitGetOverlappedResult,
+        &fReadPending,
         TRUE,
         1000,
         1,
@@ -846,6 +857,7 @@ static VOID TestBoundedReadReturnsSubmissionErrorWithoutPolling(VOID)
     ASSERT_EQ(Script.cReadCalls, 1);
     ASSERT_EQ(Script.Wait.cGetCalls, 0);
     ASSERT_EQ(Script.Wait.cSleepCalls, 0);
+    ASSERT_FALSE(fReadPending);
 }
 
 static VOID TestBoundedReadRejectsInvalidArguments(VOID)
@@ -853,36 +865,48 @@ static VOID TestBoundedReadRejectsInvalidArguments(VOID)
     BYTE pbBuffer[0x100];
     OVERLAPPED Overlapped = { 0 };
     READ_PIPE_SCRIPT Script = { 0 };
-#define ASSERT_INVALID_BOUNDED_READ(handle, buffer, size, overlapped, read, get, tick, sleep) \
+#define ASSERT_INVALID_BOUNDED_READ(handle, buffer, size, overlapped, read, get, pending, tick, sleep) \
     ASSERT_EQ( \
         DeviceFPGA_Session_ReadPipeBounded( \
             (handle), 0x82, (buffer), (size), (overlapped), (read), (get), \
-            TRUE, 1000, 1, &Script.Wait, (tick), (sleep)).outcome, \
+            (pending), TRUE, 1000, 1, &Script.Wait, (tick), (sleep)).outcome, \
         DEVICE_FPGA_SESSION_WAIT_DRIVER_ERROR)
+    BOOL fReadPending = TRUE;
     ASSERT_INVALID_BOUNDED_READ(
         NULL, pbBuffer, sizeof(pbBuffer), &Overlapped, ScriptedReadPipe,
-        ScriptedWaitGetOverlappedResult, ScriptedWaitTick, ScriptedWaitSleep);
+        ScriptedWaitGetOverlappedResult, &fReadPending,
+        ScriptedWaitTick, ScriptedWaitSleep);
     ASSERT_INVALID_BOUNDED_READ(
         &Script, NULL, sizeof(pbBuffer), &Overlapped, ScriptedReadPipe,
-        ScriptedWaitGetOverlappedResult, ScriptedWaitTick, ScriptedWaitSleep);
+        ScriptedWaitGetOverlappedResult, &fReadPending,
+        ScriptedWaitTick, ScriptedWaitSleep);
     ASSERT_INVALID_BOUNDED_READ(
         &Script, pbBuffer, 0, &Overlapped, ScriptedReadPipe,
-        ScriptedWaitGetOverlappedResult, ScriptedWaitTick, ScriptedWaitSleep);
+        ScriptedWaitGetOverlappedResult, &fReadPending,
+        ScriptedWaitTick, ScriptedWaitSleep);
     ASSERT_INVALID_BOUNDED_READ(
         &Script, pbBuffer, sizeof(pbBuffer), NULL, ScriptedReadPipe,
-        ScriptedWaitGetOverlappedResult, ScriptedWaitTick, ScriptedWaitSleep);
+        ScriptedWaitGetOverlappedResult, &fReadPending,
+        ScriptedWaitTick, ScriptedWaitSleep);
     ASSERT_INVALID_BOUNDED_READ(
         &Script, pbBuffer, sizeof(pbBuffer), &Overlapped, NULL,
-        ScriptedWaitGetOverlappedResult, ScriptedWaitTick, ScriptedWaitSleep);
+        ScriptedWaitGetOverlappedResult, &fReadPending,
+        ScriptedWaitTick, ScriptedWaitSleep);
     ASSERT_INVALID_BOUNDED_READ(
         &Script, pbBuffer, sizeof(pbBuffer), &Overlapped, ScriptedReadPipe,
-        NULL, ScriptedWaitTick, ScriptedWaitSleep);
+        NULL, &fReadPending, ScriptedWaitTick, ScriptedWaitSleep);
     ASSERT_INVALID_BOUNDED_READ(
         &Script, pbBuffer, sizeof(pbBuffer), &Overlapped, ScriptedReadPipe,
-        ScriptedWaitGetOverlappedResult, NULL, ScriptedWaitSleep);
+        ScriptedWaitGetOverlappedResult, NULL,
+        ScriptedWaitTick, ScriptedWaitSleep);
     ASSERT_INVALID_BOUNDED_READ(
         &Script, pbBuffer, sizeof(pbBuffer), &Overlapped, ScriptedReadPipe,
-        ScriptedWaitGetOverlappedResult, ScriptedWaitTick, NULL);
+        ScriptedWaitGetOverlappedResult, &fReadPending,
+        NULL, ScriptedWaitSleep);
+    ASSERT_INVALID_BOUNDED_READ(
+        &Script, pbBuffer, sizeof(pbBuffer), &Overlapped, ScriptedReadPipe,
+        ScriptedWaitGetOverlappedResult, &fReadPending,
+        ScriptedWaitTick, NULL);
 #undef ASSERT_INVALID_BOUNDED_READ
     ASSERT_EQ(Script.cReadCalls, 0);
     ASSERT_EQ(Script.Wait.cGetCalls, 0);
