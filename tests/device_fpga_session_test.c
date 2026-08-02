@@ -4,6 +4,13 @@
 #include "../leechcore/device_fpga_session.h"
 
 static int g_cFailures = 0;
+static int g_cTests = 0;
+
+#define RUN_TEST(test) \
+    do { \
+        (test)(); \
+        g_cTests++; \
+    } while(0)
 
 #define ASSERT_TRUE(value) \
     do { \
@@ -1516,58 +1523,58 @@ static VOID TestDrainRejectsInvalidPolicy(VOID)
 
 int main(void)
 {
-    TestCompleteAlignedReply();
-    TestCompleteUnalignedReply();
-    TestCompleteZeroValuedReply();
-    TestEmptyReplyFailsAndClearsOutput();
-    TestPartialReplyFailsAndClearsOutput();
-    TestWrongSourceReplyFailsAndClearsOutput();
-    TestV4IdentityRetriesAndPublishesCompleteReply();
-    TestV4IdentityFailureIsBoundedAndDoesNotPublish();
-    TestV4IdentityAcceptsExplicitZeroFpgaId();
-    TestV4IdentityRejectsLegacyMajorWithoutPublishing();
-    TestV3IdentityRequiresEveryIdentityCommand();
-    TestV3IdentityPublishesCompleteReply();
-    TestV3IdentityAcceptsExplicitZeroFpgaId();
-    TestTlpFrameIgnoresContinuationUntilFirst();
-    TestTlpFrameCompletesAfterExplicitFirst();
-    TestTlpFrameRestartsAtNewFirst();
-    TestTlpFrameRejectsShortAndOversizePackets();
-    TestTlpFrameAcceptsLegacyStreamWithoutFirst();
-    TestBoundedReadReturnsImmediateCompletion();
-    TestBoundedReadWaitsForPendingCompletion();
-    TestBoundedReadPendingForeverTimesOut();
-    TestBoundedReadReturnsSubmissionErrorWithoutPolling();
-    TestBoundedReadRejectsInvalidArguments();
-    TestWaitUsesEventWithoutPolling();
-    TestWaitFallsBackToPollingAfterEarlyEvent();
-    TestWaitCanBypassSignaledEventForPolling();
-    TestWaitEventTimeoutDoesNotPoll();
-    TestWaitCompletesWithoutBlockingDriverCall();
-    TestWaitPendingForeverTimesOutAtDeadline();
-    TestWaitReturnsDriverErrorWithoutRetry();
-    TestCloseCancelsReadPipeBeforeWaiting();
-    TestClosePendingForeverIsBoundedAndStillReleases();
-    TestCloseReportsAbortErrorAfterAttemptingCleanup();
-    TestConfigurePipeTimeoutsConfiguresBothDirections();
-    TestConfigurePipeTimeoutsReportsEitherFailure();
-    TestRecoveryCoordinatorExecutesOneOrderedAttempt();
-    TestRecoveryCoordinatorStopsAtEachFailedStage();
-    TestRecoveryCoordinatorRejectsIncompleteOpsBeforeStarting();
-    TestFillerClassificationRequiresCompleteFillerWords();
-    TestDrainRequiresSustainedQuiescence();
-    TestDrainResetsQuietWindowAfterTraffic();
-    TestDrainReportsReadErrorWithoutRetry();
-    TestDrainRejectsOversizedRead();
-    TestDrainEnforcesNonFillerByteLimit();
-    TestDrainEnforcesOverallDeadline();
-    TestDrainDeadlineWinsAfterSlowRead();
-    TestDrainPassesRemainingDeadlineToReads();
-    TestDrainRejectsInvalidPolicy();
+    RUN_TEST(TestCompleteAlignedReply);
+    RUN_TEST(TestCompleteUnalignedReply);
+    RUN_TEST(TestCompleteZeroValuedReply);
+    RUN_TEST(TestEmptyReplyFailsAndClearsOutput);
+    RUN_TEST(TestPartialReplyFailsAndClearsOutput);
+    RUN_TEST(TestWrongSourceReplyFailsAndClearsOutput);
+    RUN_TEST(TestV4IdentityRetriesAndPublishesCompleteReply);
+    RUN_TEST(TestV4IdentityFailureIsBoundedAndDoesNotPublish);
+    RUN_TEST(TestV4IdentityAcceptsExplicitZeroFpgaId);
+    RUN_TEST(TestV4IdentityRejectsLegacyMajorWithoutPublishing);
+    RUN_TEST(TestV3IdentityRequiresEveryIdentityCommand);
+    RUN_TEST(TestV3IdentityPublishesCompleteReply);
+    RUN_TEST(TestV3IdentityAcceptsExplicitZeroFpgaId);
+    RUN_TEST(TestTlpFrameIgnoresContinuationUntilFirst);
+    RUN_TEST(TestTlpFrameCompletesAfterExplicitFirst);
+    RUN_TEST(TestTlpFrameRestartsAtNewFirst);
+    RUN_TEST(TestTlpFrameRejectsShortAndOversizePackets);
+    RUN_TEST(TestTlpFrameAcceptsLegacyStreamWithoutFirst);
+    RUN_TEST(TestBoundedReadReturnsImmediateCompletion);
+    RUN_TEST(TestBoundedReadWaitsForPendingCompletion);
+    RUN_TEST(TestBoundedReadPendingForeverTimesOut);
+    RUN_TEST(TestBoundedReadReturnsSubmissionErrorWithoutPolling);
+    RUN_TEST(TestBoundedReadRejectsInvalidArguments);
+    RUN_TEST(TestWaitUsesEventWithoutPolling);
+    RUN_TEST(TestWaitFallsBackToPollingAfterEarlyEvent);
+    RUN_TEST(TestWaitCanBypassSignaledEventForPolling);
+    RUN_TEST(TestWaitEventTimeoutDoesNotPoll);
+    RUN_TEST(TestWaitCompletesWithoutBlockingDriverCall);
+    RUN_TEST(TestWaitPendingForeverTimesOutAtDeadline);
+    RUN_TEST(TestWaitReturnsDriverErrorWithoutRetry);
+    RUN_TEST(TestCloseCancelsReadPipeBeforeWaiting);
+    RUN_TEST(TestClosePendingForeverIsBoundedAndStillReleases);
+    RUN_TEST(TestCloseReportsAbortErrorAfterAttemptingCleanup);
+    RUN_TEST(TestConfigurePipeTimeoutsConfiguresBothDirections);
+    RUN_TEST(TestConfigurePipeTimeoutsReportsEitherFailure);
+    RUN_TEST(TestRecoveryCoordinatorExecutesOneOrderedAttempt);
+    RUN_TEST(TestRecoveryCoordinatorStopsAtEachFailedStage);
+    RUN_TEST(TestRecoveryCoordinatorRejectsIncompleteOpsBeforeStarting);
+    RUN_TEST(TestFillerClassificationRequiresCompleteFillerWords);
+    RUN_TEST(TestDrainRequiresSustainedQuiescence);
+    RUN_TEST(TestDrainResetsQuietWindowAfterTraffic);
+    RUN_TEST(TestDrainReportsReadErrorWithoutRetry);
+    RUN_TEST(TestDrainRejectsOversizedRead);
+    RUN_TEST(TestDrainEnforcesNonFillerByteLimit);
+    RUN_TEST(TestDrainEnforcesOverallDeadline);
+    RUN_TEST(TestDrainDeadlineWinsAfterSlowRead);
+    RUN_TEST(TestDrainPassesRemainingDeadlineToReads);
+    RUN_TEST(TestDrainRejectsInvalidPolicy);
     if(g_cFailures) {
         printf("%d test assertion(s) failed.\n", g_cFailures);
         return 1;
     }
-    printf("PASS: 47 FPGA session protocol cases.\n");
+    printf("PASS: %d FPGA session protocol cases.\n", g_cTests);
     return 0;
 }
