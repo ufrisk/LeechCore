@@ -2538,7 +2538,8 @@ static BOOL DeviceFPGA_FTDI_CanReadPipeBounded(_In_ PDEVICE_CONTEXT_FPGA ctx)
         !ctx->dev.f2232h &&
         ctx->async2.fOverlappedInitialized &&
         ctx->dev.pfnFT_ReadPipe &&
-        ctx->dev.pfnFT_GetOverlappedResult;
+        ctx->dev.pfnFT_GetOverlappedResult &&
+        ctx->dev.pfnFT_AbortPipe;
 }
 
 static VOID DeviceFPGA_FTDI_ReevaluateAdaptivePollingWait(_In_ PLC_CONTEXT ctxLC, _Inout_ PDEVICE_CONTEXT_FPGA ctx)
