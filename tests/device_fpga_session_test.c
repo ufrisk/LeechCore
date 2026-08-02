@@ -406,6 +406,51 @@ static ULONG WINAPI ScriptedReadPipe(
     return pScript->ulReadStatus;
 }
 
+static VOID TestOverlappedReadSubmissionTracksOnlyPendingStatus(VOID)
+{
+    READ_PIPE_SCRIPT Script = { 0 };
+    BYTE pbBuffer[64] = { 0 };
+    DWORD cbRead = 0;
+    OVERLAPPED Overlapped = { 0 };
+    BOOL fReadPending = FALSE;
+    Script.ulReadStatus = DEVICE_FPGA_SESSION_FT_IO_PENDING;
+    ASSERT_EQ(DeviceFPGA_Session_StartOverlappedRead(
+        &Script,
+        0x82,
+        pbBuffer,
+        sizeof(pbBuffer),
+        &cbRead,
+        &Overlapped,
+        ScriptedReadPipe,
+        &fReadPending), DEVICE_FPGA_SESSION_FT_IO_PENDING);
+    ASSERT_TRUE(fReadPending);
+    Script.ulReadStatus = DEVICE_FPGA_SESSION_FT_OK;
+    fReadPending = TRUE;
+    ASSERT_EQ(DeviceFPGA_Session_StartOverlappedRead(
+        &Script,
+        0x82,
+        pbBuffer,
+        sizeof(pbBuffer),
+        &cbRead,
+        &Overlapped,
+        ScriptedReadPipe,
+        &fReadPending), DEVICE_FPGA_SESSION_FT_OK);
+    ASSERT_FALSE(fReadPending);
+    Script.ulReadStatus = 0x20;
+    fReadPending = TRUE;
+    ASSERT_EQ(DeviceFPGA_Session_StartOverlappedRead(
+        &Script,
+        0x82,
+        pbBuffer,
+        sizeof(pbBuffer),
+        &cbRead,
+        &Overlapped,
+        ScriptedReadPipe,
+        &fReadPending), 0x20);
+    ASSERT_FALSE(fReadPending);
+    ASSERT_EQ(Script.cReadCalls, 3);
+}
+
 static ULONG WINAPI ScriptedWaitGetOverlappedResult(
     _In_ HANDLE hFTDI,
     _In_ LPOVERLAPPED pOverlapped,
@@ -1016,11 +1061,62 @@ static VOID ScriptedCloseSleep(_In_ PVOID pvContext, _In_ DWORD dwMilliseconds)
     pScript->qwNow += dwMilliseconds;
 }
 
-static VOID TestCloseCancelsReadPipeBeforeWaiting(VOID)
+static VOID TestTrackedCloseReleasesIdleReadWithoutCancelling(VOID)
+{
+    CLOSE_SCRIPT Script = { 0 };
+    OVERLAPPED Overlapped = { 0 };
+    BYTE pbExpected[] = { EVENT_RELEASE };
+    ASSERT_TRUE(DeviceFPGA_Session_TeardownOverlapped(
+        &Script,
+        &Overlapped,
+        FALSE,
+        ScriptedAbortPipe,
+        ScriptedGetOverlappedResult,
+        ScriptedReleaseOverlapped,
+        &Script,
+        ScriptedCloseTick,
+        ScriptedCloseSleep));
+    ASSERT_FALSE(Script.fRxAborted);
+    ASSERT_FALSE(Script.fTxAborted);
+    ASSERT_EQ(Script.cGetCalls, 0);
+    ASSERT_EQ(Script.cSleepCalls, 0);
+    ASSERT_EQ(Script.cReleaseCalls, 1);
+    ASSERT_EQ(Script.cEvents, sizeof(pbExpected));
+    ASSERT_BYTES(Script.pbEvents, pbExpected, sizeof(pbExpected));
+}
+
+static VOID TestTrackedCloseCancelsPendingReadBeforeRelease(VOID)
 {
     CLOSE_SCRIPT Script = { 0 };
     OVERLAPPED Overlapped = { 0 };
     BYTE pbExpected[] = { 0x82, EVENT_GET_OVERLAPPED, EVENT_RELEASE };
+    ASSERT_TRUE(DeviceFPGA_Session_TeardownOverlapped(
+        &Script,
+        &Overlapped,
+        TRUE,
+        ScriptedAbortPipe,
+        ScriptedGetOverlappedResult,
+        ScriptedReleaseOverlapped,
+        &Script,
+        ScriptedCloseTick,
+        ScriptedCloseSleep));
+    ASSERT_TRUE(Script.fRxAborted);
+    ASSERT_FALSE(Script.fTxAborted);
+    ASSERT_FALSE(Script.fWaitedBeforeAbort);
+    ASSERT_EQ(Script.cEvents, sizeof(pbExpected));
+    ASSERT_BYTES(Script.pbEvents, pbExpected, sizeof(pbExpected));
+}
+
+static VOID TestOverlappedReadLifecycleAndCloseOrdering(VOID)
+{
+    CLOSE_SCRIPT Script = { 0 };
+    OVERLAPPED Overlapped = { 0 };
+    BYTE pbExpected[] = { 0x82, EVENT_GET_OVERLAPPED, EVENT_RELEASE };
+
+    TestOverlappedReadSubmissionTracksOnlyPendingStatus();
+    TestTrackedCloseReleasesIdleReadWithoutCancelling();
+    TestTrackedCloseCancelsPendingReadBeforeRelease();
+
     ASSERT_TRUE(DeviceFPGA_Session_CloseOverlapped(
         &Script,
         &Overlapped,
@@ -1553,7 +1649,7 @@ int main(void)
     RUN_TEST(TestWaitCompletesWithoutBlockingDriverCall);
     RUN_TEST(TestWaitPendingForeverTimesOutAtDeadline);
     RUN_TEST(TestWaitReturnsDriverErrorWithoutRetry);
-    RUN_TEST(TestCloseCancelsReadPipeBeforeWaiting);
+    RUN_TEST(TestOverlappedReadLifecycleAndCloseOrdering);
     RUN_TEST(TestClosePendingForeverIsBoundedAndStillReleases);
     RUN_TEST(TestCloseReportsAbortErrorAfterAttemptingCleanup);
     RUN_TEST(TestConfigurePipeTimeoutsConfiguresBothDirections);

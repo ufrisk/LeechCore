@@ -216,6 +216,7 @@ typedef struct tdFPGA_NEWASYNC2_CONTEXT {
     BOOL fEnabled;
     BOOL fOldAsync;
     BOOL fOverlappedInitialized;
+    BOOL fReadPending;
     BOOL fTransportError;
     OVERLAPPED oOverlapped;
     // below are only used for the new async (algo=0,1) mode:
@@ -1036,6 +1037,7 @@ ftdi_retry_old:
         }
     }
     ctx->async2.fOverlappedInitialized = ctx->dev.pfnFT_GetOverlappedResult && ctx->dev.pfnFT_InitializeOverlapped && ctx->dev.pfnFT_ReleaseOverlapped && !ctx->dev.pfnFT_InitializeOverlapped(ctx->dev.hFTDI, &ctx->async2.oOverlapped);
+    ctx->async2.fReadPending = FALSE;
     ctx->async2.fEnabled = ctx->async2.fOverlappedInitialized;
     ctx->dev.fInitialized = TRUE;
     DeviceFPGA_Initialize_LinuxMultiHandle_LockAcquire(ctx->qwDeviceIndex);
@@ -1317,9 +1319,10 @@ VOID DeviceFPGA_Close(_Inout_ PLC_CONTEXT ctxLC)
     ctx->fTransportSetup = FALSE;
     ctx->fTransportRecoveryInProgress = FALSE;
     if(ctx->async2.fOverlappedInitialized) {
-        DeviceFPGA_Session_CloseOverlapped(
+        DeviceFPGA_Session_TeardownOverlapped(
             ctx->dev.hFTDI,
             &ctx->async2.oOverlapped,
+            ctx->async2.fReadPending,
             ctx->dev.pfnFT_AbortPipe,
             ctx->dev.pfnFT_GetOverlappedResult,
             ctx->dev.pfnFT_ReleaseOverlapped,
@@ -1328,6 +1331,7 @@ VOID DeviceFPGA_Close(_Inout_ PLC_CONTEXT ctxLC)
             NULL
         );
         ctx->async2.fOverlappedInitialized = FALSE;
+        ctx->async2.fReadPending = FALSE;
         ZeroMemory(&ctx->async2.oOverlapped, sizeof(ctx->async2.oOverlapped));
     }
 #ifdef WIN32
@@ -2296,6 +2300,7 @@ static BOOL DeviceFPGA_FTDI_RecoveryQuiesce(_Inout_ PVOID pvContext)
             NULL,
             NULL);
         ctx->async2.fOverlappedInitialized = FALSE;
+        ctx->async2.fReadPending = FALSE;
         ZeroMemory(&ctx->async2.oOverlapped, sizeof(ctx->async2.oOverlapped));
     } else if(ctx->dev.pfnFT_AbortPipe) {
         fResult &= ctx->dev.pfnFT_AbortPipe(ctx->dev.hFTDI, 0x82) == DEVICE_FPGA_SESSION_FT_OK;
@@ -2329,6 +2334,7 @@ static BOOL DeviceFPGA_FTDI_RecoveryInitializeOverlapped(_Inout_ PVOID pvContext
     ZeroMemory(&ctx->async2.oOverlapped, sizeof(ctx->async2.oOverlapped));
     status = ctx->dev.pfnFT_InitializeOverlapped(ctx->dev.hFTDI, &ctx->async2.oOverlapped);
     ctx->async2.fOverlappedInitialized = status == DEVICE_FPGA_SESSION_FT_OK;
+    ctx->async2.fReadPending = FALSE;
     return ctx->async2.fOverlappedInitialized;
 }
 
@@ -2579,6 +2585,7 @@ static DEVICE_FPGA_SESSION_WAIT_RESULT DeviceFPGA_FTDI_WaitActiveRead(_In_ PDEVI
         DeviceFPGA_FTDI_Sleep);
     if(Result.outcome == DEVICE_FPGA_SESSION_WAIT_COMPLETED) {
         *pcbRead = Result.cbTransferred;
+        ctx->async2.fReadPending = FALSE;
     }
     return Result;
 }
@@ -3713,7 +3720,15 @@ VOID DeviceFPGA_Async2_ReadScatter_DoWork(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_C
         }
         // START OVERLAPPED READ:
         if(fAsync) {
-            status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, ctx->rxbuf.pb + ctx->rxbuf.cb, cbMAX_READSIZE, &cbRead, &ctx->async2.oOverlapped);
+            status = DeviceFPGA_Session_StartOverlappedRead(
+                ctx->dev.hFTDI,
+                0x82,
+                ctx->rxbuf.pb + ctx->rxbuf.cb,
+                cbMAX_READSIZE,
+                &cbRead,
+                &ctx->async2.oOverlapped,
+                ctx->dev.pfnFT_ReadPipe,
+                &ctx->async2.fReadPending);
             if(status && (status != FT_IO_PENDING)) {
                 ctx->async2.fTransportError = TRUE;
                 DeviceFPGA_FTDI_RxRecover(ctxLC, ctx, status, FALSE);
@@ -3807,7 +3822,15 @@ VOID DeviceFPGA_Async2_ReadOnlyFast_DoWork(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_
         }
         // START OVERLAPPED READ:
         if(fAsync) {
-            status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, ctx->rxbuf.pb + ctx->rxbuf.cb, ctx->perf.ASYNC_MAX_READSIZE, &cbRead, &ctx->async2.oOverlapped);
+            status = DeviceFPGA_Session_StartOverlappedRead(
+                ctx->dev.hFTDI,
+                0x82,
+                ctx->rxbuf.pb + ctx->rxbuf.cb,
+                ctx->perf.ASYNC_MAX_READSIZE,
+                &cbRead,
+                &ctx->async2.oOverlapped,
+                ctx->dev.pfnFT_ReadPipe,
+                &ctx->async2.fReadPending);
             if(status && (status != FT_IO_PENDING)) {
                 DeviceFPGA_FTDI_RxRecover(ctxLC, ctx, status, FALSE);
                 return;
@@ -4140,7 +4163,15 @@ BOOL DeviceFPGA_SynchOldAsync_RxTlpAsynchronous(_In_ PLC_CONTEXT ctxLC, _In_ PDE
         cbBuffer += cbRead;
         // 1: submit async read (if target read is large enough to gain from it)
         if(fAsync) {
-            status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, pbBuffer + cbBuffer, cbReadMax, &cbRead, &ctx->async2.oOverlapped);
+            status = DeviceFPGA_Session_StartOverlappedRead(
+                ctx->dev.hFTDI,
+                0x82,
+                pbBuffer + cbBuffer,
+                cbReadMax,
+                &cbRead,
+                &ctx->async2.oOverlapped,
+                ctx->dev.pfnFT_ReadPipe,
+                &ctx->async2.fReadPending);
             if(status && (status != FT_IO_PENDING)) {
                 fTransportError = TRUE;
                 DeviceFPGA_FTDI_RxRecover(ctxLC, ctx, status, FALSE);
@@ -4196,9 +4227,11 @@ BOOL DeviceFPGA_SynchOldAsync_RxTlpAsynchronous(_In_ PLC_CONTEXT ctxLC, _In_ PDE
                 NULL
             );
             ctx->async2.fOverlappedInitialized = FALSE;
+            ctx->async2.fReadPending = FALSE;
             ZeroMemory(&ctx->async2.oOverlapped, sizeof(ctx->async2.oOverlapped));
             if(fCancelled && !ctx->dev.pfnFT_InitializeOverlapped(ctx->dev.hFTDI, &ctx->async2.oOverlapped)) {
                 ctx->async2.fOverlappedInitialized = TRUE;
+                ctx->async2.fReadPending = FALSE;
             } else if(ctx->fFT601) {
                 fTransportError = TRUE;
                 DeviceFPGA_FTDI_RxRecover(ctxLC, ctx, FT_OTHER_ERROR, FALSE);
