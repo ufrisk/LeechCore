@@ -2520,17 +2520,11 @@ static BOOL DeviceFPGA_FTDI_CanReadPipeBounded(_In_ PDEVICE_CONTEXT_FPGA ctx)
 
 static VOID DeviceFPGA_FTDI_ReevaluateAdaptivePollingWait(_In_ PLC_CONTEXT ctxLC, _Inout_ PDEVICE_CONTEXT_FPGA ctx)
 {
-    if(!FpgaReadPolicy_ShouldResetAdaptivePolling(
-        ctx->fAdaptivePollingWait,
-        ctx->dwAdaptivePollingGeneration,
-        ctx->dwTransportGeneration)) {
+    if(!FpgaReadPolicy_ShouldResetAdaptivePolling(ctx->fAdaptivePollingWait, ctx->dwAdaptivePollingGeneration, ctx->dwTransportGeneration)) {
         return;
     }
     EnterCriticalSection(&ctx->Lock);
-    if(FpgaReadPolicy_ShouldResetAdaptivePolling(
-        ctx->fAdaptivePollingWait,
-        ctx->dwAdaptivePollingGeneration,
-        ctx->dwTransportGeneration)) {
+    if(FpgaReadPolicy_ShouldResetAdaptivePolling(ctx->fAdaptivePollingWait, ctx->dwAdaptivePollingGeneration, ctx->dwTransportGeneration)) {
         ctx->fAdaptivePollingWait = FALSE;
         lcprintfv(ctxLC, "Device Info: FPGA: restoring FT601 event waits after transport recovery\n");
     }
@@ -3096,8 +3090,7 @@ BOOL DeviceFPGA_Synch_ReadScatterEx(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _I
                 (pResults[iOriginal] == LC_READ_PAGE_RESULT_SUCCESS) ||
                 (pResults[iOriginal] == LC_READ_PAGE_RESULT_SUCCESS_AFTER_RETRY);
         }
-        if(!cRetryPass && !ctx->fAdaptivePollingWait &&
-           (dwRetryTransportGeneration == ctx->dwTransportGeneration)) {
+        if(!cRetryPass && !ctx->fAdaptivePollingWait && (dwRetryTransportGeneration == ctx->dwTransportGeneration)) {
             cAdaptiveEvidence = FpgaReadPolicy_CountAdaptivePollingEvidence(cRetry, pRetryResults);
             DeviceFPGA_FTDI_EnableAdaptivePollingWait(ctxLC, ctx, cAdaptiveEvidence, dwRetryTransportGeneration);
             if(ctx->fAdaptivePollingWait) {
@@ -3966,8 +3959,7 @@ BOOL DeviceFPGA_Async2_ReadScatterEx(_In_ PLC_CONTEXT ctxLC, _In_ DWORD cMEMs, _
                 (pResults[iOriginal] == LC_READ_PAGE_RESULT_SUCCESS) ||
                 (pResults[iOriginal] == LC_READ_PAGE_RESULT_SUCCESS_AFTER_RETRY);
         }
-        if(!cRetryPass && !ctx->fAdaptivePollingWait &&
-           (dwRetryTransportGeneration == ctx->dwTransportGeneration)) {
+        if(!cRetryPass && !ctx->fAdaptivePollingWait && (dwRetryTransportGeneration == ctx->dwTransportGeneration)) {
             cAdaptiveEvidence = FpgaReadPolicy_CountAdaptivePollingEvidence(cRetry, pRetryResults);
             DeviceFPGA_FTDI_EnableAdaptivePollingWait(ctxLC, ctx, cAdaptiveEvidence, dwRetryTransportGeneration);
             if(ctx->fAdaptivePollingWait) {
