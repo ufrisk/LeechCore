@@ -72,6 +72,24 @@ static VOID TestCompleteAlignedReply(VOID)
     ASSERT_BYTES(pbActual, pbExpected, sizeof(pbActual));
 }
 
+static VOID TestCompleteReplyAcceptsTrailingFiller(VOID)
+{
+    BYTE pbReply[64] = {
+        0x33, 0x00, 0x00, 0xe0,
+        0x00, 0x08, 0x04, 0x13,
+        0x00, 0x0a, 0x04, 0x00
+    };
+    BYTE pbActual[3] = { 0xaa, 0xbb, 0xcc };
+    BYTE pbExpected[3] = { 0x04, 0x13, 0x04 };
+    DWORD i, dwFiller = 0x55556666;
+    for(i = 32; i < sizeof(pbReply); i += sizeof(dwFiller)) {
+        memcpy(pbReply + i, &dwFiller, sizeof(dwFiller));
+    }
+    ASSERT_TRUE(DeviceFPGA_Session_ParseConfigReply(
+        pbReply, sizeof(pbReply), 0x0008, pbActual, sizeof(pbActual), 0x0003));
+    ASSERT_BYTES(pbActual, pbExpected, sizeof(pbActual));
+}
+
 static VOID TestCompleteUnalignedReply(VOID)
 {
     BYTE pbReply[32] = {
@@ -133,6 +151,283 @@ static VOID TestWrongSourceReplyFailsAndClearsOutput(VOID)
     ASSERT_FALSE(DeviceFPGA_Session_ParseConfigReply(
         pbReply, sizeof(pbReply), 0x0008, pbActual, sizeof(pbActual), 0x0003));
     ASSERT_BYTES(pbActual, pbExpected, sizeof(pbActual));
+}
+
+static VOID BuildPCIeConfigReplyRecord(
+    _Out_writes_(32) PBYTE pbRecord,
+    _In_ DWORD dwData
+)
+{
+    DWORD dwStatus = 0xe0000001;
+    ZeroMemory(pbRecord, 32);
+    memcpy(pbRecord, &dwStatus, sizeof(dwStatus));
+    memcpy(pbRecord + sizeof(dwStatus), &dwData, sizeof(dwData));
+}
+
+static VOID TestPCIeConfigParserPlacesOneDwordAndMarksCoverage(VOID)
+{
+    BYTE pbReply[100];
+    BYTE pbResult[0x200] = { 0 };
+    BYTE pbCoverage[0x200] = { 0 };
+    DWORD dwFiller = 0x55556666;
+    memcpy(pbReply, &dwFiller, sizeof(dwFiller));
+    BuildPCIeConfigReplyRecord(pbReply + 4, 0x08042a00);
+    BuildPCIeConfigReplyRecord(pbReply + 36, 0x22112c00);
+    BuildPCIeConfigReplyRecord(pbReply + 68, 0x44332e00);
+    ASSERT_TRUE(DeviceFPGA_Session_ParsePCIeConfigReply(
+        pbReply, sizeof(pbReply), pbResult, pbCoverage));
+    ASSERT_EQ(pbResult[0x10], 0x11);
+    ASSERT_EQ(pbResult[0x11], 0x22);
+    ASSERT_EQ(pbResult[0x12], 0x33);
+    ASSERT_EQ(pbResult[0x13], 0x44);
+    ASSERT_EQ(pbCoverage[0x10], 1);
+    ASSERT_EQ(pbCoverage[0x11], 1);
+    ASSERT_EQ(pbCoverage[0x12], 1);
+    ASSERT_EQ(pbCoverage[0x13], 1);
+    ASSERT_EQ(pbCoverage[0x0f], 0);
+    ASSERT_EQ(pbCoverage[0x14], 0);
+}
+
+static VOID TestPCIeConfigParserAcceptsCompleteSpaceCoverage(VOID)
+{
+    BYTE pbReply[32 * 3 * 128];
+    BYTE pbResult[0x200] = { 0 };
+    BYTE pbCoverage[0x200] = { 0 };
+    DWORD i;
+    for(i = 0; i < 0x200; i += 4) {
+        BuildPCIeConfigReplyRecord(
+            pbReply + ((i >> 2) * 96) + 0,
+            0x08002a00 | ((i >> 2) << 16));
+        BuildPCIeConfigReplyRecord(
+            pbReply + ((i >> 2) * 96) + 32,
+            (((i + 1) & 0xff) << 24) | ((i & 0xff) << 16) | 0x2c00);
+        BuildPCIeConfigReplyRecord(
+            pbReply + ((i >> 2) * 96) + 64,
+            (((i + 3) & 0xff) << 24) | (((i + 2) & 0xff) << 16) | 0x2e00);
+    }
+    ASSERT_TRUE(DeviceFPGA_Session_ParsePCIeConfigReply(
+        pbReply, sizeof(pbReply), pbResult, pbCoverage));
+    ASSERT_TRUE(DeviceFPGA_Session_IsPCIeConfigComplete(pbCoverage, 0));
+    for(i = 0; i < 0x200; i++) {
+        ASSERT_EQ(pbResult[i], i & 0xff);
+        ASSERT_EQ(pbCoverage[i], 1);
+    }
+}
+
+static VOID TestPCIeConfigCoverageRejectsOneMissingByte(VOID)
+{
+    BYTE pbCoverage[0x200];
+    memset(pbCoverage, 1, sizeof(pbCoverage));
+    pbCoverage[0x17] = 0;
+    ASSERT_FALSE(DeviceFPGA_Session_IsPCIeConfigComplete(pbCoverage, 0));
+}
+
+static VOID TestPCIeConfigCoverageAcceptsRequestedSingleDword(VOID)
+{
+    BYTE pbCoverage[0x200] = { 0 };
+    memset(pbCoverage + 0x1fc, 1, sizeof(DWORD));
+    ASSERT_TRUE(DeviceFPGA_Session_IsPCIeConfigComplete(
+        pbCoverage, 0x80000000 | 0x7f));
+}
+
+static VOID TestPCIeConfigCoverageRejectsIncompleteSingleDword(VOID)
+{
+    BYTE pbCoverage[0x200] = { 0 };
+    memset(pbCoverage + 0x40, 1, sizeof(DWORD));
+    pbCoverage[0x42] = 0;
+    ASSERT_FALSE(DeviceFPGA_Session_IsPCIeConfigComplete(
+        pbCoverage, 0x80000000 | 0x10));
+}
+
+static VOID TestPCIeConfigCoverageRejectsOutOfRangeSingleDword(VOID)
+{
+    BYTE pbCoverage[0x200];
+    memset(pbCoverage, 1, sizeof(pbCoverage));
+    ASSERT_FALSE(DeviceFPGA_Session_IsPCIeConfigComplete(
+        pbCoverage, 0x80000000 | 0x80));
+}
+
+static VOID TestPCIeConfigParserRejectsTruncatedAndFillerOnlyReply(VOID)
+{
+    BYTE pbFillerOnly[4] = { 0x66, 0x66, 0x55, 0x55 };
+    BYTE pbTruncated[31] = { 0 };
+    BYTE pbResult[0x200] = { 0 };
+    BYTE pbCoverage[0x200] = { 0 };
+    ASSERT_FALSE(DeviceFPGA_Session_ParsePCIeConfigReply(
+        pbFillerOnly, sizeof(pbFillerOnly), pbResult, pbCoverage));
+    ASSERT_FALSE(DeviceFPGA_Session_ParsePCIeConfigReply(
+        pbTruncated, sizeof(pbTruncated), pbResult, pbCoverage));
+}
+
+static VOID TestPCIeConfigParserDoesNotCoverDataBeforeMetadata(VOID)
+{
+    BYTE pbReply[32];
+    BYTE pbResult[0x200] = { 0 };
+    BYTE pbCoverage[0x200] = { 0 };
+    BuildPCIeConfigReplyRecord(pbReply, 0x22112c00);
+    ASSERT_TRUE(DeviceFPGA_Session_ParsePCIeConfigReply(
+        pbReply, sizeof(pbReply), pbResult, pbCoverage));
+    ASSERT_EQ(pbResult[0], 0);
+    ASSERT_EQ(pbCoverage[0], 0);
+    ASSERT_FALSE(DeviceFPGA_Session_IsPCIeConfigComplete(pbCoverage, 0));
+}
+
+static VOID TestPCIeConfigBatchSizingBoundsRepliesBelowTransportBoundary(VOID)
+{
+    ASSERT_EQ(DeviceFPGA_Session_GetPCIeConfigBatchDWords(0, 0), 16);
+    ASSERT_EQ(DeviceFPGA_Session_GetPCIeConfigBatchDWords(112, 0), 16);
+    ASSERT_EQ(DeviceFPGA_Session_GetPCIeConfigBatchDWords(127, 0), 1);
+    ASSERT_EQ(DeviceFPGA_Session_GetPCIeConfigBatchDWords(128, 0), 0);
+    ASSERT_EQ(DeviceFPGA_Session_GetPCIeConfigBatchDWords(
+        0, 0x80000000 | 0x7f), 1);
+    ASSERT_EQ(DeviceFPGA_Session_GetPCIeConfigBatchDWords(
+        0, 0x80000000 | 0x80), 0);
+}
+
+static VOID AssertPCIeConfigBatchAddresses(
+    _In_reads_(cbBatch) PBYTE pbBatch,
+    _In_ DWORD cbBatch,
+    _In_ DWORD iStartDWord,
+    _In_ DWORD cDWords
+)
+{
+    DWORD i, iAddress = 0, iExpected;
+    for(i = 0; i + 8 <= cbBatch; i += 8) {
+        if((pbBatch[i + 4] != 0x80) ||
+           (pbBatch[i + 5] != 0x14) ||
+           (pbBatch[i + 6] != 0x21) ||
+           (pbBatch[i + 7] != 0x77)) {
+            continue;
+        }
+        iExpected = iStartDWord + (iAddress ? iAddress - 1 : 0);
+        ASSERT_EQ(pbBatch[i], iExpected & 0xff);
+        ASSERT_EQ(pbBatch[i + 1], (iExpected >> 8) & 0x03);
+        iAddress++;
+    }
+    ASSERT_EQ(iAddress, cDWords + 1);
+}
+
+static VOID TestPCIeConfigBatchBuilderKeepsRealRequestsBelowBoundary(VOID)
+{
+    BYTE pbBatch[0x1000];
+    DWORD cbBatch, cBatchDWords, cBatches = 0, iDWord = 0;
+    while((cBatchDWords = DeviceFPGA_Session_GetPCIeConfigBatchDWords(
+        iDWord, 0))) {
+        memset(pbBatch, 0xcc, sizeof(pbBatch));
+        cbBatch = 0;
+        ASSERT_TRUE(DeviceFPGA_Session_BuildPCIeConfigBatch(
+            pbBatch, sizeof(pbBatch), &cbBatch, iDWord, 0));
+        ASSERT_EQ(cBatchDWords, 16);
+        ASSERT_EQ(cbBatch, 912);
+        ASSERT_TRUE(cbBatch < 1024);
+        ASSERT_TRUE(20 + (cBatchDWords * 32) < 1024);
+        AssertPCIeConfigBatchAddresses(
+            pbBatch, cbBatch, iDWord, cBatchDWords);
+        iDWord += cBatchDWords;
+        cBatches++;
+    }
+    ASSERT_EQ(iDWord, 128);
+    ASSERT_EQ(cBatches, 8);
+}
+
+static VOID TestPCIeConfigBatchBuilderPreservesSingleDwordRequest(VOID)
+{
+    BYTE pbBatch[0x1000];
+    DWORD cbBatch = 0;
+    ASSERT_TRUE(DeviceFPGA_Session_BuildPCIeConfigBatch(
+        pbBatch,
+        sizeof(pbBatch),
+        &cbBatch,
+        0,
+        0x80000000 | 0x7f));
+    ASSERT_EQ(cbBatch, 72);
+    AssertPCIeConfigBatchAddresses(pbBatch, cbBatch, 0x7f, 1);
+    cbBatch = 0xaa;
+    ASSERT_FALSE(DeviceFPGA_Session_BuildPCIeConfigBatch(
+        pbBatch, 71, &cbBatch, 0, 0x80000000 | 0x7f));
+    ASSERT_EQ(cbBatch, 0);
+    ASSERT_FALSE(DeviceFPGA_Session_BuildPCIeConfigBatch(
+        pbBatch,
+        sizeof(pbBatch),
+        &cbBatch,
+        0,
+        0x80000000 | 0x80));
+    ASSERT_EQ(cbBatch, 0);
+}
+
+typedef struct tdPCIE_CONFIG_READ_SCRIPT {
+    BOOL afSuccess[2];
+    BYTE abWrite[2];
+    DWORD cCalls;
+    BOOL fSecondOutputWasCleared;
+} PCIE_CONFIG_READ_SCRIPT, *PPCIE_CONFIG_READ_SCRIPT;
+
+static BOOL ScriptedPCIeConfigReadAttempt(
+    _Inout_ PVOID pvContext,
+    _Out_writes_(DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE) PBYTE pbResult
+)
+{
+    PPCIE_CONFIG_READ_SCRIPT pScript = (PPCIE_CONFIG_READ_SCRIPT)pvContext;
+    DWORD i, iAttempt = pScript->cCalls++;
+    if(iAttempt >= 2) { return FALSE; }
+    if(iAttempt == 1) {
+        for(i = 0; i < DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE; i++) {
+            if(pbResult[i]) {
+                pScript->fSecondOutputWasCleared = FALSE;
+                break;
+            }
+        }
+    }
+    memset(pbResult, pScript->abWrite[iAttempt],
+        DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE);
+    return pScript->afSuccess[iAttempt];
+}
+
+static VOID TestPCIeConfigRetryReturnsFirstAttemptSuccess(VOID)
+{
+    PCIE_CONFIG_READ_SCRIPT Script = { { TRUE, FALSE }, { 0x11, 0x00 }, 0, TRUE };
+    BYTE pbResult[DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE];
+    memset(pbResult, 0xaa, sizeof(pbResult));
+    ASSERT_TRUE(DeviceFPGA_Session_ReadPCIeConfigWithRetry(
+        &Script, ScriptedPCIeConfigReadAttempt, pbResult, 0));
+    ASSERT_EQ(Script.cCalls, 1);
+    ASSERT_EQ(pbResult[0], 0x11);
+}
+
+static VOID TestPCIeConfigRetryClearsOutputBeforeSecondAttempt(VOID)
+{
+    PCIE_CONFIG_READ_SCRIPT Script = { { FALSE, TRUE }, { 0xaa, 0x22 }, 0, TRUE };
+    BYTE pbResult[DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE];
+    memset(pbResult, 0xff, sizeof(pbResult));
+    ASSERT_TRUE(DeviceFPGA_Session_ReadPCIeConfigWithRetry(
+        &Script, ScriptedPCIeConfigReadAttempt, pbResult, 0));
+    ASSERT_EQ(Script.cCalls, 2);
+    ASSERT_TRUE(Script.fSecondOutputWasCleared);
+    ASSERT_EQ(pbResult[0], 0x22);
+}
+
+static VOID TestPCIeConfigRetryStopsAfterTwoFailures(VOID)
+{
+    PCIE_CONFIG_READ_SCRIPT Script = { { FALSE, FALSE }, { 0xaa, 0x22 }, 0, TRUE };
+    BYTE pbResult[DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE];
+    memset(pbResult, 0xff, sizeof(pbResult));
+    ASSERT_FALSE(DeviceFPGA_Session_ReadPCIeConfigWithRetry(
+        &Script, ScriptedPCIeConfigReadAttempt, pbResult, 0));
+    ASSERT_EQ(Script.cCalls, 2);
+    ASSERT_TRUE(Script.fSecondOutputWasCleared);
+}
+
+static VOID TestPCIeConfigRetryRejectsOutOfRangeRequestWithoutAttempt(VOID)
+{
+    PCIE_CONFIG_READ_SCRIPT Script = { { TRUE, TRUE }, { 0x11, 0x22 }, 0, TRUE };
+    BYTE pbResult[DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE];
+    memset(pbResult, 0xff, sizeof(pbResult));
+    ASSERT_FALSE(DeviceFPGA_Session_ReadPCIeConfigWithRetry(
+        &Script,
+        ScriptedPCIeConfigReadAttempt,
+        pbResult,
+        0x80000000 | 0x80));
+    ASSERT_EQ(Script.cCalls, 0);
 }
 
 typedef struct tdCONFIG_READ_SCRIPT {
@@ -259,6 +554,26 @@ static VOID TestV3IdentityPublishesCompleteReply(VOID)
     };
     DEVICE_FPGA_IDENTITY Identity = { 0xaa, 0xbb, 0xcc };
     WORD wPcieDeviceId = 0xdddd;
+    ASSERT_TRUE(DeviceFPGA_Session_ParseV3Identity(
+        pbReply, sizeof(pbReply), &Identity, &wPcieDeviceId));
+    ASSERT_IDENTITY(Identity, 4, 19, 4);
+    ASSERT_EQ(wPcieDeviceId, 0);
+}
+
+static VOID TestV3IdentityAcceptsTrailingFiller(VOID)
+{
+    BYTE pbReply[64] = {
+        0x33, 0x03, 0x00, 0xe0,
+        0x04, 0x00, 0x00, 0x01,
+        0x13, 0x00, 0x00, 0x05,
+        0x04, 0x00, 0x00, 0x03
+    };
+    DEVICE_FPGA_IDENTITY Identity = { 0xaa, 0xbb, 0xcc };
+    WORD wPcieDeviceId = 0xdddd;
+    DWORD i, dwFiller = 0x55556666;
+    for(i = 32; i < sizeof(pbReply); i += sizeof(dwFiller)) {
+        memcpy(pbReply + i, &dwFiller, sizeof(dwFiller));
+    }
     ASSERT_TRUE(DeviceFPGA_Session_ParseV3Identity(
         pbReply, sizeof(pbReply), &Identity, &wPcieDeviceId));
     ASSERT_IDENTITY(Identity, 4, 19, 4);
@@ -1078,59 +1393,6 @@ static VOID TestCloseReportsAbortErrorAfterAttemptingCleanup(VOID)
     ASSERT_EQ(Script.cReleaseCalls, 1);
 }
 
-typedef struct tdPIPE_TIMEOUT_SCRIPT {
-    BYTE pbPipe[2];
-    ULONG pulTimeout[2];
-    DWORD cCalls;
-    ULONG ulRxStatus;
-    ULONG ulTxStatus;
-} PIPE_TIMEOUT_SCRIPT, *PPIPE_TIMEOUT_SCRIPT;
-
-static ULONG WINAPI ScriptedSetPipeTimeout(
-    _In_ HANDLE hFTDI,
-    _In_ UCHAR ucPipeID,
-    _In_ ULONG ulTimeoutInMs
-)
-{
-    PPIPE_TIMEOUT_SCRIPT pScript = (PPIPE_TIMEOUT_SCRIPT)hFTDI;
-    DWORD i = pScript->cCalls++;
-    if(i < 2) {
-        pScript->pbPipe[i] = ucPipeID;
-        pScript->pulTimeout[i] = ulTimeoutInMs;
-    }
-    return (ucPipeID == 0x82) ? pScript->ulRxStatus : pScript->ulTxStatus;
-}
-
-static VOID TestConfigurePipeTimeoutsConfiguresBothDirections(VOID)
-{
-    PIPE_TIMEOUT_SCRIPT Script = { 0 };
-    ASSERT_TRUE(DeviceFPGA_Session_ConfigurePipeTimeouts(
-        &Script,
-        DEVICE_FPGA_SESSION_WAIT_TIMEOUT_MS,
-        ScriptedSetPipeTimeout));
-    ASSERT_EQ(Script.cCalls, 2);
-    ASSERT_EQ(Script.pbPipe[0], 0x82);
-    ASSERT_EQ(Script.pbPipe[1], 0x02);
-    ASSERT_EQ(Script.pulTimeout[0], DEVICE_FPGA_SESSION_WAIT_TIMEOUT_MS);
-    ASSERT_EQ(Script.pulTimeout[1], DEVICE_FPGA_SESSION_WAIT_TIMEOUT_MS);
-}
-
-static VOID TestConfigurePipeTimeoutsReportsEitherFailure(VOID)
-{
-    PIPE_TIMEOUT_SCRIPT RxFailure = { { 0 }, { 0 }, 0, 1, 0 };
-    PIPE_TIMEOUT_SCRIPT TxFailure = { { 0 }, { 0 }, 0, 0, 1 };
-    ASSERT_FALSE(DeviceFPGA_Session_ConfigurePipeTimeouts(
-        &RxFailure,
-        DEVICE_FPGA_SESSION_WAIT_TIMEOUT_MS,
-        ScriptedSetPipeTimeout));
-    ASSERT_EQ(RxFailure.cCalls, 2);
-    ASSERT_FALSE(DeviceFPGA_Session_ConfigurePipeTimeouts(
-        &TxFailure,
-        DEVICE_FPGA_SESSION_WAIT_TIMEOUT_MS,
-        ScriptedSetPipeTimeout));
-    ASSERT_EQ(TxFailure.cCalls, 2);
-}
-
 #define RECOVERY_EVENT_QUIESCE      1
 #define RECOVERY_EVENT_REOPEN       2
 #define RECOVERY_EVENT_INITIALIZE   3
@@ -1276,6 +1538,446 @@ static VOID TestFillerClassificationRequiresCompleteFillerWords(VOID)
         pbFramed, sizeof(pbFramed)));
     ASSERT_FALSE(DeviceFPGA_Session_IsFillerOnly(
         pbTruncated, sizeof(pbTruncated)));
+}
+
+typedef struct tdCONFIG_REPLY_READ_SCRIPT {
+    BYTE pbReply[2][32];
+    DWORD pcbReply[2];
+    DWORD cCalls;
+    DWORD dwReadDelayMs;
+    DWORD iFailureCall;
+    DWORD iOversizeCall;
+    QWORD qwNow;
+    UCHAR ucLastPipe;
+    DWORD cbLastBuffer;
+    BOOL fSawOverlapped;
+} CONFIG_REPLY_READ_SCRIPT, *PCONFIG_REPLY_READ_SCRIPT;
+
+static ULONG WINAPI ScriptedConfigReplyRead(
+    _In_ HANDLE hFTDI,
+    _In_ UCHAR ucPipeID,
+    _Out_writes_(cbBuffer) PUCHAR pbBuffer,
+    _In_ ULONG cbBuffer,
+    _Out_ PULONG pcbTransferred,
+    _In_ LPOVERLAPPED pOverlapped
+)
+{
+    PCONFIG_REPLY_READ_SCRIPT pScript =
+        (PCONFIG_REPLY_READ_SCRIPT)hFTDI;
+    DWORD iCall = pScript->cCalls++;
+    pScript->ucLastPipe = ucPipeID;
+    pScript->cbLastBuffer = cbBuffer;
+    pScript->fSawOverlapped |= pOverlapped != NULL;
+    pScript->qwNow += pScript->dwReadDelayMs;
+    if(iCall + 1 == pScript->iFailureCall) {
+        *pcbTransferred = 0;
+        return 1;
+    }
+    if(iCall + 1 == pScript->iOversizeCall) {
+        *pcbTransferred = cbBuffer + 1;
+        return 0;
+    }
+    if(iCall >= 2 || pScript->pcbReply[iCall] > cbBuffer) {
+        *pcbTransferred = 0;
+        return 1;
+    }
+    memcpy(pbBuffer, pScript->pbReply[iCall], pScript->pcbReply[iCall]);
+    *pcbTransferred = pScript->pcbReply[iCall];
+    return 0;
+}
+
+static QWORD ScriptedConfigReplyTick(_In_opt_ PVOID pvContext)
+{
+    return ((PCONFIG_REPLY_READ_SCRIPT)pvContext)->qwNow;
+}
+
+static VOID SetConfigReplyFiller(
+    _Out_writes_(20) PBYTE pb,
+    _Out_ PDWORD pcb
+)
+{
+    DWORD i;
+    DWORD dwFiller = 0x55556666;
+    for(i = 0; i < 20; i += sizeof(dwFiller)) {
+        memcpy(pb + i, &dwFiller, sizeof(dwFiller));
+    }
+    *pcb = 20;
+}
+
+static VOID SetConfigReplyRecord(
+    _Out_writes_(32) PBYTE pb,
+    _Out_ PDWORD pcb
+)
+{
+    static const BYTE pbRecord[32] = {
+        0x33, 0x00, 0x00, 0xe0,
+        0x00, 0x08, 0x04, 0x13,
+        0x00, 0x0a, 0x04, 0x00
+    };
+    memcpy(pb, pbRecord, sizeof(pbRecord));
+    *pcb = sizeof(pbRecord);
+}
+
+static VOID TestConfigReplyReadSkipsOneFillerOnlyReceive(VOID)
+{
+    CONFIG_REPLY_READ_SCRIPT Script = { 0 };
+    BYTE pbBuffer[64] = { 0 };
+    BYTE pbResult[3] = { 0 };
+    BYTE pbExpected[3] = { 0x04, 0x13, 0x04 };
+    DWORD cbRead = 0;
+    SetConfigReplyFiller(Script.pbReply[0], &Script.pcbReply[0]);
+    SetConfigReplyRecord(Script.pbReply[1], &Script.pcbReply[1]);
+    ASSERT_TRUE(DeviceFPGA_Session_ReadConfigReply(
+        &Script,
+        pbBuffer,
+        sizeof(pbBuffer),
+        &cbRead,
+        ScriptedConfigReplyRead,
+        DEVICE_FPGA_SESSION_CONFIG_REPLY_TIMEOUT_MS,
+        NULL,
+        NULL));
+    ASSERT_EQ(Script.cCalls, 2);
+    ASSERT_EQ(Script.ucLastPipe, 0x82);
+    ASSERT_EQ(Script.cbLastBuffer, sizeof(pbBuffer));
+    ASSERT_FALSE(Script.fSawOverlapped);
+    ASSERT_EQ(cbRead, Script.pcbReply[1]);
+    ASSERT_BYTES(pbBuffer, Script.pbReply[1], cbRead);
+    ASSERT_TRUE(DeviceFPGA_Session_ParseConfigReply(
+        pbBuffer,
+        cbRead,
+        0x0008,
+        pbResult,
+        sizeof(pbResult),
+        0x0003));
+    ASSERT_BYTES(pbResult, pbExpected, sizeof(pbResult));
+}
+
+static VOID TestConfigReplyReadReturnsNonFillerImmediately(VOID)
+{
+    CONFIG_REPLY_READ_SCRIPT Script = { 0 };
+    BYTE pbBuffer[64] = { 0 };
+    DWORD cbRead = 0;
+    SetConfigReplyRecord(Script.pbReply[0], &Script.pcbReply[0]);
+    ASSERT_TRUE(DeviceFPGA_Session_ReadConfigReply(
+        &Script,
+        pbBuffer,
+        sizeof(pbBuffer),
+        &cbRead,
+        ScriptedConfigReplyRead,
+        DEVICE_FPGA_SESSION_CONFIG_REPLY_TIMEOUT_MS,
+        NULL,
+        NULL));
+    ASSERT_EQ(Script.cCalls, 1);
+    ASSERT_EQ(cbRead, Script.pcbReply[0]);
+    ASSERT_BYTES(pbBuffer, Script.pbReply[0], cbRead);
+}
+
+static VOID TestConfigReplyReadRejectsZeroTransferImmediately(VOID)
+{
+    CONFIG_REPLY_READ_SCRIPT Script = { 0 };
+    BYTE pbBuffer[64] = { 0 };
+    DWORD cbRead = 0xaa;
+    ASSERT_FALSE(DeviceFPGA_Session_ReadConfigReply(
+        &Script,
+        pbBuffer,
+        sizeof(pbBuffer),
+        &cbRead,
+        ScriptedConfigReplyRead,
+        DEVICE_FPGA_SESSION_CONFIG_REPLY_TIMEOUT_MS,
+        NULL,
+        NULL));
+    ASSERT_EQ(Script.cCalls, 1);
+    ASSERT_EQ(cbRead, 0);
+}
+
+static VOID TestConfigReplyReadStopsAtOverallDeadline(VOID)
+{
+    CONFIG_REPLY_READ_SCRIPT Script = { 0 };
+    BYTE pbBuffer[64] = { 0 };
+    DWORD cbRead = 0xaa;
+    Script.dwReadDelayMs = 100;
+    SetConfigReplyFiller(Script.pbReply[0], &Script.pcbReply[0]);
+    SetConfigReplyRecord(Script.pbReply[1], &Script.pcbReply[1]);
+    ASSERT_FALSE(DeviceFPGA_Session_ReadConfigReply(
+        &Script,
+        pbBuffer,
+        sizeof(pbBuffer),
+        &cbRead,
+        ScriptedConfigReplyRead,
+        100,
+        &Script,
+        ScriptedConfigReplyTick));
+    ASSERT_EQ(Script.cCalls, 1);
+    ASSERT_EQ(cbRead, 0);
+}
+
+static VOID TestConfigReplyReadStopsAfterSecondFiller(VOID)
+{
+    CONFIG_REPLY_READ_SCRIPT Script = { 0 };
+    BYTE pbBuffer[64] = { 0 };
+    DWORD cbRead = 0xaa;
+    SetConfigReplyFiller(Script.pbReply[0], &Script.pcbReply[0]);
+    SetConfigReplyFiller(Script.pbReply[1], &Script.pcbReply[1]);
+    ASSERT_FALSE(DeviceFPGA_Session_ReadConfigReply(
+        &Script,
+        pbBuffer,
+        sizeof(pbBuffer),
+        &cbRead,
+        ScriptedConfigReplyRead,
+        DEVICE_FPGA_SESSION_CONFIG_REPLY_TIMEOUT_MS,
+        NULL,
+        NULL));
+    ASSERT_EQ(Script.cCalls, 2);
+    ASSERT_EQ(cbRead, 0);
+}
+
+static VOID TestConfigReplyReadRejectsReadErrorsAndOversize(VOID)
+{
+    CONFIG_REPLY_READ_SCRIPT Failure = { 0 };
+    CONFIG_REPLY_READ_SCRIPT Oversize = { 0 };
+    BYTE pbBuffer[64] = { 0 };
+    DWORD cbRead = 0xaa;
+    Failure.iFailureCall = 1;
+    ASSERT_FALSE(DeviceFPGA_Session_ReadConfigReply(
+        &Failure,
+        pbBuffer,
+        sizeof(pbBuffer),
+        &cbRead,
+        ScriptedConfigReplyRead,
+        DEVICE_FPGA_SESSION_CONFIG_REPLY_TIMEOUT_MS,
+        NULL,
+        NULL));
+    ASSERT_EQ(Failure.cCalls, 1);
+    ASSERT_EQ(cbRead, 0);
+    Oversize.iOversizeCall = 1;
+    ASSERT_FALSE(DeviceFPGA_Session_ReadConfigReply(
+        &Oversize,
+        pbBuffer,
+        sizeof(pbBuffer),
+        &cbRead,
+        ScriptedConfigReplyRead,
+        DEVICE_FPGA_SESSION_CONFIG_REPLY_TIMEOUT_MS,
+        NULL,
+        NULL));
+    ASSERT_EQ(Oversize.cCalls, 1);
+    ASSERT_EQ(cbRead, 0);
+    ASSERT_FALSE(DeviceFPGA_Session_ReadConfigReply(
+        NULL,
+        pbBuffer,
+        sizeof(pbBuffer),
+        &cbRead,
+        ScriptedConfigReplyRead,
+        DEVICE_FPGA_SESSION_CONFIG_REPLY_TIMEOUT_MS,
+        NULL,
+        NULL));
+    ASSERT_EQ(cbRead, 0);
+}
+
+typedef struct tdMATCHING_CONFIG_REPLY_SCRIPT {
+    DWORD cCalls;
+    DWORD cWrongReplies;
+    BOOL fNeverMatch;
+    BOOL fSplitReply;
+    BOOL fTrailingFiller;
+} MATCHING_CONFIG_REPLY_SCRIPT, *PMATCHING_CONFIG_REPLY_SCRIPT;
+
+static ULONG WINAPI ScriptedMatchingConfigReplyRead(
+    _In_ HANDLE hFTDI,
+    _In_ UCHAR ucPipeID,
+    _Out_writes_(cbBuffer) PUCHAR pbBuffer,
+    _In_ ULONG cbBuffer,
+    _Out_ PULONG pcbTransferred,
+    _In_ LPOVERLAPPED pOverlapped
+)
+{
+    PMATCHING_CONFIG_REPLY_SCRIPT pScript =
+        (PMATCHING_CONFIG_REPLY_SCRIPT)hFTDI;
+    BYTE pbReply[64];
+    DWORD cbReply, i, dwFiller = 0x55556666;
+    UNREFERENCED_PARAMETER(ucPipeID);
+    UNREFERENCED_PARAMETER(pOverlapped);
+    SetConfigReplyRecord(pbReply, &cbReply);
+    if(pScript->fSplitReply) {
+        if((pScript->cCalls >= 2) || (cbBuffer < 16)) {
+            *pcbTransferred = 0;
+            return 1;
+        }
+        memcpy(pbBuffer, pbReply + (pScript->cCalls * 16), 16);
+        pScript->cCalls++;
+        *pcbTransferred = 16;
+        return 0;
+    }
+    if(pScript->fTrailingFiller) {
+        for(i = cbReply; i < sizeof(pbReply); i += sizeof(dwFiller)) {
+            memcpy(pbReply + i, &dwFiller, sizeof(dwFiller));
+        }
+        cbReply = sizeof(pbReply);
+    }
+    if(cbBuffer < cbReply) {
+        *pcbTransferred = 0;
+        return 1;
+    }
+    if(pScript->fNeverMatch ||
+       (pScript->cCalls < pScript->cWrongReplies)) {
+        pbReply[5] = 0x20;
+        pbReply[9] = 0x22;
+    }
+    memcpy(pbBuffer, pbReply, cbReply);
+    pScript->cCalls++;
+    *pcbTransferred = cbReply;
+    return 0;
+}
+
+static VOID TestConfigReplyReadSkipsUnrelatedNonFillerReplies(VOID)
+{
+    MATCHING_CONFIG_REPLY_SCRIPT Script = { 0 };
+    BYTE pbBuffer[128] = { 0 };
+    BYTE pbResult[3] = { 0 };
+    BYTE pbExpected[3] = { 0x04, 0x13, 0x04 };
+    DWORD cbRead = 0;
+    Script.cWrongReplies = 2;
+    ASSERT_TRUE(DeviceFPGA_Session_ReadConfigReplyMatching(
+        &Script,
+        pbBuffer,
+        sizeof(pbBuffer),
+        &cbRead,
+        ScriptedMatchingConfigReplyRead,
+        0x0008,
+        pbResult,
+        sizeof(pbResult),
+        0x0003,
+        DEVICE_FPGA_SESSION_CONFIG_REPLY_TIMEOUT_MS,
+        NULL,
+        NULL));
+    ASSERT_EQ(Script.cCalls, 3);
+    ASSERT_EQ(cbRead, 96);
+    ASSERT_BYTES(pbResult, pbExpected, sizeof(pbExpected));
+}
+
+static VOID TestConfigReplyReadBoundsUnrelatedNonFillerReplies(VOID)
+{
+    MATCHING_CONFIG_REPLY_SCRIPT Script = { 0 };
+    BYTE pbBuffer[
+        DEVICE_FPGA_SESSION_CONFIG_REPLY_MAX_READS * 32] = { 0 };
+    BYTE pbResult[3] = { 0 };
+    DWORD cbRead = 0xaa;
+    Script.fNeverMatch = TRUE;
+    ASSERT_FALSE(DeviceFPGA_Session_ReadConfigReplyMatching(
+        &Script,
+        pbBuffer,
+        sizeof(pbBuffer),
+        &cbRead,
+        ScriptedMatchingConfigReplyRead,
+        0x0008,
+        pbResult,
+        sizeof(pbResult),
+        0x0003,
+        DEVICE_FPGA_SESSION_CONFIG_REPLY_TIMEOUT_MS,
+        NULL,
+        NULL));
+    ASSERT_EQ(Script.cCalls, DEVICE_FPGA_SESSION_CONFIG_REPLY_MAX_READS);
+    ASSERT_EQ(cbRead, 0);
+}
+
+static VOID TestMatchingConfigReplyReadRejectsZeroTransferImmediately(VOID)
+{
+    CONFIG_REPLY_READ_SCRIPT Script = { 0 };
+    BYTE pbBuffer[64] = { 0 };
+    BYTE pbResult[3] = { 0 };
+    DWORD cbRead = 0xaa;
+    ASSERT_FALSE(DeviceFPGA_Session_ReadConfigReplyMatching(
+        &Script,
+        pbBuffer,
+        sizeof(pbBuffer),
+        &cbRead,
+        ScriptedConfigReplyRead,
+        0x0008,
+        pbResult,
+        sizeof(pbResult),
+        0x0003,
+        DEVICE_FPGA_SESSION_CONFIG_REPLY_TIMEOUT_MS,
+        NULL,
+        NULL));
+    ASSERT_EQ(Script.cCalls, 1);
+    ASSERT_EQ(cbRead, 0);
+}
+
+static VOID TestMatchingConfigReplyReadStopsAtOverallDeadline(VOID)
+{
+    CONFIG_REPLY_READ_SCRIPT Script = { 0 };
+    BYTE pbBuffer[64] = { 0 };
+    BYTE pbResult[3] = { 0 };
+    DWORD cbRead = 0xaa;
+    Script.dwReadDelayMs = 100;
+    SetConfigReplyFiller(Script.pbReply[0], &Script.pcbReply[0]);
+    SetConfigReplyRecord(Script.pbReply[1], &Script.pcbReply[1]);
+    ASSERT_FALSE(DeviceFPGA_Session_ReadConfigReplyMatching(
+        &Script,
+        pbBuffer,
+        sizeof(pbBuffer),
+        &cbRead,
+        ScriptedConfigReplyRead,
+        0x0008,
+        pbResult,
+        sizeof(pbResult),
+        0x0003,
+        100,
+        &Script,
+        ScriptedConfigReplyTick));
+    ASSERT_EQ(Script.cCalls, 1);
+    ASSERT_EQ(cbRead, 0);
+}
+
+static VOID TestConfigReplyReadAccumulatesSplitReply(VOID)
+{
+    MATCHING_CONFIG_REPLY_SCRIPT Script = { 0 };
+    BYTE pbBuffer[64] = { 0 };
+    BYTE pbResult[3] = { 0 };
+    BYTE pbExpected[3] = { 0x04, 0x13, 0x04 };
+    DWORD cbRead = 0;
+    Script.fSplitReply = TRUE;
+    ASSERT_TRUE(DeviceFPGA_Session_ReadConfigReplyMatching(
+        &Script,
+        pbBuffer,
+        sizeof(pbBuffer),
+        &cbRead,
+        ScriptedMatchingConfigReplyRead,
+        0x0008,
+        pbResult,
+        sizeof(pbResult),
+        0x0003,
+        DEVICE_FPGA_SESSION_CONFIG_REPLY_TIMEOUT_MS,
+        NULL,
+        NULL));
+    ASSERT_EQ(Script.cCalls, 2);
+    ASSERT_EQ(cbRead, 32);
+    ASSERT_BYTES(pbResult, pbExpected, sizeof(pbExpected));
+}
+
+static VOID TestConfigReplyReadAcceptsTrailingFillerWithoutAnotherRead(VOID)
+{
+    MATCHING_CONFIG_REPLY_SCRIPT Script = { 0 };
+    BYTE pbBuffer[64] = { 0 };
+    BYTE pbResult[3] = { 0 };
+    BYTE pbExpected[3] = { 0x04, 0x13, 0x04 };
+    DWORD cbRead = 0;
+    Script.fTrailingFiller = TRUE;
+    ASSERT_TRUE(DeviceFPGA_Session_ReadConfigReplyMatching(
+        &Script,
+        pbBuffer,
+        sizeof(pbBuffer),
+        &cbRead,
+        ScriptedMatchingConfigReplyRead,
+        0x0008,
+        pbResult,
+        sizeof(pbResult),
+        0x0003,
+        DEVICE_FPGA_SESSION_CONFIG_REPLY_TIMEOUT_MS,
+        NULL,
+        NULL));
+    ASSERT_EQ(Script.cCalls, 1);
+    ASSERT_EQ(cbRead, sizeof(pbBuffer));
+    ASSERT_BYTES(pbResult, pbExpected, sizeof(pbExpected));
 }
 
 typedef struct tdDRAIN_SCRIPT {
@@ -1521,20 +2223,100 @@ static VOID TestDrainRejectsInvalidPolicy(VOID)
     ASSERT_EQ(Script.cCalls, 0);
 }
 
+static VOID AssertPCIeLinkInfo(
+    _In_ BOOL fPhySupported,
+    _In_ BYTE bRate,
+    _In_ BYTE bWidthIndex,
+    _In_ BOOL fExpected,
+    _In_ BYTE bExpectedGen,
+    _In_ BYTE bExpectedWidth
+)
+{
+    BYTE bGen = 0xaa;
+    BYTE bWidth = 0xbb;
+    ASSERT_EQ(
+        DeviceFPGA_Session_GetPCIeLinkInfo(
+            fPhySupported,
+            bRate,
+            bWidthIndex,
+            &bGen,
+            &bWidth),
+        fExpected);
+    ASSERT_EQ(bGen, bExpectedGen);
+    ASSERT_EQ(bWidth, bExpectedWidth);
+}
+
+static VOID TestPCIeLinkInfoRejectsUnavailableAndOutOfRangeState(VOID)
+{
+    BYTE bGen = 0xaa;
+    BYTE bWidth = 0xbb;
+    AssertPCIeLinkInfo(FALSE, 0, 0, FALSE, 0, 0);
+    AssertPCIeLinkInfo(TRUE, 2, 0, FALSE, 0, 0);
+    AssertPCIeLinkInfo(TRUE, 0, 4, FALSE, 0, 0);
+    ASSERT_FALSE(DeviceFPGA_Session_GetPCIeLinkInfo(
+        TRUE, 0, 0, NULL, &bWidth));
+    ASSERT_EQ(bWidth, 0);
+    ASSERT_FALSE(DeviceFPGA_Session_GetPCIeLinkInfo(
+        TRUE, 0, 0, &bGen, NULL));
+    ASSERT_EQ(bGen, 0);
+    ASSERT_FALSE(DeviceFPGA_Session_GetPCIeLinkInfo(
+        TRUE, 0, 0, NULL, NULL));
+}
+
+static VOID TestPCIeLinkInfoMapsSupportedRateAndWidthIndexes(VOID)
+{
+    AssertPCIeLinkInfo(TRUE, 0, 0, TRUE, 1, 1);
+    AssertPCIeLinkInfo(TRUE, 0, 1, TRUE, 1, 2);
+    AssertPCIeLinkInfo(TRUE, 0, 2, TRUE, 1, 4);
+    AssertPCIeLinkInfo(TRUE, 0, 3, TRUE, 1, 8);
+    AssertPCIeLinkInfo(TRUE, 1, 0, TRUE, 2, 1);
+    AssertPCIeLinkInfo(TRUE, 1, 1, TRUE, 2, 2);
+    AssertPCIeLinkInfo(TRUE, 1, 2, TRUE, 2, 4);
+    AssertPCIeLinkInfo(TRUE, 1, 3, TRUE, 2, 8);
+}
+
+static VOID TestCustomPCIeConfigRequiresSuccessfulNonDefaultRead(VOID)
+{
+    ASSERT_FALSE(DeviceFPGA_Session_IsCustomPCIeConfig(
+        FALSE, 0x12345678));
+    ASSERT_FALSE(DeviceFPGA_Session_IsCustomPCIeConfig(TRUE, 0));
+    ASSERT_FALSE(DeviceFPGA_Session_IsCustomPCIeConfig(
+        TRUE, 0x066610ee));
+    ASSERT_TRUE(DeviceFPGA_Session_IsCustomPCIeConfig(
+        TRUE, 0x12345678));
+}
+
 int main(void)
 {
     RUN_TEST(TestCompleteAlignedReply);
+    RUN_TEST(TestCompleteReplyAcceptsTrailingFiller);
     RUN_TEST(TestCompleteUnalignedReply);
     RUN_TEST(TestCompleteZeroValuedReply);
     RUN_TEST(TestEmptyReplyFailsAndClearsOutput);
     RUN_TEST(TestPartialReplyFailsAndClearsOutput);
     RUN_TEST(TestWrongSourceReplyFailsAndClearsOutput);
+    RUN_TEST(TestPCIeConfigParserPlacesOneDwordAndMarksCoverage);
+    RUN_TEST(TestPCIeConfigParserAcceptsCompleteSpaceCoverage);
+    RUN_TEST(TestPCIeConfigCoverageRejectsOneMissingByte);
+    RUN_TEST(TestPCIeConfigCoverageAcceptsRequestedSingleDword);
+    RUN_TEST(TestPCIeConfigCoverageRejectsIncompleteSingleDword);
+    RUN_TEST(TestPCIeConfigCoverageRejectsOutOfRangeSingleDword);
+    RUN_TEST(TestPCIeConfigParserRejectsTruncatedAndFillerOnlyReply);
+    RUN_TEST(TestPCIeConfigParserDoesNotCoverDataBeforeMetadata);
+    RUN_TEST(TestPCIeConfigBatchSizingBoundsRepliesBelowTransportBoundary);
+    RUN_TEST(TestPCIeConfigBatchBuilderKeepsRealRequestsBelowBoundary);
+    RUN_TEST(TestPCIeConfigBatchBuilderPreservesSingleDwordRequest);
+    RUN_TEST(TestPCIeConfigRetryReturnsFirstAttemptSuccess);
+    RUN_TEST(TestPCIeConfigRetryClearsOutputBeforeSecondAttempt);
+    RUN_TEST(TestPCIeConfigRetryStopsAfterTwoFailures);
+    RUN_TEST(TestPCIeConfigRetryRejectsOutOfRangeRequestWithoutAttempt);
     RUN_TEST(TestV4IdentityRetriesAndPublishesCompleteReply);
     RUN_TEST(TestV4IdentityFailureIsBoundedAndDoesNotPublish);
     RUN_TEST(TestV4IdentityAcceptsExplicitZeroFpgaId);
     RUN_TEST(TestV4IdentityRejectsLegacyMajorWithoutPublishing);
     RUN_TEST(TestV3IdentityRequiresEveryIdentityCommand);
     RUN_TEST(TestV3IdentityPublishesCompleteReply);
+    RUN_TEST(TestV3IdentityAcceptsTrailingFiller);
     RUN_TEST(TestV3IdentityAcceptsExplicitZeroFpgaId);
     RUN_TEST(TestTlpFrameIgnoresContinuationUntilFirst);
     RUN_TEST(TestTlpFrameCompletesAfterExplicitFirst);
@@ -1556,12 +2338,22 @@ int main(void)
     RUN_TEST(TestCloseCancelsReadPipeBeforeWaiting);
     RUN_TEST(TestClosePendingForeverIsBoundedAndStillReleases);
     RUN_TEST(TestCloseReportsAbortErrorAfterAttemptingCleanup);
-    RUN_TEST(TestConfigurePipeTimeoutsConfiguresBothDirections);
-    RUN_TEST(TestConfigurePipeTimeoutsReportsEitherFailure);
     RUN_TEST(TestRecoveryCoordinatorExecutesOneOrderedAttempt);
     RUN_TEST(TestRecoveryCoordinatorStopsAtEachFailedStage);
     RUN_TEST(TestRecoveryCoordinatorRejectsIncompleteOpsBeforeStarting);
     RUN_TEST(TestFillerClassificationRequiresCompleteFillerWords);
+    RUN_TEST(TestConfigReplyReadSkipsOneFillerOnlyReceive);
+    RUN_TEST(TestConfigReplyReadReturnsNonFillerImmediately);
+    RUN_TEST(TestConfigReplyReadRejectsZeroTransferImmediately);
+    RUN_TEST(TestConfigReplyReadStopsAtOverallDeadline);
+    RUN_TEST(TestConfigReplyReadStopsAfterSecondFiller);
+    RUN_TEST(TestConfigReplyReadRejectsReadErrorsAndOversize);
+    RUN_TEST(TestConfigReplyReadSkipsUnrelatedNonFillerReplies);
+    RUN_TEST(TestConfigReplyReadBoundsUnrelatedNonFillerReplies);
+    RUN_TEST(TestMatchingConfigReplyReadRejectsZeroTransferImmediately);
+    RUN_TEST(TestMatchingConfigReplyReadStopsAtOverallDeadline);
+    RUN_TEST(TestConfigReplyReadAccumulatesSplitReply);
+    RUN_TEST(TestConfigReplyReadAcceptsTrailingFillerWithoutAnotherRead);
     RUN_TEST(TestDrainRequiresSustainedQuiescence);
     RUN_TEST(TestDrainResetsQuietWindowAfterTraffic);
     RUN_TEST(TestDrainReportsReadErrorWithoutRetry);
@@ -1571,6 +2363,9 @@ int main(void)
     RUN_TEST(TestDrainDeadlineWinsAfterSlowRead);
     RUN_TEST(TestDrainPassesRemainingDeadlineToReads);
     RUN_TEST(TestDrainRejectsInvalidPolicy);
+    RUN_TEST(TestPCIeLinkInfoRejectsUnavailableAndOutOfRangeState);
+    RUN_TEST(TestPCIeLinkInfoMapsSupportedRateAndWidthIndexes);
+    RUN_TEST(TestCustomPCIeConfigRequiresSuccessfulNonDefaultRead);
     if(g_cFailures) {
         printf("%d test assertion(s) failed.\n", g_cFailures);
         return 1;
