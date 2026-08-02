@@ -2834,18 +2834,13 @@ static DEVICE_FPGA_SESSION_READ_OUTCOME DeviceFPGA_Synch_RxTlpSynchronousInterna
         // read data:
         if(DeviceFPGA_FTDI_CanReadPipeBounded(ctx)) {
             if(fOpportunistic) {
-                OpportunisticResult = DeviceFPGA_FTDI_ReadPipeOpportunistic(
-                    ctx,
-                    ctx->rxbuf.pb + ctx->rxbuf.cb,
-                    cbReadRxBuf - ctx->rxbuf.cb);
+                OpportunisticResult = DeviceFPGA_FTDI_ReadPipeOpportunistic(ctx, ctx->rxbuf.pb + ctx->rxbuf.cb, cbReadRxBuf - ctx->rxbuf.cb);
                 status = OpportunisticResult.status;
                 cbRx = OpportunisticResult.cbTransferred;
-                if(OpportunisticResult.outcome ==
-                   DEVICE_FPGA_SESSION_READ_QUIET) {
+                if(OpportunisticResult.outcome == DEVICE_FPGA_SESSION_READ_QUIET) {
                     return DEVICE_FPGA_SESSION_READ_QUIET;
                 }
-                if(OpportunisticResult.outcome ==
-                   DEVICE_FPGA_SESSION_READ_DRIVER_ERROR) {
+                if(OpportunisticResult.outcome == DEVICE_FPGA_SESSION_READ_DRIVER_ERROR) {
                     DeviceFPGA_FTDI_RxRecover(ctxLC, ctx, status, FALSE);
                     return DEVICE_FPGA_SESSION_READ_DRIVER_ERROR;
                 }
@@ -4564,23 +4559,17 @@ BOOL DeviceFPGA_ProbeMEM_Attempt(_In_ PLC_CONTEXT ctxLC, _In_ QWORD qwAddr, _In_
             fBatchTransportError = TRUE;
         }
         BusySleep(ctx->perf.DELAY_PROBE_READ);
-        cReceiveMax = FpgaReadPolicy_ProbeReceiveMaxReads(
-            DeviceFPGA_FTDI_CanReadPipeBounded(ctx));
+        cReceiveMax = FpgaReadPolicy_ProbeReceiveMaxReads(DeviceFPGA_FTDI_CanReadPipeBounded(ctx));
         for(cReceive = 0; cReceive < cReceiveMax; cReceive++) {
             DEVICE_FPGA_SESSION_READ_OUTCOME ReceiveOutcome;
             if(cReceive) {
                 BusySleep(ctx->perf.DELAY_PROBE_READ);
             }
-            ReceiveOutcome = DeviceFPGA_Synch_RxTlpSynchronousInternal(
-                ctxLC,
-                ctx,
-                0,
-                cReceive != 0);
+            ReceiveOutcome = DeviceFPGA_Synch_RxTlpSynchronousInternal(ctxLC, ctx, 0, cReceive != 0);
             if(ReceiveOutcome == DEVICE_FPGA_SESSION_READ_DRIVER_ERROR) {
                 fBatchTransportError = TRUE;
             }
-            if(fBatchTransportError || !Probe.TagMap.cActive ||
-               (ReceiveOutcome == DEVICE_FPGA_SESSION_READ_QUIET)) {
+            if(fBatchTransportError || !Probe.TagMap.cActive || (ReceiveOutcome == DEVICE_FPGA_SESSION_READ_QUIET)) {
                 break;
             }
         }
