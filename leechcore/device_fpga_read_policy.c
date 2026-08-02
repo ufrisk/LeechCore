@@ -12,7 +12,8 @@ static BOOL FpgaReadPolicy_IsSuccess(_In_ LC_READ_PAGE_RESULT result)
 static BOOL FpgaReadPolicy_IsTerminal(_In_ LC_READ_PAGE_RESULT result)
 {
     return (result == LC_READ_PAGE_RESULT_UNSUPPORTED_REQUEST) ||
-        (result == LC_READ_PAGE_RESULT_COMPLETER_ABORT);
+        (result == LC_READ_PAGE_RESULT_COMPLETER_ABORT) ||
+        (result == LC_READ_PAGE_RESULT_NOT_ISSUED);
 }
 
 static DWORD FpgaReadPolicy_Precedence(_In_ LC_READ_PAGE_RESULT result)
@@ -32,6 +33,7 @@ static DWORD FpgaReadPolicy_Precedence(_In_ LC_READ_PAGE_RESULT result)
             return 5;
         case LC_READ_PAGE_RESULT_UNSUPPORTED_REQUEST:
         case LC_READ_PAGE_RESULT_COMPLETER_ABORT:
+        case LC_READ_PAGE_RESULT_NOT_ISSUED:
             return 6;
         default:
             return 0;
@@ -76,6 +78,7 @@ BOOL FpgaReadPolicy_IsRetryable(_In_ LC_READ_PAGE_RESULT result)
         case LC_READ_PAGE_RESULT_SUCCESS_AFTER_RETRY:
         case LC_READ_PAGE_RESULT_UNSUPPORTED_REQUEST:
         case LC_READ_PAGE_RESULT_COMPLETER_ABORT:
+        case LC_READ_PAGE_RESULT_NOT_ISSUED:
             return 0;
         case LC_READ_PAGE_RESULT_NONE:
         case LC_READ_PAGE_RESULT_NO_COMPLETION:
@@ -102,11 +105,39 @@ DWORD FpgaReadPolicy_BuildRetryList(_In_ DWORD cResults, _In_reads_(cResults) PL
     return cRetry;
 }
 
-BOOL FpgaReadPolicy_ShouldEnableAdaptivePolling(_In_ DWORD cRetry)
+DWORD FpgaReadPolicy_CountAdaptivePollingEvidence(_In_ DWORD cResults, _In_reads_(cResults) PLC_READ_PAGE_RESULT pResults)
+{
+    DWORD i, cEvidence = 0;
+    if(!pResults) { return 0; }
+    for(i = 0; i < cResults; i++) {
+        switch(pResults[i]) {
+            case LC_READ_PAGE_RESULT_NO_COMPLETION:
+            case LC_READ_PAGE_RESULT_PARTIAL_COMPLETION:
+            case LC_READ_PAGE_RESULT_TRANSPORT_ERROR:
+            case LC_READ_PAGE_RESULT_PROTOCOL_ERROR:
+                cEvidence++;
+                break;
+            default:
+                break;
+        }
+    }
+    return cEvidence;
+}
+
+BOOL FpgaReadPolicy_ShouldEnableAdaptivePolling(_In_ DWORD cEvidence, _In_ DWORD dwEvidenceGeneration, _In_ DWORD dwTransportGeneration)
 {
     // A full tag generation distinguishes sustained completion loss from an
     // isolated retry that should not slow the remainder of a healthy session.
-    return cRetry >= FPGA_READ_TAGS_PER_GENERATION;
+    // Evidence collected before a transport recovery must not affect the new
+    // transport generation.
+    return
+        (dwEvidenceGeneration == dwTransportGeneration) &&
+        (cEvidence >= FPGA_READ_TAGS_PER_GENERATION);
+}
+
+BOOL FpgaReadPolicy_ShouldResetAdaptivePolling(_In_ BOOL fAdaptivePollingWait, _In_ DWORD dwPollingGeneration, _In_ DWORD dwTransportGeneration)
+{
+    return fAdaptivePollingWait && (dwPollingGeneration != dwTransportGeneration);
 }
 
 LC_READ_PAGE_RESULT FpgaReadPolicy_MergeRetryResult(_In_ LC_READ_PAGE_RESULT firstResult, _In_ LC_READ_PAGE_RESULT retryResult)

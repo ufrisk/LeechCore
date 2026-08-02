@@ -17,6 +17,7 @@ static void test_public_result_values_are_stable(void)
     assert(LC_READ_PAGE_RESULT_TRANSPORT_ERROR == 7);
     assert(LC_READ_PAGE_RESULT_PROTOCOL_ERROR == 8);
     assert(LC_READ_PAGE_RESULT_UNSPECIFIED_ERROR == 9);
+    assert(LC_READ_PAGE_RESULT_NOT_ISSUED == 10);
 }
 
 static void test_completion_status_is_classified_without_guessing(void)
@@ -41,6 +42,7 @@ static void test_only_transient_or_unclassified_results_are_retryable(void)
     assert(!FpgaReadPolicy_IsRetryable(LC_READ_PAGE_RESULT_SUCCESS_AFTER_RETRY));
     assert(!FpgaReadPolicy_IsRetryable(LC_READ_PAGE_RESULT_UNSUPPORTED_REQUEST));
     assert(!FpgaReadPolicy_IsRetryable(LC_READ_PAGE_RESULT_COMPLETER_ABORT));
+    assert(!FpgaReadPolicy_IsRetryable(LC_READ_PAGE_RESULT_NOT_ISSUED));
 }
 
 static void test_terminal_result_is_sticky_across_tiny_fragments(void)
@@ -56,6 +58,11 @@ static void test_terminal_result_is_sticky_across_tiny_fragments(void)
     FpgaReadPolicy_Observe(&state, LC_READ_PAGE_RESULT_COMPLETER_ABORT, 0);
     FpgaReadPolicy_Observe(&state, LC_READ_PAGE_RESULT_PROTOCOL_ERROR, 0);
     assert(FpgaReadPolicy_Finalize(&state) == LC_READ_PAGE_RESULT_COMPLETER_ABORT);
+
+    FpgaReadPolicy_PageBegin(&state, 0x1000);
+    FpgaReadPolicy_Observe(&state, LC_READ_PAGE_RESULT_NOT_ISSUED, 0);
+    FpgaReadPolicy_Observe(&state, LC_READ_PAGE_RESULT_SUCCESS, 0x1000);
+    assert(FpgaReadPolicy_Finalize(&state) == LC_READ_PAGE_RESULT_NOT_ISSUED);
 }
 
 static void test_incomplete_data_is_distinguished_from_transport_failure(void)
@@ -122,10 +129,11 @@ static void test_retry_list_contains_only_retryable_results(void)
         LC_READ_PAGE_RESULT_TRANSPORT_ERROR,
         LC_READ_PAGE_RESULT_PROTOCOL_ERROR,
         LC_READ_PAGE_RESULT_UNSPECIFIED_ERROR,
-        LC_READ_PAGE_RESULT_SUCCESS_AFTER_RETRY
+        LC_READ_PAGE_RESULT_SUCCESS_AFTER_RETRY,
+        LC_READ_PAGE_RESULT_NOT_ISSUED
     };
-    DWORD indices[9] = { 0 };
-    DWORD count = FpgaReadPolicy_BuildRetryList(9, results, 9, indices);
+    DWORD indices[10] = { 0 };
+    DWORD count = FpgaReadPolicy_BuildRetryList(10, results, 10, indices);
     assert(count == 5);
     assert(indices[0] == 3);
     assert(indices[1] == 4);
@@ -136,12 +144,73 @@ static void test_retry_list_contains_only_retryable_results(void)
 
 static void test_adaptive_polling_requires_sustained_completion_loss(void)
 {
-    assert(!FpgaReadPolicy_ShouldEnableAdaptivePolling(0));
-    assert(!FpgaReadPolicy_ShouldEnableAdaptivePolling(1));
+    assert(!FpgaReadPolicy_ShouldEnableAdaptivePolling(0, 7, 7));
+    assert(!FpgaReadPolicy_ShouldEnableAdaptivePolling(1, 7, 7));
     assert(!FpgaReadPolicy_ShouldEnableAdaptivePolling(
-        FPGA_READ_TAGS_PER_GENERATION - 1));
+        FPGA_READ_TAGS_PER_GENERATION - 1, 7, 7));
     assert(FpgaReadPolicy_ShouldEnableAdaptivePolling(
-        FPGA_READ_TAGS_PER_GENERATION));
+        FPGA_READ_TAGS_PER_GENERATION, 7, 7));
+}
+
+static void test_adaptive_polling_rejects_stale_transport_evidence(void)
+{
+    assert(!FpgaReadPolicy_ShouldEnableAdaptivePolling(
+        FPGA_READ_TAGS_PER_GENERATION, 7, 8));
+}
+
+static void test_adaptive_polling_counts_only_transport_evidence(void)
+{
+    LC_READ_PAGE_RESULT results[] = {
+        LC_READ_PAGE_RESULT_NONE,
+        LC_READ_PAGE_RESULT_SUCCESS,
+        LC_READ_PAGE_RESULT_SUCCESS_AFTER_RETRY,
+        LC_READ_PAGE_RESULT_UNSUPPORTED_REQUEST,
+        LC_READ_PAGE_RESULT_COMPLETER_ABORT,
+        LC_READ_PAGE_RESULT_NO_COMPLETION,
+        LC_READ_PAGE_RESULT_PARTIAL_COMPLETION,
+        LC_READ_PAGE_RESULT_TRANSPORT_ERROR,
+        LC_READ_PAGE_RESULT_PROTOCOL_ERROR,
+        LC_READ_PAGE_RESULT_UNSPECIFIED_ERROR,
+        LC_READ_PAGE_RESULT_NOT_ISSUED
+    };
+    LC_READ_PAGE_RESULT boundary[FPGA_READ_TAGS_PER_GENERATION];
+    DWORD i, cEvidence;
+
+    assert(FpgaReadPolicy_CountAdaptivePollingEvidence(
+        sizeof(results) / sizeof(results[0]), results) == 4);
+    assert(FpgaReadPolicy_CountAdaptivePollingEvidence(0, NULL) == 0);
+
+    for(i = 0; i < FPGA_READ_TAGS_PER_GENERATION; i++) {
+        boundary[i] = LC_READ_PAGE_RESULT_NO_COMPLETION;
+    }
+    cEvidence = FpgaReadPolicy_CountAdaptivePollingEvidence(
+        FPGA_READ_TAGS_PER_GENERATION - 1, boundary);
+    assert(cEvidence == FPGA_READ_TAGS_PER_GENERATION - 1);
+    assert(!FpgaReadPolicy_ShouldEnableAdaptivePolling(cEvidence, 7, 7));
+
+    cEvidence = FpgaReadPolicy_CountAdaptivePollingEvidence(
+        FPGA_READ_TAGS_PER_GENERATION, boundary);
+    assert(cEvidence == FPGA_READ_TAGS_PER_GENERATION);
+    assert(FpgaReadPolicy_ShouldEnableAdaptivePolling(cEvidence, 7, 7));
+
+    boundary[0] = LC_READ_PAGE_RESULT_NOT_ISSUED;
+    cEvidence = FpgaReadPolicy_CountAdaptivePollingEvidence(
+        FPGA_READ_TAGS_PER_GENERATION, boundary);
+    assert(cEvidence == FPGA_READ_TAGS_PER_GENERATION - 1);
+    assert(!FpgaReadPolicy_ShouldEnableAdaptivePolling(cEvidence, 7, 7));
+
+    for(i = 0; i < FPGA_READ_TAGS_PER_GENERATION; i++) {
+        boundary[i] = LC_READ_PAGE_RESULT_NOT_ISSUED;
+    }
+    assert(FpgaReadPolicy_CountAdaptivePollingEvidence(
+        FPGA_READ_TAGS_PER_GENERATION, boundary) == 0);
+}
+
+static void test_adaptive_polling_is_reevaluated_after_transport_reopen(void)
+{
+    assert(!FpgaReadPolicy_ShouldResetAdaptivePolling(0, 4, 5));
+    assert(!FpgaReadPolicy_ShouldResetAdaptivePolling(1, 5, 5));
+    assert(FpgaReadPolicy_ShouldResetAdaptivePolling(1, 4, 5));
 }
 
 static void test_retry_result_replaces_transient_result(void)
@@ -410,6 +479,9 @@ int main(void)
     test_new_operation_does_not_inherit_terminal_result();
     test_retry_list_contains_only_retryable_results();
     test_adaptive_polling_requires_sustained_completion_loss();
+    test_adaptive_polling_rejects_stale_transport_evidence();
+    test_adaptive_polling_counts_only_transport_evidence();
+    test_adaptive_polling_is_reevaluated_after_transport_reopen();
     test_retry_result_replaces_transient_result();
     test_mixed_synchronous_pass_retries_only_transient_pages();
     test_async_and_tiny_tag_sequences();
