@@ -1170,10 +1170,10 @@ static VOID TestOverlappedReadLifecycleAndCloseOrdering(VOID)
         EVENT_GET_OVERLAPPED, 0x82, EVENT_GET_OVERLAPPED, EVENT_RELEASE
     };
 
-    TestOverlappedReadSubmissionTracksOnlyPendingStatus();
-    TestTrackedCloseReleasesIdleReadWithoutCancelling();
-    TestTrackedCloseReleasesCompletedReadWithoutCancelling();
-    TestTrackedCloseCancelsPendingReadBeforeRelease();
+    RUN_TEST(TestOverlappedReadSubmissionTracksOnlyPendingStatus);
+    RUN_TEST(TestTrackedCloseReleasesIdleReadWithoutCancelling);
+    RUN_TEST(TestTrackedCloseReleasesCompletedReadWithoutCancelling);
+    RUN_TEST(TestTrackedCloseCancelsPendingReadBeforeRelease);
 
     Script.ulPreAbortGetStatus = DEVICE_FPGA_SESSION_FT_IO_INCOMPLETE;
     ASSERT_TRUE(DeviceFPGA_Session_CloseOverlapped(
