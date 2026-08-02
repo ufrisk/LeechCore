@@ -4412,7 +4412,7 @@ BOOL DeviceFPGA_ProbeMEM_Attempt(_In_ PLC_CONTEXT ctxLC, _In_ QWORD qwAddr, _In_
     FPGA_PROBE_CALLBACK Probe = { 0 };
     PFPGA_READ_PAGE_STATE pStates;
     DWORD tx[4] = { 0 };
-    DWORD i, j, iSelected = 0, iBatchStart, iPage, cTxTlp;
+    DWORD i, j, iSelected = 0, iBatchStart, iPage, cTxTlp, cReceive, cReceiveMax;
     BYTE tag;
     BOOL is32, isFlush, fBatchTransportError;
     PTLP_HDR_MRdWr64 hdrRd64 = (PTLP_HDR_MRdWr64)tx;
@@ -4489,9 +4489,17 @@ BOOL DeviceFPGA_ProbeMEM_Attempt(_In_ PLC_CONTEXT ctxLC, _In_ QWORD qwAddr, _In_
             fBatchTransportError = TRUE;
         }
         BusySleep(ctx->perf.DELAY_PROBE_READ);
-        fBatchTransportError =
-            DeviceFPGA_Synch_RxTlpSynchronous(ctxLC, ctx, 0) ||
-            fBatchTransportError;
+        cReceiveMax = FpgaReadPolicy_ProbeReceiveMaxReads(
+            ctx->fFT601 && !ctx->fCustomDriver && !ctx->dev.f2232h);
+        for(cReceive = 0; cReceive < cReceiveMax; cReceive++) {
+            if(cReceive) {
+                BusySleep(ctx->perf.DELAY_PROBE_READ);
+            }
+            if(DeviceFPGA_Synch_RxTlpSynchronous(ctxLC, ctx, 0)) {
+                fBatchTransportError = TRUE;
+            }
+            if(fBatchTransportError || !Probe.TagMap.cActive) { break; }
+        }
         for(i = iBatchStart; i < iSelected; i++) {
             iPage = pSelected[i];
             if((iPage >= cPages) || !pStates[iPage].cbExpected) {

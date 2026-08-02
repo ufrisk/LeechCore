@@ -3,6 +3,9 @@
 #include "device_fpga_read_policy.h"
 #include <string.h>
 
+#define FPGA_PROBE_RECEIVE_MAX_READS_LEGACY  1
+#define FPGA_PROBE_RECEIVE_MAX_READS_FT601   3
+
 static BOOL FpgaReadPolicy_IsSuccess(_In_ LC_READ_PAGE_RESULT result)
 {
     return (result == LC_READ_PAGE_RESULT_SUCCESS) ||
@@ -138,6 +141,16 @@ BOOL FpgaReadPolicy_ShouldEnableAdaptivePolling(_In_ DWORD cEvidence, _In_ DWORD
 BOOL FpgaReadPolicy_ShouldResetAdaptivePolling(_In_ BOOL fAdaptivePollingWait, _In_ DWORD dwPollingGeneration, _In_ DWORD dwTransportGeneration)
 {
     return fAdaptivePollingWait && (dwPollingGeneration != dwTransportGeneration);
+}
+
+DWORD FpgaReadPolicy_ProbeReceiveMaxReads(_In_ BOOL fNativeFT601)
+{
+    // Native FT601 receives use one initial read plus two bounded follow-ups so
+    // a delayed completion batch may itself arrive split across reads. Preserve
+    // the legacy single receive on transports for which this is unproven.
+    return fNativeFT601 ?
+        FPGA_PROBE_RECEIVE_MAX_READS_FT601 :
+        FPGA_PROBE_RECEIVE_MAX_READS_LEGACY;
 }
 
 LC_READ_PAGE_RESULT FpgaReadPolicy_MergeRetryResult(_In_ LC_READ_PAGE_RESULT firstResult, _In_ LC_READ_PAGE_RESULT retryResult)
