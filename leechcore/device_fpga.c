@@ -1529,15 +1529,9 @@ static BOOL DeviceFPGA_PCIeCfgSpaceCoreReadAttempt(
     // A 32-DWORD reply can cross the FT601's effective 1 KiB receive
     // boundary and lose its final framed result. Keep each reply below it.
     for(wDWordAddr = 0;
-        (cBatchDWords = DeviceFPGA_Session_GetPCIeConfigBatchDWords(
-            wDWordAddr, raSingleDW));
+        (cBatchDWords = DeviceFPGA_Session_GetPCIeConfigBatchDWords(wDWordAddr, raSingleDW));
         wDWordAddr = (WORD)(wDWordAddr + cBatchDWords)) {
-        if(!DeviceFPGA_Session_BuildPCIeConfigBatch(
-            pbRxTx,
-            sizeof(pbRxTx),
-            &cbRxTx,
-            wDWordAddr,
-            raSingleDW)) {
+        if(!DeviceFPGA_Session_BuildPCIeConfigBatch(pbRxTx, sizeof(pbRxTx), &cbRxTx, wDWordAddr, raSingleDW)) {
             return FALSE;
         }
         // WRITE TxData
@@ -5146,12 +5140,7 @@ BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
             fPCIeConfigRead = DeviceFPGA_PCIeCfgSpaceCoreRead(ctx, pb200, 0x80000000 | 0);
         }
         dwVIDPID = *(PDWORD)pb200;
-        if(DeviceFPGA_Session_GetPCIeLinkInfo(
-            ctx->phySupported,
-            ctx->phy.rd.pl_sel_lnk_rate,
-            ctx->phy.rd.pl_sel_lnk_width,
-            &bPCIeGen,
-            &bPCIeWidth)) {
+        if(DeviceFPGA_Session_GetPCIeLinkInfo(ctx->phySupported, ctx->phy.rd.pl_sel_lnk_rate, ctx->phy.rd.pl_sel_lnk_width, &bPCIeGen, &bPCIeWidth)) {
             _snprintf_s(szPCIeLink, _countof(szPCIeLink), _TRUNCATE,
                 "PCIe gen%i x%i", bPCIeGen, bPCIeWidth);
         } else {
