@@ -294,61 +294,6 @@ BOOL DeviceFPGA_Session_IsFillerOnly(
 }
 
 /*
-* A fresh FT601 session may return one already-queued idle filler burst before
-* the configuration reply. Consume that boundary without replaying the request.
-*/
-_Success_(return)
-BOOL DeviceFPGA_Session_ReadConfigReply(
-    _In_ HANDLE hFTDI,
-    _Out_writes_to_(cbBuffer, *pcbRead) PBYTE pbBuffer,
-    _In_ DWORD cbBuffer,
-    _Out_ PDWORD pcbRead,
-    _In_ PFN_DEVICE_FPGA_SESSION_READ_PIPE pfnReadPipe,
-    _In_ DWORD dwTimeoutMs,
-    _In_opt_ PVOID pvTimingContext,
-    _In_opt_ PFN_DEVICE_FPGA_SESSION_TICK pfnTick
-)
-{
-    DWORD i;
-    QWORD qwStart;
-    ULONG cbRead;
-    if(!pcbRead) { return FALSE; }
-    *pcbRead = 0;
-    if(!hFTDI || !pbBuffer || !cbBuffer || !pfnReadPipe || !dwTimeoutMs) {
-        return FALSE;
-    }
-    // A synchronous read retains the driver's in-flight timeout; this budget
-    // bounds repeated reads before and after each driver call.
-    if(!pfnTick) { pfnTick = DeviceFPGA_Session_DefaultTick; }
-    qwStart = pfnTick(pvTimingContext);
-    for(i = 0; i < 2; i++) {
-        if(pfnTick(pvTimingContext) - qwStart >= dwTimeoutMs) {
-            return FALSE;
-        }
-        cbRead = 0;
-        if(pfnReadPipe(
-            hFTDI,
-            0x82,
-            pbBuffer,
-            cbBuffer,
-            &cbRead,
-            NULL) ||
-           (cbRead > cbBuffer)) {
-            return FALSE;
-        }
-        if(!cbRead) { return FALSE; }
-        if(pfnTick(pvTimingContext) - qwStart >= dwTimeoutMs) {
-            return FALSE;
-        }
-        if(!DeviceFPGA_Session_IsFillerOnly(pbBuffer, cbRead)) {
-            *pcbRead = cbRead;
-            return TRUE;
-        }
-    }
-    return FALSE;
-}
-
-/*
 * Configuration replies may be preceded by framed responses from earlier
 * requests or split across receives. Accumulate a bounded sequence and return
 * only after the requested register range has complete source/address coverage.
@@ -626,7 +571,9 @@ BOOL DeviceFPGA_Session_ReadPCIeConfigBatchMatching(
     _In_opt_ PFN_DEVICE_FPGA_SESSION_TICK pfnTick
 )
 {
-    DWORD i, cbAccumulated = 0, cbReadMax;
+    BYTE pbBatchResult[DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE] = { 0 };
+    BYTE pbBatchCoverage[DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE] = { 0 };
+    DWORD i, oBatch, cbBatch, cbAccumulated = 0, cbReadMax;
     QWORD qwStart;
     ULONG cbRead;
     if(!pcbRead) { return FALSE; }
@@ -667,11 +614,15 @@ BOOL DeviceFPGA_Session_ReadPCIeConfigBatchMatching(
         }
         cbAccumulated += cbRead;
         if(!DeviceFPGA_Session_ParsePCIeConfigReply(
-            pbBuffer, cbAccumulated, pbResult, pbCoverage)) {
+            pbBuffer, cbAccumulated, pbBatchResult, pbBatchCoverage)) {
             continue;
         }
         if(DeviceFPGA_Session_IsPCIeConfigBatchComplete(
-            pbCoverage, iDWord, cDWords)) {
+            pbBatchCoverage, iDWord, cDWords)) {
+            oBatch = iDWord * sizeof(DWORD);
+            cbBatch = cDWords * sizeof(DWORD);
+            memcpy(pbResult + oBatch, pbBatchResult + oBatch, cbBatch);
+            memcpy(pbCoverage + oBatch, pbBatchCoverage + oBatch, cbBatch);
             *pcbRead = cbAccumulated;
             return TRUE;
         }
@@ -873,6 +824,22 @@ BOOL DeviceFPGA_Session_ParseV3Identity(
     *pIdentity = Identity;
     *pwPcieDeviceId = wPcieDeviceId;
     return TRUE;
+}
+
+_Success_(return)
+BOOL DeviceFPGA_Session_ConfigurePipeTimeouts(
+    _In_ HANDLE hFTDI,
+    _In_ ULONG ulTimeoutInMs,
+    _In_ PFN_DEVICE_FPGA_SESSION_SET_PIPE_TIMEOUT pfnSetPipeTimeout
+)
+{
+    ULONG ulRxStatus, ulTxStatus;
+    if(!hFTDI || !ulTimeoutInMs || !pfnSetPipeTimeout) { return FALSE; }
+    ulRxStatus = pfnSetPipeTimeout(hFTDI, 0x82, ulTimeoutInMs);
+    ulTxStatus = pfnSetPipeTimeout(hFTDI, 0x02, ulTimeoutInMs);
+    return
+        (ulRxStatus == DEVICE_FPGA_SESSION_FT_OK) &&
+        (ulTxStatus == DEVICE_FPGA_SESSION_FT_OK);
 }
 
 static QWORD DeviceFPGA_Session_DefaultTick(_In_ PVOID pvContext)

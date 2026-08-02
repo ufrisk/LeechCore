@@ -360,6 +360,7 @@ static VOID TestPCIeConfigBatchBuilderPreservesSingleDwordRequest(VOID)
 
 typedef struct tdPCIE_CONFIG_BATCH_REPLY_SCRIPT {
     BYTE apbReply[9][PCIE_CONFIG_BATCH_REPLY_SIZE];
+    DWORD acbReply[9];
     DWORD cReplies;
     DWORD cCalls;
 } PCIE_CONFIG_BATCH_REPLY_SCRIPT, *PPCIE_CONFIG_BATCH_REPLY_SCRIPT;
@@ -402,9 +403,13 @@ static ULONG WINAPI ScriptedPCIeConfigBatchRead(
 {
     PPCIE_CONFIG_BATCH_REPLY_SCRIPT pScript =
         (PPCIE_CONFIG_BATCH_REPLY_SCRIPT)hFTDI;
+    DWORD cbReply;
     UNREFERENCED_PARAMETER(pOverlapped);
-    if((ucPipeID != 0x82) ||
-       (cbBuffer < PCIE_CONFIG_BATCH_REPLY_SIZE)) {
+    cbReply = (pScript->cCalls < pScript->cReplies) &&
+        pScript->acbReply[pScript->cCalls] ?
+        pScript->acbReply[pScript->cCalls] :
+        PCIE_CONFIG_BATCH_REPLY_SIZE;
+    if((ucPipeID != 0x82) || (cbBuffer < cbReply)) {
         *pcbTransferred = 0;
         return 1;
     }
@@ -413,9 +418,9 @@ static ULONG WINAPI ScriptedPCIeConfigBatchRead(
         return 0;
     }
     memcpy(pbBuffer, pScript->apbReply[pScript->cCalls],
-        PCIE_CONFIG_BATCH_REPLY_SIZE);
+        cbReply);
     pScript->cCalls++;
-    *pcbTransferred = PCIE_CONFIG_BATCH_REPLY_SIZE;
+    *pcbTransferred = cbReply;
     return 0;
 }
 
@@ -452,6 +457,63 @@ static VOID TestPCIeConfigBatchReadDoesNotAdvanceOnShiftedStaleReply(VOID)
     ASSERT_TRUE(DeviceFPGA_Session_IsPCIeConfigComplete(pbCoverage, 0));
     for(i = 0; i < sizeof(pbResult); i++) {
         ASSERT_EQ(pbResult[i], i & 0xff);
+    }
+}
+
+static VOID TestPCIeConfigBatchReadRejectsStaleFutureCoverageAfterMissingReply(VOID)
+{
+    PCIE_CONFIG_BATCH_REPLY_SCRIPT Script = { 0 };
+    BYTE pbBuffer[0x1000] = { 0 };
+    BYTE pbResult[DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE] = { 0 };
+    BYTE pbCoverage[DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE] = { 0 };
+    DWORD i, iBatch, cbRead = 0xaa;
+    BuildPCIeConfigBatchReply(Script.apbReply[0], 112, 0xee);
+    for(iBatch = 0; iBatch < 7; iBatch++) {
+        BuildPCIeConfigBatchReply(
+            Script.apbReply[iBatch + 1], iBatch * 16, 0);
+    }
+    BuildPCIeConfigReplyRecord(Script.apbReply[8], 0x44332211);
+    Script.acbReply[8] = 32;
+    Script.cReplies = 9;
+    for(iBatch = 0; iBatch < 7; iBatch++) {
+        cbRead = 0;
+        ASSERT_TRUE(DeviceFPGA_Session_ReadPCIeConfigBatchMatching(
+            &Script,
+            pbBuffer,
+            sizeof(pbBuffer),
+            &cbRead,
+            ScriptedPCIeConfigBatchRead,
+            iBatch * 16,
+            16,
+            pbResult,
+            pbCoverage,
+            DEVICE_FPGA_SESSION_CONFIG_REPLY_TIMEOUT_MS,
+            NULL,
+            NULL));
+    }
+    cbRead = 0xaa;
+    ASSERT_FALSE(DeviceFPGA_Session_ReadPCIeConfigBatchMatching(
+        &Script,
+        pbBuffer,
+        sizeof(pbBuffer),
+        &cbRead,
+        ScriptedPCIeConfigBatchRead,
+        112,
+        16,
+        pbResult,
+        pbCoverage,
+        DEVICE_FPGA_SESSION_CONFIG_REPLY_TIMEOUT_MS,
+        NULL,
+        NULL));
+    ASSERT_EQ(cbRead, 0);
+    ASSERT_EQ(Script.cCalls, 9);
+    for(i = 0; i < 112 * sizeof(DWORD); i++) {
+        ASSERT_EQ(pbResult[i], i & 0xff);
+        ASSERT_EQ(pbCoverage[i], 1);
+    }
+    for(; i < sizeof(pbResult); i++) {
+        ASSERT_EQ(pbResult[i], 0);
+        ASSERT_EQ(pbCoverage[i], 0);
     }
 }
 
@@ -1495,6 +1557,59 @@ static VOID TestCloseReportsAbortErrorAfterAttemptingCleanup(VOID)
     ASSERT_EQ(Script.cReleaseCalls, 1);
 }
 
+typedef struct tdPIPE_TIMEOUT_SCRIPT {
+    BYTE pbPipe[2];
+    ULONG pulTimeout[2];
+    DWORD cCalls;
+    ULONG ulRxStatus;
+    ULONG ulTxStatus;
+} PIPE_TIMEOUT_SCRIPT, *PPIPE_TIMEOUT_SCRIPT;
+
+static ULONG WINAPI ScriptedSetPipeTimeout(
+    _In_ HANDLE hFTDI,
+    _In_ UCHAR ucPipeID,
+    _In_ ULONG ulTimeoutInMs
+)
+{
+    PPIPE_TIMEOUT_SCRIPT pScript = (PPIPE_TIMEOUT_SCRIPT)hFTDI;
+    DWORD i = pScript->cCalls++;
+    if(i < 2) {
+        pScript->pbPipe[i] = ucPipeID;
+        pScript->pulTimeout[i] = ulTimeoutInMs;
+    }
+    return (ucPipeID == 0x82) ? pScript->ulRxStatus : pScript->ulTxStatus;
+}
+
+static VOID TestConfigurePipeTimeoutsConfiguresBothDirections(VOID)
+{
+    PIPE_TIMEOUT_SCRIPT Script = { 0 };
+    ASSERT_TRUE(DeviceFPGA_Session_ConfigurePipeTimeouts(
+        &Script,
+        DEVICE_FPGA_SESSION_WAIT_TIMEOUT_MS,
+        ScriptedSetPipeTimeout));
+    ASSERT_EQ(Script.cCalls, 2);
+    ASSERT_EQ(Script.pbPipe[0], 0x82);
+    ASSERT_EQ(Script.pbPipe[1], 0x02);
+    ASSERT_EQ(Script.pulTimeout[0], DEVICE_FPGA_SESSION_WAIT_TIMEOUT_MS);
+    ASSERT_EQ(Script.pulTimeout[1], DEVICE_FPGA_SESSION_WAIT_TIMEOUT_MS);
+}
+
+static VOID TestConfigurePipeTimeoutsReportsEitherFailure(VOID)
+{
+    PIPE_TIMEOUT_SCRIPT RxFailure = { { 0 }, { 0 }, 0, 1, 0 };
+    PIPE_TIMEOUT_SCRIPT TxFailure = { { 0 }, { 0 }, 0, 0, 1 };
+    ASSERT_FALSE(DeviceFPGA_Session_ConfigurePipeTimeouts(
+        &RxFailure,
+        DEVICE_FPGA_SESSION_WAIT_TIMEOUT_MS,
+        ScriptedSetPipeTimeout));
+    ASSERT_EQ(RxFailure.cCalls, 2);
+    ASSERT_FALSE(DeviceFPGA_Session_ConfigurePipeTimeouts(
+        &TxFailure,
+        DEVICE_FPGA_SESSION_WAIT_TIMEOUT_MS,
+        ScriptedSetPipeTimeout));
+    ASSERT_EQ(TxFailure.cCalls, 2);
+}
+
 #define RECOVERY_EVENT_QUIESCE      1
 #define RECOVERY_EVENT_REOPEN       2
 #define RECOVERY_EVENT_INITIALIZE   3
@@ -1647,12 +1762,7 @@ typedef struct tdCONFIG_REPLY_READ_SCRIPT {
     DWORD pcbReply[2];
     DWORD cCalls;
     DWORD dwReadDelayMs;
-    DWORD iFailureCall;
-    DWORD iOversizeCall;
     QWORD qwNow;
-    UCHAR ucLastPipe;
-    DWORD cbLastBuffer;
-    BOOL fSawOverlapped;
 } CONFIG_REPLY_READ_SCRIPT, *PCONFIG_REPLY_READ_SCRIPT;
 
 static ULONG WINAPI ScriptedConfigReplyRead(
@@ -1667,18 +1777,9 @@ static ULONG WINAPI ScriptedConfigReplyRead(
     PCONFIG_REPLY_READ_SCRIPT pScript =
         (PCONFIG_REPLY_READ_SCRIPT)hFTDI;
     DWORD iCall = pScript->cCalls++;
-    pScript->ucLastPipe = ucPipeID;
-    pScript->cbLastBuffer = cbBuffer;
-    pScript->fSawOverlapped |= pOverlapped != NULL;
+    UNREFERENCED_PARAMETER(ucPipeID);
+    UNREFERENCED_PARAMETER(pOverlapped);
     pScript->qwNow += pScript->dwReadDelayMs;
-    if(iCall + 1 == pScript->iFailureCall) {
-        *pcbTransferred = 0;
-        return 1;
-    }
-    if(iCall + 1 == pScript->iOversizeCall) {
-        *pcbTransferred = cbBuffer + 1;
-        return 0;
-    }
     if(iCall >= 2 || pScript->pcbReply[iCall] > cbBuffer) {
         *pcbTransferred = 0;
         return 1;
@@ -1718,161 +1819,6 @@ static VOID SetConfigReplyRecord(
     };
     memcpy(pb, pbRecord, sizeof(pbRecord));
     *pcb = sizeof(pbRecord);
-}
-
-static VOID TestConfigReplyReadSkipsOneFillerOnlyReceive(VOID)
-{
-    CONFIG_REPLY_READ_SCRIPT Script = { 0 };
-    BYTE pbBuffer[64] = { 0 };
-    BYTE pbResult[3] = { 0 };
-    BYTE pbExpected[3] = { 0x04, 0x13, 0x04 };
-    DWORD cbRead = 0;
-    SetConfigReplyFiller(Script.pbReply[0], &Script.pcbReply[0]);
-    SetConfigReplyRecord(Script.pbReply[1], &Script.pcbReply[1]);
-    ASSERT_TRUE(DeviceFPGA_Session_ReadConfigReply(
-        &Script,
-        pbBuffer,
-        sizeof(pbBuffer),
-        &cbRead,
-        ScriptedConfigReplyRead,
-        DEVICE_FPGA_SESSION_CONFIG_REPLY_TIMEOUT_MS,
-        NULL,
-        NULL));
-    ASSERT_EQ(Script.cCalls, 2);
-    ASSERT_EQ(Script.ucLastPipe, 0x82);
-    ASSERT_EQ(Script.cbLastBuffer, sizeof(pbBuffer));
-    ASSERT_FALSE(Script.fSawOverlapped);
-    ASSERT_EQ(cbRead, Script.pcbReply[1]);
-    ASSERT_BYTES(pbBuffer, Script.pbReply[1], cbRead);
-    ASSERT_TRUE(DeviceFPGA_Session_ParseConfigReply(
-        pbBuffer,
-        cbRead,
-        0x0008,
-        pbResult,
-        sizeof(pbResult),
-        0x0003));
-    ASSERT_BYTES(pbResult, pbExpected, sizeof(pbResult));
-}
-
-static VOID TestConfigReplyReadReturnsNonFillerImmediately(VOID)
-{
-    CONFIG_REPLY_READ_SCRIPT Script = { 0 };
-    BYTE pbBuffer[64] = { 0 };
-    DWORD cbRead = 0;
-    SetConfigReplyRecord(Script.pbReply[0], &Script.pcbReply[0]);
-    ASSERT_TRUE(DeviceFPGA_Session_ReadConfigReply(
-        &Script,
-        pbBuffer,
-        sizeof(pbBuffer),
-        &cbRead,
-        ScriptedConfigReplyRead,
-        DEVICE_FPGA_SESSION_CONFIG_REPLY_TIMEOUT_MS,
-        NULL,
-        NULL));
-    ASSERT_EQ(Script.cCalls, 1);
-    ASSERT_EQ(cbRead, Script.pcbReply[0]);
-    ASSERT_BYTES(pbBuffer, Script.pbReply[0], cbRead);
-}
-
-static VOID TestConfigReplyReadRejectsZeroTransferImmediately(VOID)
-{
-    CONFIG_REPLY_READ_SCRIPT Script = { 0 };
-    BYTE pbBuffer[64] = { 0 };
-    DWORD cbRead = 0xaa;
-    ASSERT_FALSE(DeviceFPGA_Session_ReadConfigReply(
-        &Script,
-        pbBuffer,
-        sizeof(pbBuffer),
-        &cbRead,
-        ScriptedConfigReplyRead,
-        DEVICE_FPGA_SESSION_CONFIG_REPLY_TIMEOUT_MS,
-        NULL,
-        NULL));
-    ASSERT_EQ(Script.cCalls, 1);
-    ASSERT_EQ(cbRead, 0);
-}
-
-static VOID TestConfigReplyReadStopsAtOverallDeadline(VOID)
-{
-    CONFIG_REPLY_READ_SCRIPT Script = { 0 };
-    BYTE pbBuffer[64] = { 0 };
-    DWORD cbRead = 0xaa;
-    Script.dwReadDelayMs = 100;
-    SetConfigReplyFiller(Script.pbReply[0], &Script.pcbReply[0]);
-    SetConfigReplyRecord(Script.pbReply[1], &Script.pcbReply[1]);
-    ASSERT_FALSE(DeviceFPGA_Session_ReadConfigReply(
-        &Script,
-        pbBuffer,
-        sizeof(pbBuffer),
-        &cbRead,
-        ScriptedConfigReplyRead,
-        100,
-        &Script,
-        ScriptedConfigReplyTick));
-    ASSERT_EQ(Script.cCalls, 1);
-    ASSERT_EQ(cbRead, 0);
-}
-
-static VOID TestConfigReplyReadStopsAfterSecondFiller(VOID)
-{
-    CONFIG_REPLY_READ_SCRIPT Script = { 0 };
-    BYTE pbBuffer[64] = { 0 };
-    DWORD cbRead = 0xaa;
-    SetConfigReplyFiller(Script.pbReply[0], &Script.pcbReply[0]);
-    SetConfigReplyFiller(Script.pbReply[1], &Script.pcbReply[1]);
-    ASSERT_FALSE(DeviceFPGA_Session_ReadConfigReply(
-        &Script,
-        pbBuffer,
-        sizeof(pbBuffer),
-        &cbRead,
-        ScriptedConfigReplyRead,
-        DEVICE_FPGA_SESSION_CONFIG_REPLY_TIMEOUT_MS,
-        NULL,
-        NULL));
-    ASSERT_EQ(Script.cCalls, 2);
-    ASSERT_EQ(cbRead, 0);
-}
-
-static VOID TestConfigReplyReadRejectsReadErrorsAndOversize(VOID)
-{
-    CONFIG_REPLY_READ_SCRIPT Failure = { 0 };
-    CONFIG_REPLY_READ_SCRIPT Oversize = { 0 };
-    BYTE pbBuffer[64] = { 0 };
-    DWORD cbRead = 0xaa;
-    Failure.iFailureCall = 1;
-    ASSERT_FALSE(DeviceFPGA_Session_ReadConfigReply(
-        &Failure,
-        pbBuffer,
-        sizeof(pbBuffer),
-        &cbRead,
-        ScriptedConfigReplyRead,
-        DEVICE_FPGA_SESSION_CONFIG_REPLY_TIMEOUT_MS,
-        NULL,
-        NULL));
-    ASSERT_EQ(Failure.cCalls, 1);
-    ASSERT_EQ(cbRead, 0);
-    Oversize.iOversizeCall = 1;
-    ASSERT_FALSE(DeviceFPGA_Session_ReadConfigReply(
-        &Oversize,
-        pbBuffer,
-        sizeof(pbBuffer),
-        &cbRead,
-        ScriptedConfigReplyRead,
-        DEVICE_FPGA_SESSION_CONFIG_REPLY_TIMEOUT_MS,
-        NULL,
-        NULL));
-    ASSERT_EQ(Oversize.cCalls, 1);
-    ASSERT_EQ(cbRead, 0);
-    ASSERT_FALSE(DeviceFPGA_Session_ReadConfigReply(
-        NULL,
-        pbBuffer,
-        sizeof(pbBuffer),
-        &cbRead,
-        ScriptedConfigReplyRead,
-        DEVICE_FPGA_SESSION_CONFIG_REPLY_TIMEOUT_MS,
-        NULL,
-        NULL));
-    ASSERT_EQ(cbRead, 0);
 }
 
 typedef struct tdMATCHING_CONFIG_REPLY_SCRIPT {
@@ -2409,6 +2355,7 @@ int main(void)
     RUN_TEST(TestPCIeConfigBatchBuilderKeepsRealRequestsBelowBoundary);
     RUN_TEST(TestPCIeConfigBatchBuilderPreservesSingleDwordRequest);
     RUN_TEST(TestPCIeConfigBatchReadDoesNotAdvanceOnShiftedStaleReply);
+    RUN_TEST(TestPCIeConfigBatchReadRejectsStaleFutureCoverageAfterMissingReply);
     RUN_TEST(TestPCIeConfigRetryReturnsFirstAttemptSuccess);
     RUN_TEST(TestPCIeConfigRetryClearsOutputBeforeSecondAttempt);
     RUN_TEST(TestPCIeConfigRetryStopsAfterTwoFailures);
@@ -2441,16 +2388,12 @@ int main(void)
     RUN_TEST(TestCloseCancelsReadPipeBeforeWaiting);
     RUN_TEST(TestClosePendingForeverIsBoundedAndStillReleases);
     RUN_TEST(TestCloseReportsAbortErrorAfterAttemptingCleanup);
+    RUN_TEST(TestConfigurePipeTimeoutsConfiguresBothDirections);
+    RUN_TEST(TestConfigurePipeTimeoutsReportsEitherFailure);
     RUN_TEST(TestRecoveryCoordinatorExecutesOneOrderedAttempt);
     RUN_TEST(TestRecoveryCoordinatorStopsAtEachFailedStage);
     RUN_TEST(TestRecoveryCoordinatorRejectsIncompleteOpsBeforeStarting);
     RUN_TEST(TestFillerClassificationRequiresCompleteFillerWords);
-    RUN_TEST(TestConfigReplyReadSkipsOneFillerOnlyReceive);
-    RUN_TEST(TestConfigReplyReadReturnsNonFillerImmediately);
-    RUN_TEST(TestConfigReplyReadRejectsZeroTransferImmediately);
-    RUN_TEST(TestConfigReplyReadStopsAtOverallDeadline);
-    RUN_TEST(TestConfigReplyReadStopsAfterSecondFiller);
-    RUN_TEST(TestConfigReplyReadRejectsReadErrorsAndOversize);
     RUN_TEST(TestConfigReplyReadSkipsUnrelatedNonFillerReplies);
     RUN_TEST(TestConfigReplyReadBoundsUnrelatedNonFillerReplies);
     RUN_TEST(TestMatchingConfigReplyReadRejectsZeroTransferImmediately);

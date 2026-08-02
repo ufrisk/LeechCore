@@ -237,11 +237,14 @@ typedef ULONG(WINAPI *PFN_FT_AbortPipe)(HANDLE ftHandle, UCHAR ucPipeID);
 typedef ULONG(WINAPI *PFN_FT_GetOverlappedResult)(HANDLE ftHandle, LPOVERLAPPED pOverlapped, PULONG pulLengthTransferred, BOOL bWait);
 typedef ULONG(WINAPI *PFN_FT_InitializeOverlapped)(HANDLE ftHandle, LPOVERLAPPED pOverlapped);
 typedef ULONG(WINAPI *PFN_FT_ReleaseOverlapped)(HANDLE ftHandle, LPOVERLAPPED pOverlapped);
+typedef ULONG(WINAPI *PFN_FT_SetPipeTimeout)(HANDLE ftHandle, UCHAR ucPipeID, ULONG ulTimeoutInMs);
+
 typedef struct tdDEVICE_CONTEXT_FPGA {
     CRITICAL_SECTION Lock;
     BOOL fTransportUsable;
     BOOL fTransportSetup;
     BOOL fTransportRecoveryInProgress;
+    BOOL fOpenPipeTimeoutFailure;
     BOOL fAdaptivePollingWait;  // disable event waits after sustained issued completion loss
     DWORD dwAdaptivePollingGeneration;
     DWORD dwTransportGeneration;
@@ -294,6 +297,7 @@ typedef struct tdDEVICE_CONTEXT_FPGA {
         PFN_FT_GetOverlappedResult pfnFT_GetOverlappedResult;
         PFN_FT_InitializeOverlapped pfnFT_InitializeOverlapped;
         PFN_FT_ReleaseOverlapped pfnFT_ReleaseOverlapped;
+        PFN_FT_SetPipeTimeout pfnFT_SetPipeTimeout;
     } dev;
     FPGA_NEWASYNC2_CONTEXT async2;
     PVOID pMRdBufferX; // NULL || PFPGA_PROBE_CALLBACK || PTLP_CALLBACK_BUF_MRd_SCATTER
@@ -970,6 +974,7 @@ ftdi_retry_old:
     ctx->dev.pfnFT_GetOverlappedResult = (PFN_FT_GetOverlappedResult)GetProcAddress(ctx->dev.hModule, "FT_GetOverlappedResult");
     ctx->dev.pfnFT_InitializeOverlapped = (PFN_FT_InitializeOverlapped)GetProcAddress(ctx->dev.hModule, "FT_InitializeOverlapped");
     ctx->dev.pfnFT_ReleaseOverlapped = (PFN_FT_ReleaseOverlapped)GetProcAddress(ctx->dev.hModule, "FT_ReleaseOverlapped");
+    ctx->dev.pfnFT_SetPipeTimeout = (PFN_FT_SetPipeTimeout)GetProcAddress(ctx->dev.hModule, "FT_SetPipeTimeout");
     pfnFT_GetChipConfiguration = (ULONG(WINAPI*)(HANDLE, PVOID))GetProcAddress(ctx->dev.hModule, "FT_GetChipConfiguration");
     pfnFT_SetChipConfiguration = (ULONG(WINAPI*)(HANDLE, PVOID))GetProcAddress(ctx->dev.hModule, "FT_SetChipConfiguration");
     pfnFT_SetSuspendTimeout = (ULONG(WINAPI*)(HANDLE, ULONG))GetProcAddress(ctx->dev.hModule, "FT_SetSuspendTimeout");
@@ -986,7 +991,7 @@ ftdi_retry_old:
             fFailFTD3XXWU = fUseFTD3XXWU;
 #endif /* _WIN32 */
             if(!szErrorReason) {
-                szErrorReason = "Unable to connect to FPGA device";
+                szErrorReason = ctx->fOpenPipeTimeoutFailure ? "Unable to configure FT601 pipe timeouts" : "Unable to connect to FPGA device";
             }
             goto fail;
         }
@@ -1247,6 +1252,7 @@ static BOOL DeviceFPGA_OpenFTDIHandle(_Inout_ PDEVICE_CONTEXT_FPGA ctx)
 {
     HANDLE hFTDI = NULL;
     DWORD status;
+    ctx->fOpenPipeTimeoutFailure = FALSE;
     if(!ctx->dev.pfnFT_Create || ctx->dev.hFTDI) { return FALSE; }
     status = ctx->dev.pfnFT_Create((PVOID)ctx->qwDeviceIndex, 0x10 /*FT_OPEN_BY_INDEX*/, &hFTDI);
     if(status || !hFTDI) {
@@ -5051,6 +5057,7 @@ BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
     BOOL fFT601 = FALSE, fCustomDriver = FALSE, fPCIeConfigRead = FALSE;
     BYTE pb200[0x200];
     BYTE bPCIeGen, bPCIeWidth;
+    CHAR szPCIeLink[32];
     DWORD dwVIDPID;
     if(ppLcCreateErrorInfo) { *ppLcCreateErrorInfo = NULL; }
     ctx = LocalAlloc(LMEM_ZEROINIT, sizeof(DEVICE_CONTEXT_FPGA));
@@ -5145,36 +5152,25 @@ BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
             ctx->phy.rd.pl_sel_lnk_width,
             &bPCIeGen,
             &bPCIeWidth)) {
-            lcprintfv(ctxLC,
-                "DEVICE: FPGA: %s PCIe gen%i x%i [%i,%i,%i] [v%i.%i,%04x] [%s,%s%s]\n",
-                ctx->perf.SZ_DEVICE_NAME,
-                bPCIeGen,
-                bPCIeWidth,
-                ctx->perf.DELAY_READ,
-                ctx->perf.DELAY_WRITE,
-                ctx->perf.DELAY_PROBE_READ,
-                ctx->wFpgaVersionMajor,
-                ctx->wFpgaVersionMinor,
-                ctx->wDeviceId,
-                (ctx->async2.fEnabled ? "ASYNC" : (ctx->async2.fOldAsync ? "OLDASYNC" : "SYNC")),
-                (ctx->fAlgorithmReadTiny ? "TINY" : "NORM"),
-                (DeviceFPGA_Session_IsCustomPCIeConfig(fPCIeConfigRead, dwVIDPID) ? ",FWCUST" : "")
-            );
+            _snprintf_s(szPCIeLink, _countof(szPCIeLink), _TRUNCATE,
+                "PCIe gen%i x%i", bPCIeGen, bPCIeWidth);
         } else {
-            lcprintfv(ctxLC,
-                "DEVICE: FPGA: %s PCIe unknown [%i,%i,%i] [v%i.%i,%04x] [%s,%s%s]\n",
-                ctx->perf.SZ_DEVICE_NAME,
-                ctx->perf.DELAY_READ,
-                ctx->perf.DELAY_WRITE,
-                ctx->perf.DELAY_PROBE_READ,
-                ctx->wFpgaVersionMajor,
-                ctx->wFpgaVersionMinor,
-                ctx->wDeviceId,
-                (ctx->async2.fEnabled ? "ASYNC" : (ctx->async2.fOldAsync ? "OLDASYNC" : "SYNC")),
-                (ctx->fAlgorithmReadTiny ? "TINY" : "NORM"),
-                (DeviceFPGA_Session_IsCustomPCIeConfig(fPCIeConfigRead, dwVIDPID) ? ",FWCUST" : "")
-            );
+            strcpy_s(szPCIeLink, _countof(szPCIeLink), "PCIe unknown");
         }
+        lcprintfv(ctxLC,
+            "DEVICE: FPGA: %s %s [%i,%i,%i] [v%i.%i,%04x] [%s,%s%s]\n",
+            ctx->perf.SZ_DEVICE_NAME,
+            szPCIeLink,
+            ctx->perf.DELAY_READ,
+            ctx->perf.DELAY_WRITE,
+            ctx->perf.DELAY_PROBE_READ,
+            ctx->wFpgaVersionMajor,
+            ctx->wFpgaVersionMinor,
+            ctx->wDeviceId,
+            (ctx->async2.fEnabled ? "ASYNC" : (ctx->async2.fOldAsync ? "OLDASYNC" : "SYNC")),
+            (ctx->fAlgorithmReadTiny ? "TINY" : "NORM"),
+            (DeviceFPGA_Session_IsCustomPCIeConfig(fPCIeConfigRead, dwVIDPID) ? ",FWCUST" : "")
+        );
     }
     if(ctxLC->fPrintf[LC_PRINTF_VV] && ctx->dev.fInitialized) {
         DeviceFPGA_ConfigPrint(ctxLC, ctx);

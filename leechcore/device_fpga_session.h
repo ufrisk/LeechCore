@@ -142,6 +142,12 @@ typedef ULONG(WINAPI *PFN_DEVICE_FPGA_SESSION_RELEASE_OVERLAPPED)(
     _In_ LPOVERLAPPED pOverlapped
 );
 
+typedef ULONG(WINAPI *PFN_DEVICE_FPGA_SESSION_SET_PIPE_TIMEOUT)(
+    _In_ HANDLE hFTDI,
+    _In_ UCHAR ucPipeID,
+    _In_ ULONG ulTimeoutInMs
+);
+
 #define DEVICE_FPGA_SESSION_FT_OK                  0
 #define DEVICE_FPGA_SESSION_FT_TIMEOUT             19
 #define DEVICE_FPGA_SESSION_FT_IO_PENDING          24
@@ -251,18 +257,6 @@ BOOL DeviceFPGA_Session_IsFillerOnly(
 );
 
 _Success_(return)
-BOOL DeviceFPGA_Session_ReadConfigReply(
-    _In_ HANDLE hFTDI,
-    _Out_writes_to_(cbBuffer, *pcbRead) PBYTE pbBuffer,
-    _In_ DWORD cbBuffer,
-    _Out_ PDWORD pcbRead,
-    _In_ PFN_DEVICE_FPGA_SESSION_READ_PIPE pfnReadPipe,
-    _In_ DWORD dwTimeoutMs,
-    _In_opt_ PVOID pvTimingContext,
-    _In_opt_ PFN_DEVICE_FPGA_SESSION_TICK pfnTick
-);
-
-_Success_(return)
 BOOL DeviceFPGA_Session_ReadConfigReplyMatching(
     _In_ HANDLE hFTDI,
     _Out_writes_to_(cbBuffer, *pcbRead) PBYTE pbBuffer,
@@ -369,6 +363,13 @@ BOOL DeviceFPGA_Session_ParseV3Identity(
     _In_ DWORD cbReply,
     _Out_ PDEVICE_FPGA_IDENTITY pIdentity,
     _Out_ PWORD pwPcieDeviceId
+);
+
+_Success_(return)
+BOOL DeviceFPGA_Session_ConfigurePipeTimeouts(
+    _In_ HANDLE hFTDI,
+    _In_ ULONG ulTimeoutInMs,
+    _In_ PFN_DEVICE_FPGA_SESSION_SET_PIPE_TIMEOUT pfnSetPipeTimeout
 );
 
 _Success_(return)
