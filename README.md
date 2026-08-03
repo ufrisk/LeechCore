@@ -253,3 +253,6 @@ v1.0-1.8
 * Improved FPGA error handling and recovery.
 * bug fix: hibernation file support.
 * Support for non-ascii characters in file paths.
+
+Latest:
+* Bug fixes.

@@ -1410,7 +1410,7 @@ BOOL DeviceFPGA_ConfigRead(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ WORD wBaseAddr, _
     }
     Sleep(10);
     // READ and interpret result
-    if(!DeviceFPGA_Session_ReadConfigReplyMatching(
+    fReturn = DeviceFPGA_Session_ReadConfigReplyMatching(
         ctx->dev.hFTDI,
         pbRxTx,
         0x20000,
@@ -1422,10 +1422,8 @@ BOOL DeviceFPGA_ConfigRead(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ WORD wBaseAddr, _
         flags,
         DEVICE_FPGA_SESSION_CONFIG_REPLY_TIMEOUT_MS,
         NULL,
-        NULL)) {
-        goto fail;
-    }
-    fReturn = TRUE;
+        NULL
+    );
 fail:
     LocalFree(pbRxTx);
     return fReturn;
@@ -1520,13 +1518,10 @@ typedef struct tdDEVICE_FPGA_PCIE_CONFIG_READ_CONTEXT {
     DWORD raSingleDW;
 } DEVICE_FPGA_PCIE_CONFIG_READ_CONTEXT, *PDEVICE_FPGA_PCIE_CONFIG_READ_CONTEXT;
 
-static BOOL DeviceFPGA_PCIeCfgSpaceCoreReadAttempt(
-    _Inout_ PVOID pvContext,
-    _Out_writes_(DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE) PBYTE pb
-)
+_Success_(return)
+static BOOL DeviceFPGA_PCIeCfgSpaceCoreReadAttempt(_Inout_ PVOID pvContext, _Out_writes_(DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE) PBYTE pb)
 {
-    PDEVICE_FPGA_PCIE_CONFIG_READ_CONTEXT pReadContext =
-        (PDEVICE_FPGA_PCIE_CONFIG_READ_CONTEXT)pvContext;
+    PDEVICE_FPGA_PCIE_CONFIG_READ_CONTEXT pReadContext = (PDEVICE_FPGA_PCIE_CONFIG_READ_CONTEXT)pvContext;
     PDEVICE_CONTEXT_FPGA ctx;
     BYTE pbRxTx[0x1000];
     BYTE pbStaged[DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE];
@@ -1551,8 +1546,7 @@ static BOOL DeviceFPGA_PCIeCfgSpaceCoreReadAttempt(
         status = ctx->dev.pfnFT_WritePipe(ctx->dev.hFTDI, 0x02, pbRxTx, cbRxTx, &cbRxTx, NULL);
         if(status) { return FALSE; }
         Sleep(10);
-        iBatchDWord = raSingleDW ?
-            (raSingleDW & 0x7fffffff) : wDWordAddr;
+        iBatchDWord = raSingleDW ? (raSingleDW & 0x7fffffff) : wDWordAddr;
         if(!DeviceFPGA_Session_ReadPCIeConfigBatchMatching(
             ctx->dev.hFTDI,
             pbRxTx,
@@ -1593,8 +1587,7 @@ BOOL DeviceFPGA_PCIeCfgSpaceCoreRead(_In_ PDEVICE_CONTEXT_FPGA ctx, _Out_writes_
 {
     DEVICE_FPGA_PCIE_CONFIG_READ_CONTEXT ReadContext = { ctx, raSingleDW };
     if(!ctx || !pb) { return FALSE; }
-    return DeviceFPGA_Session_ReadPCIeConfigWithRetry(
-        &ReadContext, DeviceFPGA_PCIeCfgSpaceCoreReadAttempt, pb, raSingleDW);
+    return DeviceFPGA_Session_ReadPCIeConfigWithRetry(&ReadContext, DeviceFPGA_PCIeCfgSpaceCoreReadAttempt, pb, raSingleDW);
 }
 
 /*
@@ -2587,11 +2580,7 @@ static DEVICE_FPGA_SESSION_WAIT_RESULT DeviceFPGA_FTDI_ReadPipeBounded(_In_ PDEV
         DeviceFPGA_FTDI_Sleep);
 }
 
-static DEVICE_FPGA_SESSION_READ_RESULT DeviceFPGA_FTDI_ReadPipeOpportunistic(
-    _Inout_ PDEVICE_CONTEXT_FPGA ctx,
-    _Out_writes_(cbBuffer) PBYTE pbBuffer,
-    _In_ DWORD cbBuffer
-)
+static DEVICE_FPGA_SESSION_READ_RESULT DeviceFPGA_FTDI_ReadPipeOpportunistic(_Inout_ PDEVICE_CONTEXT_FPGA ctx, _Out_writes_(cbBuffer) PBYTE pbBuffer, _In_ DWORD cbBuffer)
 {
     DEVICE_FPGA_SESSION_OPPORTUNISTIC_READ_CONTEXT Context = {
         ctx->dev.hFTDI,
@@ -2610,10 +2599,7 @@ static DEVICE_FPGA_SESSION_READ_RESULT DeviceFPGA_FTDI_ReadPipeOpportunistic(
         &ctx->async2.fOverlappedInitialized,
         &ctx->async2.fReadPending
     };
-    return DeviceFPGA_Session_ReadPipeOpportunistic(
-        &Context,
-        pbBuffer,
-        cbBuffer);
+    return DeviceFPGA_Session_ReadPipeOpportunistic(&Context, pbBuffer, cbBuffer);
 }
 
 static DEVICE_FPGA_SESSION_WAIT_RESULT DeviceFPGA_FTDI_WaitActiveRead(_In_ PDEVICE_CONTEXT_FPGA ctx, _Out_ PULONG pcbRead)
@@ -2803,12 +2789,7 @@ VOID DeviceFPGA_RxTlp_QueueUserCallback(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ SIZE
     ObByteQueue_Push(ctx->tlp_callback.pBqRx, 0, cbTlp, pbTlp);
 }
 
-static DEVICE_FPGA_SESSION_READ_OUTCOME DeviceFPGA_Synch_RxTlpSynchronousInternal(
-    _In_ PLC_CONTEXT ctxLC,
-    _Inout_ PDEVICE_CONTEXT_FPGA ctx,
-    _In_opt_ DWORD dwBytesToRead,
-    _In_ BOOL fOpportunistic
-)
+static DEVICE_FPGA_SESSION_READ_OUTCOME DeviceFPGA_Synch_RxTlpSynchronousInternal(_In_ PLC_CONTEXT ctxLC, _Inout_ PDEVICE_CONTEXT_FPGA ctx, _In_opt_ DWORD dwBytesToRead, _In_ BOOL fOpportunistic)
 {
     DWORD status;
     BOOL fRetry = FALSE, fTimedOut, fTransportError = FALSE;
@@ -2915,9 +2896,7 @@ static DEVICE_FPGA_SESSION_READ_OUTCOME DeviceFPGA_Synch_RxTlpSynchronousInterna
         }
         // return upon (successful) finish!
         if((TlpFrame.cdwTlp == 0) || fRetry || (ctx->rxbuf.cbMax - ctx->rxbuf.cb < 0x400)) {
-            return fTransportError ?
-                DEVICE_FPGA_SESSION_READ_DRIVER_ERROR :
-                DEVICE_FPGA_SESSION_READ_DATA;
+            return fTransportError ? DEVICE_FPGA_SESSION_READ_DRIVER_ERROR : DEVICE_FPGA_SESSION_READ_DATA;
         }
         // read retry should be attempted (in case of partial tlp received at the end)
         lcprintfvv(ctxLC, "Device Info: FPGA: Partial read - read retry attempted!\n");
@@ -2927,17 +2906,9 @@ static DEVICE_FPGA_SESSION_READ_OUTCOME DeviceFPGA_Synch_RxTlpSynchronousInterna
     }
 }
 
-BOOL DeviceFPGA_Synch_RxTlpSynchronous(
-    _In_ PLC_CONTEXT ctxLC,
-    _In_ PDEVICE_CONTEXT_FPGA ctx,
-    _In_opt_ DWORD dwBytesToRead
-)
+BOOL DeviceFPGA_Synch_RxTlpSynchronous(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ctx, _In_opt_ DWORD dwBytesToRead)
 {
-    return DeviceFPGA_Synch_RxTlpSynchronousInternal(
-        ctxLC,
-        ctx,
-        dwBytesToRead,
-        FALSE) == DEVICE_FPGA_SESSION_READ_DRIVER_ERROR;
+    return DEVICE_FPGA_SESSION_READ_DRIVER_ERROR == DeviceFPGA_Synch_RxTlpSynchronousInternal(ctxLC, ctx, dwBytesToRead, FALSE);
 }
 
 static BOOL DeviceFPGA_Synch_IsValidRead(_In_ PMEM_SCATTER pMEM)
@@ -5275,8 +5246,7 @@ BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
         }
         dwVIDPID = *(PDWORD)pb200;
         if(DeviceFPGA_Session_GetPCIeLinkInfo(ctx->phySupported, ctx->phy.rd.pl_sel_lnk_rate, ctx->phy.rd.pl_sel_lnk_width, &bPCIeGen, &bPCIeWidth)) {
-            _snprintf_s(szPCIeLink, _countof(szPCIeLink), _TRUNCATE,
-                "PCIe gen%i x%i", bPCIeGen, bPCIeWidth);
+            _snprintf_s(szPCIeLink, _countof(szPCIeLink), _TRUNCATE, "PCIe gen%i x%i", bPCIeGen, bPCIeWidth);
         } else {
             strcpy_s(szPCIeLink, _countof(szPCIeLink), "PCIe unknown");
         }
