@@ -1397,9 +1397,22 @@ BOOL DeviceFPGA_ConfigRead(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ WORD wBaseAddr, _
     }
     Sleep(10);
     // READ and interpret result
-    status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, pbRxTx, 0x20000, &cbRxTx, NULL);
-    if(status) { goto fail; }
-    fReturn = DeviceFPGA_Session_ParseConfigReply(pbRxTx, cbRxTx, wBaseAddr, pb, cb, flags);
+    if(!DeviceFPGA_Session_ReadConfigReplyMatching(
+        ctx->dev.hFTDI,
+        pbRxTx,
+        0x20000,
+        &cbRxTx,
+        ctx->dev.pfnFT_ReadPipe,
+        wBaseAddr,
+        pb,
+        cb,
+        flags,
+        DEVICE_FPGA_SESSION_CONFIG_REPLY_TIMEOUT_MS,
+        NULL,
+        NULL)) {
+        goto fail;
+    }
+    fReturn = TRUE;
 fail:
     LocalFree(pbRxTx);
     return fReturn;
@@ -1489,6 +1502,68 @@ BOOL DeviceFPGA_ConfigWrite(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ WORD wBaseAddr, 
     return TRUE;
 }
 
+typedef struct tdDEVICE_FPGA_PCIE_CONFIG_READ_CONTEXT {
+    PDEVICE_CONTEXT_FPGA ctx;
+    DWORD raSingleDW;
+} DEVICE_FPGA_PCIE_CONFIG_READ_CONTEXT, *PDEVICE_FPGA_PCIE_CONFIG_READ_CONTEXT;
+
+static BOOL DeviceFPGA_PCIeCfgSpaceCoreReadAttempt(
+    _Inout_ PVOID pvContext,
+    _Out_writes_(DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE) PBYTE pb
+)
+{
+    PDEVICE_FPGA_PCIE_CONFIG_READ_CONTEXT pReadContext =
+        (PDEVICE_FPGA_PCIE_CONFIG_READ_CONTEXT)pvContext;
+    PDEVICE_CONTEXT_FPGA ctx;
+    BYTE pbRxTx[0x1000];
+    BYTE pbStaged[DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE];
+    BYTE pbCoverage[DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE];
+    DWORD status, cbRxTx, cBatchDWords, iBatchDWord, raSingleDW;
+    WORD wDWordAddr;
+    if(!pReadContext || !pReadContext->ctx || !pb) { return FALSE; }
+    ctx = pReadContext->ctx;
+    raSingleDW = pReadContext->raSingleDW;
+    if(!DeviceFPGA_TransportIOAllowed(ctx)) { return FALSE; }
+    ZeroMemory(pbStaged, sizeof(pbStaged));
+    ZeroMemory(pbCoverage, sizeof(pbCoverage));
+    // A 32-DWORD reply can cross the FT601's effective 1 KiB receive
+    // boundary and lose its final framed result. Keep each reply below it.
+    for(wDWordAddr = 0;
+        (cBatchDWords = DeviceFPGA_Session_GetPCIeConfigBatchDWords(wDWordAddr, raSingleDW));
+        wDWordAddr = (WORD)(wDWordAddr + cBatchDWords)) {
+        if(!DeviceFPGA_Session_BuildPCIeConfigBatch(pbRxTx, sizeof(pbRxTx), &cbRxTx, wDWordAddr, raSingleDW)) {
+            return FALSE;
+        }
+        // WRITE TxData
+        status = ctx->dev.pfnFT_WritePipe(ctx->dev.hFTDI, 0x02, pbRxTx, cbRxTx, &cbRxTx, NULL);
+        if(status) { return FALSE; }
+        Sleep(10);
+        iBatchDWord = raSingleDW ?
+            (raSingleDW & 0x7fffffff) : wDWordAddr;
+        if(!DeviceFPGA_Session_ReadPCIeConfigBatchMatching(
+            ctx->dev.hFTDI,
+            pbRxTx,
+            sizeof(pbRxTx),
+            &cbRxTx,
+            ctx->dev.pfnFT_ReadPipe,
+            iBatchDWord,
+            cBatchDWords,
+            pbStaged,
+            pbCoverage,
+            DEVICE_FPGA_SESSION_CONFIG_REPLY_TIMEOUT_MS,
+            NULL,
+            NULL)) {
+            return FALSE;
+        }
+        if(raSingleDW) { break; }
+    }
+    if(!DeviceFPGA_Session_IsPCIeConfigComplete(pbCoverage, raSingleDW)) {
+        return FALSE;
+    }
+    memcpy(pb, pbStaged, sizeof(pbStaged));
+    return TRUE;
+}
+
 /*
 * Read from the device PCIe configuration space. Only the values used by the
 * xilinx ip core itself is read. Custom "shadow" user-provided configuration
@@ -1503,84 +1578,10 @@ BOOL DeviceFPGA_ConfigWrite(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ WORD wBaseAddr, 
 _Success_(return)
 BOOL DeviceFPGA_PCIeCfgSpaceCoreRead(_In_ PDEVICE_CONTEXT_FPGA ctx, _Out_writes_(0x200) PBYTE pb, _In_opt_ DWORD raSingleDW)
 {
-    BYTE pbTxLockEnable[]   = { 0x04, 0x00, 0x04, 0x00, 0x80, 0x02, 0x21, 0x77 };
-    BYTE pbTxLockDisable[]  = { 0x00, 0x00, 0x04, 0x00, 0x80, 0x02, 0x21, 0x77 };
-    BYTE pbTxReadEnable[]   = { 0x01, 0x00, 0x01, 0x00, 0x80, 0x02, 0x21, 0x77 };
-    BYTE pbTxAddress[]      = { 0x00, 0x00, 0xff, 0x03, 0x80, 0x14, 0x21, 0x77 };
-    BYTE pbTxResultMeta[]   = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x2a, 0x11, 0x77 };
-    BYTE pbTxResultDataLo[] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x2c, 0x11, 0x77 };
-    BYTE pbTxResultDataHi[] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x2e, 0x11, 0x77 };
-    BOOL f;
-    BYTE oAddr, pbRxTx[0x1000];
-    DWORD i, j, status, dwStatus, dwData, cbRxTx;
-    PDWORD pdwData;
-    WORD wDWordAddr, oDWord, wAddr = 0;
-    if(!DeviceFPGA_TransportIOAllowed(ctx)) { return FALSE; }
-    ZeroMemory(pb, 0x200);
-    for(wDWordAddr = 0; wDWordAddr < 0x80; wDWordAddr += 32) {  // 0x80 * sizeof(DWORD) == 0x200
-        cbRxTx = 0;
-        for(oDWord = 0; oDWord < 32; oDWord++) {
-            memcpy(pbRxTx + cbRxTx, pbTxLockEnable, 8); cbRxTx += 8;    // enable read/write lock (instruction serialization)
-            // NB! read config space DWORD _TWO_ times on 1st read in
-            //     batch required to clear any lingering register data.
-            for(i = 0; (i < 2) && (!i || !oDWord); i++) {
-                // WRITE request setup (address)
-                if(raSingleDW) {
-                    // set address: single dword read
-                    pbTxAddress[0] = raSingleDW & 0xff;
-                    pbTxAddress[1] = (raSingleDW >> 8) & 0x03;
-                } else {
-                    // set address: normal (full config space read)
-                    pbTxAddress[0] = (wDWordAddr + oDWord) & 0xff;
-                    pbTxAddress[1] = ((wDWordAddr + oDWord) >> 8) & 0x03;
-                }
-                memcpy(pbRxTx + cbRxTx, pbTxAddress, 8); cbRxTx += 8;
-                // WRITE read enable bit
-                memcpy(pbRxTx + cbRxTx, pbTxReadEnable, 8); cbRxTx += 8;
-            }
-            // READ result
-            memcpy(pbRxTx + cbRxTx, pbTxResultMeta, 8); cbRxTx += 8;
-            memcpy(pbRxTx + cbRxTx, pbTxResultDataLo, 8); cbRxTx += 8;
-            memcpy(pbRxTx + cbRxTx, pbTxResultDataHi, 8); cbRxTx += 8;
-            memcpy(pbRxTx + cbRxTx, pbTxLockDisable, 8); cbRxTx += 8;   // disable read/write lock (instruction serialization)
-            if(raSingleDW) { break; }
-        }
-        // WRITE TxData
-        status = ctx->dev.pfnFT_WritePipe(ctx->dev.hFTDI, 0x02, pbRxTx, cbRxTx, &cbRxTx, NULL);
-        if(status) { return FALSE; }
-        Sleep(10);
-        // READ and interpret result
-        status = ctx->dev.pfnFT_ReadPipe(ctx->dev.hFTDI, 0x82, pbRxTx, 0x1000, &cbRxTx, NULL);
-        if(status) { return FALSE; }
-        for(i = 0; i < cbRxTx; i += 32) {
-            while(*(PDWORD)(pbRxTx + i) == 0x55556666) { // skip over ftdi workaround dummy fillers
-                i += 4;
-                if(i + 32 > cbRxTx) { return FALSE; }
-            }
-            dwStatus = *(PDWORD)(pbRxTx + i);
-            pdwData = (PDWORD)(pbRxTx + i + 4);
-            if((dwStatus & 0xf0000000) != 0xe0000000) { continue; }
-            for(j = 0; j < 7; j++) {
-                f = (dwStatus & 0x0f) == 0x01;
-                dwData = *pdwData;
-                pdwData++;                              // move ptr to next data
-                dwStatus >>= 4;                         // move to next status
-                if(!f) { continue; }                    // status src flags does not match source
-                if((dwData & 0x0800ffff) == 0x08002a00) {
-                    wAddr = ((dwData >> 16) & 0x03ff) << 2;
-                    continue;
-                }
-                oAddr = (BYTE)(dwData >> 8);
-                if((oAddr != 0x2c) && (oAddr != 0x2e)) { continue; }
-                oAddr -= 0x2c;
-                if(wAddr + oAddr + 1 >= 0x200) { continue; }
-                *(PBYTE)(pb + wAddr + oAddr + 1) = (dwData >> 24) & 0xff;
-                *(PBYTE)(pb + wAddr + oAddr + 0) = (dwData >> 16) & 0xff;
-            }
-        }
-        if(raSingleDW) { break; }
-    }
-    return TRUE;
+    DEVICE_FPGA_PCIE_CONFIG_READ_CONTEXT ReadContext = { ctx, raSingleDW };
+    if(!ctx || !pb) { return FALSE; }
+    return DeviceFPGA_Session_ReadPCIeConfigWithRetry(
+        &ReadContext, DeviceFPGA_PCIeCfgSpaceCoreReadAttempt, pb, raSingleDW);
 }
 
 /*
@@ -1749,10 +1750,11 @@ VOID DeviceFPGA_ConfigPrint(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ct
     if(ctx->wFpgaVersionMajor < 4) { return; }
     for(i = 0; i < 4; i++) {
         if(DeviceFPGA_ConfigRead(ctx, 0x0004, (PBYTE)&cb, 2, flags[i])) {
-            lcprintf(ctxLC, "\n----- FPGA DEVICE CONFIG REGISTERS: %s    SIZE: %i BYTES -----\n", szNAME[i], cb);
             cb = min(cb, sizeof(pb));
-            DeviceFPGA_ConfigRead(ctx, 0x0000, pb, cb, flags[i]);
-            Util_PrintHexAscii(ctxLC, pb, cb, 0);
+            if(DeviceFPGA_ConfigRead(ctx, 0x0000, pb, cb, flags[i])) {
+                lcprintf(ctxLC, "\n----- FPGA DEVICE CONFIG REGISTERS: %s    SIZE: %i BYTES -----\n", szNAME[i], cb);
+                Util_PrintHexAscii(ctxLC, pb, cb, 0);
+            }
         }
     }
     if(DeviceFPGA_PCIeDrpRead(ctx, pb)) {
@@ -1773,9 +1775,17 @@ VOID DeviceFPGA_ConfigPrint(_In_ PLC_CONTEXT ctxLC, _In_ PDEVICE_CONTEXT_FPGA ct
 _Success_(return)
 BOOL DeviceFPGA_GetPHYv4(_In_ PDEVICE_CONTEXT_FPGA ctx)
 {
-    return
-        DeviceFPGA_ConfigRead(ctx, 0x0016, (PBYTE)&ctx->phy.wr, sizeof(ctx->phy.wr), FPGA_REG_PCIE | FPGA_REG_READWRITE) &&
-        DeviceFPGA_ConfigRead(ctx, 0x000a, (PBYTE)&ctx->phy.rd, sizeof(ctx->phy.rd), FPGA_REG_PCIE | FPGA_REG_READONLY);
+    DWORD i;
+    DEV_CFG_PHY phy;
+    for(i = 0; i < 2; i++) {
+        ZeroMemory(&phy, sizeof(phy));
+        if(DeviceFPGA_ConfigRead(ctx, 0x0016, (PBYTE)&phy.wr, sizeof(phy.wr), FPGA_REG_PCIE | FPGA_REG_READWRITE) &&
+           DeviceFPGA_ConfigRead(ctx, 0x000a, (PBYTE)&phy.rd, sizeof(phy.rd), FPGA_REG_PCIE | FPGA_REG_READONLY)) {
+            ctx->phy = phy;
+            return TRUE;
+        }
+    }
+    return FALSE;
 }
 
 _Success_(return)
@@ -1825,17 +1835,6 @@ BOOL DeviceFPGA_GetSetPHYv3(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ BOOL isUpdate)
         }
     }
     return FALSE;
-}
-
-BYTE DeviceFPGA_PHY_GetLinkWidth(_In_ PDEVICE_CONTEXT_FPGA ctx)
-{
-    const BYTE LINK_WIDTH[4] = { 1, 2, 4, 8 };
-    return LINK_WIDTH[ctx->phy.rd.pl_sel_lnk_width];
-}
-
-BYTE DeviceFPGA_PHY_GetPCIeGen(_In_ PDEVICE_CONTEXT_FPGA ctx)
-{
-    return 1 + ctx->phy.rd.pl_sel_lnk_rate;
 }
 
 VOID DeviceFPGA_SetSpeedPCIeGen(_In_ PDEVICE_CONTEXT_FPGA ctx, _In_ DWORD dwPCIeGen)
@@ -4757,9 +4756,14 @@ BOOL DeviceFPGA_Command(
             return TRUE;
         case LC_CMD_FPGA_PCIECFGSPACE:
             if(!ppbDataOut || (ctx->wFpgaVersionMajor < 4)) { return FALSE; }
-            if(!(*ppbDataOut = LocalAlloc(LMEM_ZEROINIT, 0x1000))) { return FALSE; }
+            if(!(pb = LocalAlloc(LMEM_ZEROINIT, 0x1000))) { return FALSE; }
+            if(!DeviceFPGA_PCIeCfgSpaceCoreRead(ctx, pb, 0)) {
+                LocalFree(pb);
+                return FALSE;
+            }
+            *ppbDataOut = pb;
             if(pcbDataOut) { *pcbDataOut = 0x1000; };
-            return DeviceFPGA_PCIeCfgSpaceCoreRead(ctx, *ppbDataOut, 0);
+            return TRUE;
         case LC_CMD_FPGA_CFGREGCFG:
         case LC_CMD_FPGA_CFGREGPCIE:
             if(ctx->wFpgaVersionMajor < 4) { return FALSE; }
@@ -4772,7 +4776,10 @@ BOOL DeviceFPGA_Command(
             }
             if(ppbDataOut) {
                 if(!(pb = LocalAlloc(LMEM_ZEROINIT, 0x100))) { return FALSE; }
-                DeviceFPGA_ConfigRead(ctx, qwOptionLo & 0x3fff, pb, 0x100, fCfgRegConfig);
+                if(!DeviceFPGA_ConfigRead(ctx, qwOptionLo & 0x3fff, pb, 0x100, fCfgRegConfig)) {
+                    LocalFree(pb);
+                    return FALSE;
+                }
                 if(pcbDataOut) { *pcbDataOut = min(0x100, *(PDWORD)(pb + 4)); }
                 *ppbDataOut = pb;
             }
@@ -5041,8 +5048,10 @@ BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
     LPSTR szDeviceError = NULL;
     PDEVICE_CONTEXT_FPGA ctx;
     PLC_DEVICE_PARAMETER_ENTRY pParam;
-    BOOL fFT601 = FALSE, fCustomDriver = FALSE;
+    BOOL fFT601 = FALSE, fCustomDriver = FALSE, fPCIeConfigRead = FALSE;
     BYTE pb200[0x200];
+    BYTE bPCIeGen, bPCIeWidth;
+    CHAR szPCIeLink[32];
     DWORD dwVIDPID;
     if(ppLcCreateErrorInfo) { *ppLcCreateErrorInfo = NULL; }
     ctx = LocalAlloc(LMEM_ZEROINIT, sizeof(DEVICE_CONTEXT_FPGA));
@@ -5126,15 +5135,21 @@ BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
     // return
     if(ctxLC->fPrintf[LC_PRINTF_V]) {
         *(PDWORD)pb200 = 0;
+        fPCIeConfigRead = FALSE;
         if(ctx->dev.fInitialized && ctx->wFpgaVersionMajor) {
-            DeviceFPGA_PCIeCfgSpaceCoreRead(ctx, pb200, 0x80000000 | 0);
+            fPCIeConfigRead = DeviceFPGA_PCIeCfgSpaceCoreRead(ctx, pb200, 0x80000000 | 0);
         }
         dwVIDPID = *(PDWORD)pb200;
+        if(DeviceFPGA_Session_GetPCIeLinkInfo(ctx->phySupported, ctx->phy.rd.pl_sel_lnk_rate, ctx->phy.rd.pl_sel_lnk_width, &bPCIeGen, &bPCIeWidth)) {
+            _snprintf_s(szPCIeLink, _countof(szPCIeLink), _TRUNCATE,
+                "PCIe gen%i x%i", bPCIeGen, bPCIeWidth);
+        } else {
+            strcpy_s(szPCIeLink, _countof(szPCIeLink), "PCIe unknown");
+        }
         lcprintfv(ctxLC,
-            "DEVICE: FPGA: %s PCIe gen%i x%i [%i,%i,%i] [v%i.%i,%04x] [%s,%s%s]\n",
+            "DEVICE: FPGA: %s %s [%i,%i,%i] [v%i.%i,%04x] [%s,%s%s]\n",
             ctx->perf.SZ_DEVICE_NAME,
-            DeviceFPGA_PHY_GetPCIeGen(ctx),
-            DeviceFPGA_PHY_GetLinkWidth(ctx),
+            szPCIeLink,
             ctx->perf.DELAY_READ,
             ctx->perf.DELAY_WRITE,
             ctx->perf.DELAY_PROBE_READ,
@@ -5143,7 +5158,7 @@ BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
             ctx->wDeviceId,
             (ctx->async2.fEnabled ? "ASYNC" : (ctx->async2.fOldAsync ? "OLDASYNC" : "SYNC")),
             (ctx->fAlgorithmReadTiny ? "TINY" : "NORM"),
-            ((!dwVIDPID || (dwVIDPID == 0x066610ee)) ? "" : ",FWCUST")
+            (DeviceFPGA_Session_IsCustomPCIeConfig(fPCIeConfigRead, dwVIDPID) ? ",FWCUST" : "")
         );
     }
     if(ctxLC->fPrintf[LC_PRINTF_VV] && ctx->dev.fInitialized) {
@@ -5156,8 +5171,9 @@ fail:
     }
     if(szDeviceError && ctxLC->fPrintf[LC_PRINTF_ENABLE]) {
         *(PDWORD)pb200 = 0;
+        fPCIeConfigRead = FALSE;
         if(ctx->dev.fInitialized && ctx->wFpgaVersionMajor) {
-            DeviceFPGA_PCIeCfgSpaceCoreRead(ctx, pb200, 0x80000000 | 0);
+            fPCIeConfigRead = DeviceFPGA_PCIeCfgSpaceCoreRead(ctx, pb200, 0x80000000 | 0);
         }
         dwVIDPID = *(PDWORD)pb200;
         lcprintf(ctxLC,
@@ -5167,7 +5183,7 @@ fail:
             ctx->wFpgaVersionMajor,
             ctx->wFpgaVersionMinor,
             ctx->wDeviceId,
-            ((!dwVIDPID || (dwVIDPID == 0x066610ee)) ? "" : ",FWCUST")
+            (DeviceFPGA_Session_IsCustomPCIeConfig(fPCIeConfigRead, dwVIDPID) ? ",FWCUST" : "")
         );
     }
     DeviceFPGA_Close(ctxLC);

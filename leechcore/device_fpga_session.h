@@ -19,6 +19,29 @@ typedef BOOL(*PFN_DEVICE_FPGA_SESSION_CONFIG_READ)(
     _In_ WORD flags
 );
 
+#define DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE  0x200
+#define DEVICE_FPGA_SESSION_PCIE_CONFIG_BATCH_DWORDS  16
+
+// Each attempt owns its validation state and returns TRUE only after pbResult
+// contains complete coverage for the requested read.
+typedef BOOL(*PFN_DEVICE_FPGA_SESSION_PCIE_CONFIG_READ_ATTEMPT)(
+    _Inout_ PVOID pvContext,
+    _Out_writes_(DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE) PBYTE pbResult
+);
+
+BOOL DeviceFPGA_Session_GetPCIeLinkInfo(
+    _In_ BOOL fPhySupported,
+    _In_ BYTE bRate,
+    _In_ BYTE bWidthIndex,
+    _Out_opt_ PBYTE pbGen,
+    _Out_opt_ PBYTE pbWidth
+);
+
+BOOL DeviceFPGA_Session_IsCustomPCIeConfig(
+    _In_ BOOL fReadSuccess,
+    _In_ DWORD dwVIDPID
+);
+
 typedef enum tdDEVICE_FPGA_SESSION_TLP_FRAME_ACTION {
     DEVICE_FPGA_SESSION_TLP_FRAME_IGNORE = 0,
     DEVICE_FPGA_SESSION_TLP_FRAME_APPEND,
@@ -103,6 +126,9 @@ typedef ULONG(WINAPI *PFN_DEVICE_FPGA_SESSION_READ_PIPE)(
     _Out_ PULONG pcbTransferred,
     _In_ LPOVERLAPPED pOverlapped
 );
+
+#define DEVICE_FPGA_SESSION_CONFIG_REPLY_MAX_READS  8
+#define DEVICE_FPGA_SESSION_CONFIG_REPLY_TIMEOUT_MS 5000
 
 typedef ULONG(WINAPI *PFN_DEVICE_FPGA_SESSION_GET_OVERLAPPED_RESULT)(
     _In_ HANDLE hFTDI,
@@ -230,6 +256,22 @@ BOOL DeviceFPGA_Session_IsFillerOnly(
     _In_ DWORD cb
 );
 
+_Success_(return)
+BOOL DeviceFPGA_Session_ReadConfigReplyMatching(
+    _In_ HANDLE hFTDI,
+    _Out_writes_to_(cbBuffer, *pcbRead) PBYTE pbBuffer,
+    _In_ DWORD cbBuffer,
+    _Out_ PDWORD pcbRead,
+    _In_ PFN_DEVICE_FPGA_SESSION_READ_PIPE pfnReadPipe,
+    _In_ WORD wBaseAddr,
+    _Out_writes_(cbResult) PBYTE pbResult,
+    _In_ WORD cbResult,
+    _In_ WORD flags,
+    _In_ DWORD dwTimeoutMs,
+    _In_opt_ PVOID pvTimingContext,
+    _In_opt_ PFN_DEVICE_FPGA_SESSION_TICK pfnTick
+);
+
 DEVICE_FPGA_SESSION_DRAIN_OUTCOME DeviceFPGA_Session_Drain(
     _Inout_ PVOID pvContext,
     _In_ PFN_DEVICE_FPGA_SESSION_DRAIN_READ pfnRead,
@@ -252,6 +294,59 @@ BOOL DeviceFPGA_Session_ParseConfigReply(
     _Out_writes_(cbResult) PBYTE pbResult,
     _In_ WORD cbResult,
     _In_ WORD flags
+);
+
+_Success_(return)
+// Accumulates into caller-owned buffers. Callers must zero both buffers before
+// parsing the first reply batch of a complete read attempt.
+BOOL DeviceFPGA_Session_ParsePCIeConfigReply(
+    _In_reads_(cbReply) PBYTE pbReply,
+    _In_ DWORD cbReply,
+    _Inout_updates_(DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE) PBYTE pbResult,
+    _Inout_updates_(DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE) PBYTE pbCoverage
+);
+
+_Success_(return)
+BOOL DeviceFPGA_Session_ReadPCIeConfigBatchMatching(
+    _In_ HANDLE hFTDI,
+    _Out_writes_to_(cbBuffer, *pcbRead) PBYTE pbBuffer,
+    _In_ DWORD cbBuffer,
+    _Out_ PDWORD pcbRead,
+    _In_ PFN_DEVICE_FPGA_SESSION_READ_PIPE pfnReadPipe,
+    _In_ DWORD iDWord,
+    _In_ DWORD cDWords,
+    _Inout_updates_(DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE) PBYTE pbResult,
+    _Inout_updates_(DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE) PBYTE pbCoverage,
+    _In_ DWORD dwTimeoutMs,
+    _In_opt_ PVOID pvTimingContext,
+    _In_opt_ PFN_DEVICE_FPGA_SESSION_TICK pfnTick
+);
+
+BOOL DeviceFPGA_Session_IsPCIeConfigComplete(
+    _In_reads_(DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE) PBYTE pbCoverage,
+    _In_opt_ DWORD raSingleDW
+);
+
+DWORD DeviceFPGA_Session_GetPCIeConfigBatchDWords(
+    _In_ DWORD iDWord,
+    _In_opt_ DWORD raSingleDW
+);
+
+_Success_(return)
+BOOL DeviceFPGA_Session_BuildPCIeConfigBatch(
+    _Out_writes_to_(cbBuffer, *pcbBatch) PBYTE pbBuffer,
+    _In_ DWORD cbBuffer,
+    _Out_ PDWORD pcbBatch,
+    _In_ DWORD iDWord,
+    _In_opt_ DWORD raSingleDW
+);
+
+_Success_(return)
+BOOL DeviceFPGA_Session_ReadPCIeConfigWithRetry(
+    _Inout_ PVOID pvContext,
+    _In_ PFN_DEVICE_FPGA_SESSION_PCIE_CONFIG_READ_ATTEMPT pfnAttempt,
+    _Out_writes_(DEVICE_FPGA_SESSION_PCIE_CONFIG_SIZE) PBYTE pbResult,
+    _In_opt_ DWORD raSingleDW
 );
 
 _Success_(return)
