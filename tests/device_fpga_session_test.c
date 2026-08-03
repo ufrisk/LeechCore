@@ -1392,6 +1392,216 @@ static VOID TestBoundedReadRejectsInvalidArguments(VOID)
     ASSERT_EQ(Script.Wait.cSleepCalls, 0);
 }
 
+typedef struct tdOPPORTUNISTIC_READ_SCRIPT {
+    WAIT_SCRIPT Wait;
+    ULONG ulReadStatus;
+    ULONG cbImmediate;
+    ULONG ulAbortStatus;
+    ULONG ulReleaseStatus;
+    ULONG ulInitializeStatus;
+    DWORD cReadCalls;
+    DWORD cAbortCalls;
+    DWORD cReleaseCalls;
+    DWORD cInitializeCalls;
+} OPPORTUNISTIC_READ_SCRIPT, *POPPORTUNISTIC_READ_SCRIPT;
+
+static ULONG WINAPI ScriptedOpportunisticRead(
+    _In_ HANDLE hFTDI,
+    _In_ UCHAR ucPipeID,
+    _Out_writes_(cbBuffer) PUCHAR pbBuffer,
+    _In_ ULONG cbBuffer,
+    _Out_ PULONG pcbTransferred,
+    _In_ LPOVERLAPPED pOverlapped
+)
+{
+    POPPORTUNISTIC_READ_SCRIPT pScript =
+        (POPPORTUNISTIC_READ_SCRIPT)hFTDI;
+    UNREFERENCED_PARAMETER(ucPipeID);
+    UNREFERENCED_PARAMETER(pbBuffer);
+    UNREFERENCED_PARAMETER(cbBuffer);
+    UNREFERENCED_PARAMETER(pOverlapped);
+    pScript->cReadCalls++;
+    *pcbTransferred = pScript->cbImmediate;
+    return pScript->ulReadStatus;
+}
+
+static ULONG WINAPI ScriptedOpportunisticAbort(
+    _In_ HANDLE hFTDI,
+    _In_ UCHAR ucPipeID
+)
+{
+    POPPORTUNISTIC_READ_SCRIPT pScript =
+        (POPPORTUNISTIC_READ_SCRIPT)hFTDI;
+    ASSERT_EQ(ucPipeID, 0x82);
+    pScript->cAbortCalls++;
+    return pScript->ulAbortStatus;
+}
+
+static ULONG WINAPI ScriptedOpportunisticRelease(
+    _In_ HANDLE hFTDI,
+    _In_ LPOVERLAPPED pOverlapped
+)
+{
+    POPPORTUNISTIC_READ_SCRIPT pScript =
+        (POPPORTUNISTIC_READ_SCRIPT)hFTDI;
+    UNREFERENCED_PARAMETER(pOverlapped);
+    pScript->cReleaseCalls++;
+    return pScript->ulReleaseStatus;
+}
+
+static ULONG WINAPI ScriptedOpportunisticInitialize(
+    _In_ HANDLE hFTDI,
+    _In_ LPOVERLAPPED pOverlapped
+)
+{
+    POPPORTUNISTIC_READ_SCRIPT pScript =
+        (POPPORTUNISTIC_READ_SCRIPT)hFTDI;
+    UNREFERENCED_PARAMETER(pOverlapped);
+    pScript->cInitializeCalls++;
+    return pScript->ulInitializeStatus;
+}
+
+static DEVICE_FPGA_SESSION_READ_RESULT RunOpportunisticRead(
+    _Inout_ POPPORTUNISTIC_READ_SCRIPT pScript,
+    _Inout_ PBOOL pfOverlappedInitialized,
+    _Inout_ PBOOL pfReadPending
+)
+{
+    BYTE pbBuffer[64] = { 0 };
+    OVERLAPPED Overlapped = { 0 };
+    DEVICE_FPGA_SESSION_OPPORTUNISTIC_READ_CONTEXT Context = {
+        pScript,
+        0x82,
+        &Overlapped,
+        ScriptedOpportunisticRead,
+        ScriptedWaitGetOverlappedResult,
+        ScriptedOpportunisticAbort,
+        ScriptedOpportunisticRelease,
+        ScriptedOpportunisticInitialize,
+        3,
+        1,
+        &pScript->Wait,
+        ScriptedWaitTick,
+        ScriptedWaitSleep,
+        pfOverlappedInitialized,
+        pfReadPending
+    };
+    return DeviceFPGA_Session_ReadPipeOpportunistic(
+        &Context,
+        pbBuffer,
+        sizeof(pbBuffer));
+}
+
+static VOID TestOpportunisticReadReturnsDelayedDataWithoutCancelling(VOID)
+{
+    OPPORTUNISTIC_READ_SCRIPT Script = { 0 };
+    DEVICE_FPGA_SESSION_READ_RESULT Result;
+    BOOL fOverlappedInitialized = TRUE, fReadPending = FALSE;
+    Script.ulReadStatus = DEVICE_FPGA_SESSION_FT_IO_PENDING;
+    Script.Wait.pStatus[0] = DEVICE_FPGA_SESSION_FT_OK;
+    Script.Wait.pTransferred[0] = 32;
+    Script.Wait.cResults = 1;
+    Result = RunOpportunisticRead(
+        &Script, &fOverlappedInitialized, &fReadPending);
+    ASSERT_EQ(Result.outcome, DEVICE_FPGA_SESSION_READ_DATA);
+    ASSERT_EQ(Result.cbTransferred, 32);
+    ASSERT_FALSE(fReadPending);
+    ASSERT_TRUE(fOverlappedInitialized);
+    ASSERT_EQ(Script.cAbortCalls, 0);
+    ASSERT_EQ(Script.cReleaseCalls, 0);
+    ASSERT_EQ(Script.cInitializeCalls, 0);
+}
+
+static VOID TestOpportunisticReadTreatsCancelledSilenceAsQuiet(VOID)
+{
+    OPPORTUNISTIC_READ_SCRIPT Script = { 0 };
+    DEVICE_FPGA_SESSION_READ_RESULT Result;
+    BOOL fOverlappedInitialized = TRUE, fReadPending = FALSE;
+    DWORD i;
+    Script.ulReadStatus = DEVICE_FPGA_SESSION_FT_IO_PENDING;
+    for(i = 0; i < 5; i++) {
+        Script.Wait.pStatus[i] = DEVICE_FPGA_SESSION_FT_IO_INCOMPLETE;
+    }
+    Script.Wait.pStatus[5] = DEVICE_FPGA_SESSION_FT_OK;
+    Script.Wait.cResults = 6;
+    Result = RunOpportunisticRead(
+        &Script, &fOverlappedInitialized, &fReadPending);
+    ASSERT_EQ(Result.outcome, DEVICE_FPGA_SESSION_READ_QUIET);
+    ASSERT_EQ(Result.cbTransferred, 0);
+    ASSERT_FALSE(fReadPending);
+    ASSERT_TRUE(fOverlappedInitialized);
+    ASSERT_EQ(Script.cAbortCalls, 1);
+    ASSERT_EQ(Script.cReleaseCalls, 1);
+    ASSERT_EQ(Script.cInitializeCalls, 1);
+}
+
+static VOID TestOpportunisticReadPreservesCompletionThatRacesTimeout(VOID)
+{
+    OPPORTUNISTIC_READ_SCRIPT Script = { 0 };
+    DEVICE_FPGA_SESSION_READ_RESULT Result;
+    BOOL fOverlappedInitialized = TRUE, fReadPending = FALSE;
+    DWORD i;
+    Script.ulReadStatus = DEVICE_FPGA_SESSION_FT_IO_PENDING;
+    for(i = 0; i < 4; i++) {
+        Script.Wait.pStatus[i] = DEVICE_FPGA_SESSION_FT_IO_INCOMPLETE;
+    }
+    Script.Wait.pStatus[4] = DEVICE_FPGA_SESSION_FT_OK;
+    Script.Wait.pTransferred[4] = 32;
+    Script.Wait.cResults = 5;
+    Result = RunOpportunisticRead(
+        &Script, &fOverlappedInitialized, &fReadPending);
+    ASSERT_EQ(Result.outcome, DEVICE_FPGA_SESSION_READ_DATA);
+    ASSERT_EQ(Result.cbTransferred, 32);
+    ASSERT_FALSE(fReadPending);
+    ASSERT_TRUE(fOverlappedInitialized);
+    ASSERT_EQ(Script.cAbortCalls, 0);
+    ASSERT_EQ(Script.cReleaseCalls, 0);
+    ASSERT_EQ(Script.cInitializeCalls, 0);
+}
+
+static VOID TestOpportunisticReadKeepsPendingObjectWhenCancelTimesOut(VOID)
+{
+    OPPORTUNISTIC_READ_SCRIPT Script = { 0 };
+    DEVICE_FPGA_SESSION_READ_RESULT Result;
+    BOOL fOverlappedInitialized = TRUE, fReadPending = FALSE;
+    Script.ulReadStatus = DEVICE_FPGA_SESSION_FT_IO_PENDING;
+    Script.Wait.pStatus[0] = DEVICE_FPGA_SESSION_FT_IO_INCOMPLETE;
+    Script.Wait.cResults = 1;
+    Result = RunOpportunisticRead(
+        &Script, &fOverlappedInitialized, &fReadPending);
+    ASSERT_EQ(Result.outcome, DEVICE_FPGA_SESSION_READ_DRIVER_ERROR);
+    ASSERT_EQ(Result.status, DEVICE_FPGA_SESSION_FT_IO_INCOMPLETE);
+    ASSERT_TRUE(fReadPending);
+    ASSERT_TRUE(fOverlappedInitialized);
+    ASSERT_EQ(Script.cAbortCalls, 1);
+    ASSERT_EQ(Script.cReleaseCalls, 0);
+    ASSERT_EQ(Script.cInitializeCalls, 0);
+}
+
+static VOID TestOpportunisticReadReportsAbortFailure(VOID)
+{
+    OPPORTUNISTIC_READ_SCRIPT Script = { 0 };
+    DEVICE_FPGA_SESSION_READ_RESULT Result;
+    BOOL fOverlappedInitialized = TRUE, fReadPending = FALSE;
+    DWORD i;
+    Script.ulReadStatus = DEVICE_FPGA_SESSION_FT_IO_PENDING;
+    Script.ulAbortStatus = 0x20;
+    for(i = 0; i < 5; i++) {
+        Script.Wait.pStatus[i] = DEVICE_FPGA_SESSION_FT_IO_INCOMPLETE;
+    }
+    Script.Wait.pStatus[5] = DEVICE_FPGA_SESSION_FT_OK;
+    Script.Wait.cResults = 6;
+    Result = RunOpportunisticRead(
+        &Script, &fOverlappedInitialized, &fReadPending);
+    ASSERT_EQ(Result.outcome, DEVICE_FPGA_SESSION_READ_DRIVER_ERROR);
+    ASSERT_EQ(Result.status, 0x20);
+    ASSERT_FALSE(fReadPending);
+    ASSERT_TRUE(fOverlappedInitialized);
+    ASSERT_EQ(Script.cAbortCalls, 1);
+    ASSERT_EQ(Script.cReleaseCalls, 1);
+    ASSERT_EQ(Script.cInitializeCalls, 1);
+}
+
 static VOID TestWaitCompletesWithoutBlockingDriverCall(VOID)
 {
     WAIT_SCRIPT Script = {
@@ -2600,6 +2810,11 @@ int main(void)
     RUN_TEST(TestBoundedReadPendingForeverTimesOut);
     RUN_TEST(TestBoundedReadReturnsSubmissionErrorWithoutPolling);
     RUN_TEST(TestBoundedReadRejectsInvalidArguments);
+    RUN_TEST(TestOpportunisticReadReturnsDelayedDataWithoutCancelling);
+    RUN_TEST(TestOpportunisticReadTreatsCancelledSilenceAsQuiet);
+    RUN_TEST(TestOpportunisticReadPreservesCompletionThatRacesTimeout);
+    RUN_TEST(TestOpportunisticReadKeepsPendingObjectWhenCancelTimesOut);
+    RUN_TEST(TestOpportunisticReadReportsAbortFailure);
     RUN_TEST(TestWaitUsesEventWithoutPolling);
     RUN_TEST(TestWaitFallsBackToPollingAfterEarlyEvent);
     RUN_TEST(TestWaitCanBypassSignaledEventForPolling);

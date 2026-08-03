@@ -158,6 +158,12 @@ static void test_adaptive_polling_rejects_stale_transport_evidence(void)
         FPGA_READ_TAGS_PER_GENERATION, 7, 8));
 }
 
+static void test_probe_extra_receive_passes_require_bounded_pipe_reads(void)
+{
+    assert(FpgaReadPolicy_ProbeReceiveMaxReads((BOOL)1) == 3);
+    assert(FpgaReadPolicy_ProbeReceiveMaxReads((BOOL)0) == 1);
+}
+
 static void test_adaptive_polling_counts_only_transport_evidence(void)
 {
     LC_READ_PAGE_RESULT results[] = {
@@ -480,6 +486,7 @@ int main(void)
     test_retry_list_contains_only_retryable_results();
     test_adaptive_polling_requires_sustained_completion_loss();
     test_adaptive_polling_rejects_stale_transport_evidence();
+    test_probe_extra_receive_passes_require_bounded_pipe_reads();
     test_adaptive_polling_counts_only_transport_evidence();
     test_adaptive_polling_is_reevaluated_after_transport_reopen();
     test_retry_result_replaces_transient_result();
