@@ -200,6 +200,7 @@ DEVICE_FPGA_SESSION_WAIT_RESULT DeviceFPGA_Session_ReadPipeBounded(
     _In_ LPOVERLAPPED pOverlapped,
     _In_ PFN_DEVICE_FPGA_SESSION_READ_PIPE pfnReadPipe,
     _In_ PFN_DEVICE_FPGA_SESSION_GET_OVERLAPPED_RESULT pfnGetOverlappedResult,
+    _Out_ PBOOL pfReadPending,
     _In_ BOOL fUseEventWait,
     _In_ DWORD dwTimeoutMs,
     _In_ DWORD dwPollMs,
@@ -213,18 +214,21 @@ DEVICE_FPGA_SESSION_WAIT_RESULT DeviceFPGA_Session_ReadPipeBounded(
         (ULONG)-1,
         0
     };
+    if(pfReadPending) { *pfReadPending = FALSE; }
     if(!hFTDI || !pbBuffer || !cbBuffer || !pOverlapped || !pfnReadPipe ||
-       !pfnGetOverlappedResult || !dwTimeoutMs || !dwPollMs ||
+       !pfnGetOverlappedResult || !pfReadPending || !dwTimeoutMs || !dwPollMs ||
        !pfnTick || !pfnSleep) {
         return Result;
     }
-    Result.status = pfnReadPipe(
+    Result.status = DeviceFPGA_Session_StartOverlappedRead(
         hFTDI,
         ucPipeID,
         pbBuffer,
         cbBuffer,
         &Result.cbTransferred,
-        pOverlapped);
+        pOverlapped,
+        pfnReadPipe,
+        pfReadPending);
     if(Result.status == DEVICE_FPGA_SESSION_FT_OK) {
         Result.outcome = DEVICE_FPGA_SESSION_WAIT_COMPLETED;
         return Result;
@@ -233,7 +237,7 @@ DEVICE_FPGA_SESSION_WAIT_RESULT DeviceFPGA_Session_ReadPipeBounded(
     if(Result.status != DEVICE_FPGA_SESSION_FT_IO_PENDING) {
         return Result;
     }
-    return DeviceFPGA_Session_WaitOverlapped(
+    Result = DeviceFPGA_Session_WaitOverlapped(
         hFTDI,
         pOverlapped,
         pfnGetOverlappedResult,
@@ -243,6 +247,38 @@ DEVICE_FPGA_SESSION_WAIT_RESULT DeviceFPGA_Session_ReadPipeBounded(
         pvTimingContext,
         pfnTick,
         pfnSleep);
+    if(Result.outcome == DEVICE_FPGA_SESSION_WAIT_COMPLETED) {
+        *pfReadPending = FALSE;
+    }
+    return Result;
+}
+
+ULONG DeviceFPGA_Session_StartOverlappedRead(
+    _In_ HANDLE hFTDI,
+    _In_ UCHAR ucPipeID,
+    _Out_writes_(cbBuffer) PUCHAR pbBuffer,
+    _In_ ULONG cbBuffer,
+    _Out_ PULONG pcbTransferred,
+    _In_ LPOVERLAPPED pOverlapped,
+    _In_ PFN_DEVICE_FPGA_SESSION_READ_PIPE pfnReadPipe,
+    _Out_ PBOOL pfReadPending
+)
+{
+    ULONG status;
+    if(pfReadPending) { *pfReadPending = FALSE; }
+    if(!hFTDI || !pbBuffer || !cbBuffer || !pcbTransferred ||
+       !pOverlapped || !pfnReadPipe || !pfReadPending) {
+        return (ULONG)-1;
+    }
+    status = pfnReadPipe(
+        hFTDI,
+        ucPipeID,
+        pbBuffer,
+        cbBuffer,
+        pcbTransferred,
+        pOverlapped);
+    *pfReadPending = status == DEVICE_FPGA_SESSION_FT_IO_PENDING;
+    return status;
 }
 
 DEVICE_FPGA_SESSION_RECOVERY_STAGE DeviceFPGA_Session_Recover(
@@ -866,18 +902,36 @@ BOOL DeviceFPGA_Session_CloseOverlapped(
     _In_ PFN_DEVICE_FPGA_SESSION_RELEASE_OVERLAPPED pfnReleaseOverlapped,
     _In_opt_ PVOID pvTimingContext,
     _In_opt_ PFN_DEVICE_FPGA_SESSION_TICK pfnTick,
-    _In_opt_ PFN_DEVICE_FPGA_SESSION_SLEEP pfnSleep
+    _In_opt_ PFN_DEVICE_FPGA_SESSION_SLEEP pfnSleep,
+    _Out_ PBOOL pfOverlappedReleased
 )
 {
     BOOL fResult = TRUE;
-    ULONG ftStatus;
+    ULONG ftStatus, cbTransferred = 0;
     DEVICE_FPGA_SESSION_WAIT_RESULT WaitResult;
-    if(!hFTDI || !pOverlapped) { return TRUE; }
+    if(!pfOverlappedReleased) { return FALSE; }
+    *pfOverlappedReleased = FALSE;
+    if(!hFTDI || !pOverlapped) {
+        *pfOverlappedReleased = TRUE;
+        return TRUE;
+    }
     if(!pfnAbortPipe || !pfnGetOverlappedResult || !pfnReleaseOverlapped) {
         return FALSE;
     }
     if(!pfnTick) { pfnTick = DeviceFPGA_Session_DefaultTick; }
     if(!pfnSleep) { pfnSleep = DeviceFPGA_Session_DefaultSleep; }
+    ftStatus = pfnGetOverlappedResult(
+        hFTDI,
+        pOverlapped,
+        &cbTransferred,
+        FALSE);
+    if(ftStatus == DEVICE_FPGA_SESSION_FT_OK) {
+        *pfOverlappedReleased = pfnReleaseOverlapped(hFTDI, pOverlapped) ==
+            DEVICE_FPGA_SESSION_FT_OK;
+        return *pfOverlappedReleased;
+    }
+    // FTDI recommends aborting the pipe after any non-success query status.
+    // This also preserves the upstream recovery attempt for unexpected errors.
     // RX only: some callers don't hold the TX fast-write lock, and aborting TX here could cancel an in-flight write on that path.
     ftStatus = pfnAbortPipe(hFTDI, 0x82);
     fResult &= ftStatus == DEVICE_FPGA_SESSION_FT_OK;
@@ -891,8 +945,48 @@ BOOL DeviceFPGA_Session_CloseOverlapped(
         pvTimingContext,
         pfnTick,
         pfnSleep);
-    fResult &= WaitResult.outcome == DEVICE_FPGA_SESSION_WAIT_COMPLETED;
-    fResult &= pfnReleaseOverlapped(hFTDI, pOverlapped) ==
+    if(WaitResult.outcome != DEVICE_FPGA_SESSION_WAIT_COMPLETED) {
+        return FALSE;
+    }
+    *pfOverlappedReleased = pfnReleaseOverlapped(hFTDI, pOverlapped) ==
         DEVICE_FPGA_SESSION_FT_OK;
-    return fResult;
+    return fResult && *pfOverlappedReleased;
+}
+
+_Success_(return)
+BOOL DeviceFPGA_Session_TeardownOverlapped(
+    _In_ HANDLE hFTDI,
+    _In_ LPOVERLAPPED pOverlapped,
+    _In_ BOOL fReadPending,
+    _In_ PFN_DEVICE_FPGA_SESSION_ABORT_PIPE pfnAbortPipe,
+    _In_ PFN_DEVICE_FPGA_SESSION_GET_OVERLAPPED_RESULT pfnGetOverlappedResult,
+    _In_ PFN_DEVICE_FPGA_SESSION_RELEASE_OVERLAPPED pfnReleaseOverlapped,
+    _In_opt_ PVOID pvTimingContext,
+    _In_opt_ PFN_DEVICE_FPGA_SESSION_TICK pfnTick,
+    _In_opt_ PFN_DEVICE_FPGA_SESSION_SLEEP pfnSleep,
+    _Out_ PBOOL pfOverlappedReleased
+)
+{
+    if(!pfOverlappedReleased) { return FALSE; }
+    *pfOverlappedReleased = FALSE;
+    if(!hFTDI || !pOverlapped) {
+        *pfOverlappedReleased = TRUE;
+        return TRUE;
+    }
+    if(!fReadPending) {
+        *pfOverlappedReleased = pfnReleaseOverlapped &&
+            (pfnReleaseOverlapped(hFTDI, pOverlapped) ==
+             DEVICE_FPGA_SESSION_FT_OK);
+        return *pfOverlappedReleased;
+    }
+    return DeviceFPGA_Session_CloseOverlapped(
+        hFTDI,
+        pOverlapped,
+        pfnAbortPipe,
+        pfnGetOverlappedResult,
+        pfnReleaseOverlapped,
+        pvTimingContext,
+        pfnTick,
+        pfnSleep,
+        pfOverlappedReleased);
 }

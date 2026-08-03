@@ -177,6 +177,17 @@ typedef struct tdDEVICE_FPGA_SESSION_WAIT_RESULT {
     ULONG cbTransferred;
 } DEVICE_FPGA_SESSION_WAIT_RESULT, *PDEVICE_FPGA_SESSION_WAIT_RESULT;
 
+ULONG DeviceFPGA_Session_StartOverlappedRead(
+    _In_ HANDLE hFTDI,
+    _In_ UCHAR ucPipeID,
+    _Out_writes_(cbBuffer) PUCHAR pbBuffer,
+    _In_ ULONG cbBuffer,
+    _Out_ PULONG pcbTransferred,
+    _In_ LPOVERLAPPED pOverlapped,
+    _In_ PFN_DEVICE_FPGA_SESSION_READ_PIPE pfnReadPipe,
+    _Out_ PBOOL pfReadPending
+);
+
 typedef enum tdDEVICE_FPGA_SESSION_RECOVERY_STAGE {
     DEVICE_FPGA_SESSION_RECOVERY_READY = 0,
     DEVICE_FPGA_SESSION_RECOVERY_QUIESCE_FAILED,
@@ -238,6 +249,7 @@ DEVICE_FPGA_SESSION_WAIT_RESULT DeviceFPGA_Session_ReadPipeBounded(
     _In_ LPOVERLAPPED pOverlapped,
     _In_ PFN_DEVICE_FPGA_SESSION_READ_PIPE pfnReadPipe,
     _In_ PFN_DEVICE_FPGA_SESSION_GET_OVERLAPPED_RESULT pfnGetOverlappedResult,
+    _Out_ PBOOL pfReadPending,
     _In_ BOOL fUseEventWait,
     _In_ DWORD dwTimeoutMs,
     _In_ DWORD dwPollMs,
@@ -372,6 +384,10 @@ BOOL DeviceFPGA_Session_ConfigurePipeTimeouts(
     _In_ PFN_DEVICE_FPGA_SESSION_SET_PIPE_TIMEOUT pfnSetPipeTimeout
 );
 
+// Query completion before cancelling. Release only after completion is
+// observed, either before cancellation or after a bounded cancellation wait.
+// pfOverlappedReleased distinguishes cleanup success from resource ownership;
+// FALSE means the initialized object must remain handle-owned until close.
 _Success_(return)
 BOOL DeviceFPGA_Session_CloseOverlapped(
     _In_ HANDLE hFTDI,
@@ -381,7 +397,24 @@ BOOL DeviceFPGA_Session_CloseOverlapped(
     _In_ PFN_DEVICE_FPGA_SESSION_RELEASE_OVERLAPPED pfnReleaseOverlapped,
     _In_opt_ PVOID pvTimingContext,
     _In_opt_ PFN_DEVICE_FPGA_SESSION_TICK pfnTick,
-    _In_opt_ PFN_DEVICE_FPGA_SESSION_SLEEP pfnSleep
+    _In_opt_ PFN_DEVICE_FPGA_SESSION_SLEEP pfnSleep,
+    _Out_ PBOOL pfOverlappedReleased
+);
+
+// Release an initialized idle OVERLAPPED object directly. If a read was
+// submitted, query it before deciding whether cancellation is required.
+_Success_(return)
+BOOL DeviceFPGA_Session_TeardownOverlapped(
+    _In_ HANDLE hFTDI,
+    _In_ LPOVERLAPPED pOverlapped,
+    _In_ BOOL fReadPending,
+    _In_ PFN_DEVICE_FPGA_SESSION_ABORT_PIPE pfnAbortPipe,
+    _In_ PFN_DEVICE_FPGA_SESSION_GET_OVERLAPPED_RESULT pfnGetOverlappedResult,
+    _In_ PFN_DEVICE_FPGA_SESSION_RELEASE_OVERLAPPED pfnReleaseOverlapped,
+    _In_opt_ PVOID pvTimingContext,
+    _In_opt_ PFN_DEVICE_FPGA_SESSION_TICK pfnTick,
+    _In_opt_ PFN_DEVICE_FPGA_SESSION_SLEEP pfnSleep,
+    _Out_ PBOOL pfOverlappedReleased
 );
 
 #endif /* __DEVICE_FPGA_SESSION_H__ */
