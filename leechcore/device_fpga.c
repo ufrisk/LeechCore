@@ -246,6 +246,7 @@ typedef struct tdDEVICE_CONTEXT_FPGA {
     BOOL fTransportSetup;
     BOOL fTransportRecoveryInProgress;
     BOOL fOpenPipeTimeoutFailure;
+    BOOL fPerformance;          // legacy failure pacing: no adaptive polling/probe follow-ups
     BOOL fAdaptivePollingWait;  // disable event waits after sustained issued completion loss
     DWORD dwAdaptivePollingGeneration;
     DWORD dwTransportGeneration;
@@ -2549,11 +2550,11 @@ static VOID DeviceFPGA_FTDI_ReevaluateAdaptivePollingWait(_In_ PLC_CONTEXT ctxLC
 
 static VOID DeviceFPGA_FTDI_EnableAdaptivePollingWait(_In_ PLC_CONTEXT ctxLC, _Inout_ PDEVICE_CONTEXT_FPGA ctx, _In_ DWORD cEvidence, _In_ DWORD dwEvidenceGeneration)
 {
-    if(!FpgaReadPolicy_ShouldEnableAdaptivePolling(cEvidence, dwEvidenceGeneration, ctx->dwTransportGeneration) || ctx->fAdaptivePollingWait || !DeviceFPGA_FTDI_CanReadPipeBounded(ctx)) {
+    if(!FpgaReadPolicy_ShouldEnableAdaptivePolling(ctx->fPerformance, cEvidence, dwEvidenceGeneration, ctx->dwTransportGeneration) || ctx->fAdaptivePollingWait || !DeviceFPGA_FTDI_CanReadPipeBounded(ctx)) {
         return;
     }
     EnterCriticalSection(&ctx->Lock);
-    if(!ctx->fAdaptivePollingWait && FpgaReadPolicy_ShouldEnableAdaptivePolling(cEvidence, dwEvidenceGeneration, ctx->dwTransportGeneration) && DeviceFPGA_FTDI_CanReadPipeBounded(ctx)) {
+    if(!ctx->fAdaptivePollingWait && FpgaReadPolicy_ShouldEnableAdaptivePolling(ctx->fPerformance, cEvidence, dwEvidenceGeneration, ctx->dwTransportGeneration) && DeviceFPGA_FTDI_CanReadPipeBounded(ctx)) {
         ctx->fAdaptivePollingWait = TRUE;
         ctx->dwAdaptivePollingGeneration = dwEvidenceGeneration;
         lcprintfv(ctxLC, "Device Info: FPGA: switching FT601 receive waits to bounded polling after %u issued failure pages\n", cEvidence);
@@ -4529,7 +4530,7 @@ BOOL DeviceFPGA_ProbeMEM_Attempt(_In_ PLC_CONTEXT ctxLC, _In_ QWORD qwAddr, _In_
             fBatchTransportError = TRUE;
         }
         BusySleep(ctx->perf.DELAY_PROBE_READ);
-        cReceiveMax = FpgaReadPolicy_ProbeReceiveMaxReads(DeviceFPGA_FTDI_CanReadPipeBounded(ctx));
+        cReceiveMax = FpgaReadPolicy_ProbeReceiveMaxReads(DeviceFPGA_FTDI_CanReadPipeBounded(ctx), ctx->fPerformance);
         for(cReceive = 0; cReceive < cReceiveMax; cReceive++) {
             DEVICE_FPGA_SESSION_READ_OUTCOME ReceiveOutcome;
             if(cReceive) {
@@ -5135,6 +5136,7 @@ BOOL DeviceFPGA_SetOption_DoLock(_In_ PLC_CONTEXT ctxLC, _In_ QWORD fOption, _In
 #define FPGA_PARAMETER_READ_ALGORITHM  "algo"
 #define FPGA_PARAMETER_READ_SIZE       "readsize"
 #define FPGA_PARAMETER_READ_RETRY      "readretry"
+#define FPGA_PARAMETER_PERFORMANCE     "performance"
 #define FPGA_PARAMETER_DEVICE_INDEX    "devindex"
 #define FPGA_PARAMETER_DEVICE_ID       "bdf"
 #define FPGA_PARAMETER_DRIVER          "driver"
@@ -5180,6 +5182,7 @@ BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
         szDeviceError = DeviceFPGA_InitializeFT601(ctx, fFT601, fCustomDriver);
     }
     if(szDeviceError) { goto fail; }
+    ctx->fPerformance = LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_PERFORMANCE) ? TRUE : FALSE;
     ctx->fRestartDevice = (1 == LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_RESTART_DEVICE));
     ctx->bAT = (BYTE)LcDeviceParameterGetNumeric(ctxLC, FPGA_PARAMETER_ATS);
     ctx->fATS = ((ctx->bAT >= 1) && (ctx->bAT <= 3));
@@ -5251,7 +5254,7 @@ BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
             strcpy_s(szPCIeLink, _countof(szPCIeLink), "PCIe unknown");
         }
         lcprintfv(ctxLC,
-            "DEVICE: FPGA: %s %s [%i,%i,%i] [v%i.%i,%04x] [%s,%s%s]\n",
+            "DEVICE: FPGA: %s %s [%i,%i,%i] [v%i.%i,%04x] [%s,%s%s%s]\n",
             ctx->perf.SZ_DEVICE_NAME,
             szPCIeLink,
             ctx->perf.DELAY_READ,
@@ -5262,7 +5265,8 @@ BOOL DeviceFPGA_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO 
             ctx->wDeviceId,
             (ctx->async2.fEnabled ? "ASYNC" : (ctx->async2.fOldAsync ? "OLDASYNC" : "SYNC")),
             (ctx->fAlgorithmReadTiny ? "TINY" : "NORM"),
-            (DeviceFPGA_Session_IsCustomPCIeConfig(fPCIeConfigRead, dwVIDPID) ? ",FWCUST" : "")
+            (DeviceFPGA_Session_IsCustomPCIeConfig(fPCIeConfigRead, dwVIDPID) ? ",FWCUST" : ""),
+            (ctx->fPerformance ? ",PERFORMANCE" : "")
         );
     }
     if(ctxLC->fPrintf[LC_PRINTF_VV] && ctx->dev.fInitialized) {

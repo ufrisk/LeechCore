@@ -127,13 +127,14 @@ DWORD FpgaReadPolicy_CountAdaptivePollingEvidence(_In_ DWORD cResults, _In_reads
     return cEvidence;
 }
 
-BOOL FpgaReadPolicy_ShouldEnableAdaptivePolling(_In_ DWORD cEvidence, _In_ DWORD dwEvidenceGeneration, _In_ DWORD dwTransportGeneration)
+BOOL FpgaReadPolicy_ShouldEnableAdaptivePolling(_In_ BOOL fPerformance, _In_ DWORD cEvidence, _In_ DWORD dwEvidenceGeneration, _In_ DWORD dwTransportGeneration)
 {
     // A full tag generation distinguishes sustained completion loss from an
     // isolated retry that should not slow the remainder of a healthy session.
     // Evidence collected before a transport recovery must not affect the new
-    // transport generation.
+    // transport generation. Performance mode preserves legacy event waits.
     return
+        !fPerformance &&
         (dwEvidenceGeneration == dwTransportGeneration) &&
         (cEvidence >= FPGA_READ_TAGS_PER_GENERATION);
 }
@@ -143,12 +144,13 @@ BOOL FpgaReadPolicy_ShouldResetAdaptivePolling(_In_ BOOL fAdaptivePollingWait, _
     return fAdaptivePollingWait && (dwPollingGeneration != dwTransportGeneration);
 }
 
-DWORD FpgaReadPolicy_ProbeReceiveMaxReads(_In_ BOOL fCanReadPipeBounded)
+DWORD FpgaReadPolicy_ProbeReceiveMaxReads(_In_ BOOL fCanReadPipeBounded, _In_ BOOL fPerformance)
 {
     // Bounded-pipe reads use one initial read plus two bounded follow-ups so a
     // delayed completion batch may itself arrive split across reads. Preserve
-    // the legacy single receive when bounded follow-ups are unavailable.
-    return fCanReadPipeBounded ?
+    // the legacy single receive when bounded follow-ups are unavailable or
+    // performance mode is requested.
+    return fCanReadPipeBounded && !fPerformance ?
         FPGA_PROBE_RECEIVE_MAX_READS_FT601 :
         FPGA_PROBE_RECEIVE_MAX_READS_LEGACY;
 }

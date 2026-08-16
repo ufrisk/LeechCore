@@ -144,24 +144,27 @@ static void test_retry_list_contains_only_retryable_results(void)
 
 static void test_adaptive_polling_requires_sustained_completion_loss(void)
 {
-    assert(!FpgaReadPolicy_ShouldEnableAdaptivePolling(0, 7, 7));
-    assert(!FpgaReadPolicy_ShouldEnableAdaptivePolling(1, 7, 7));
+    assert(!FpgaReadPolicy_ShouldEnableAdaptivePolling((BOOL)0, 0, 7, 7));
+    assert(!FpgaReadPolicy_ShouldEnableAdaptivePolling((BOOL)0, 1, 7, 7));
     assert(!FpgaReadPolicy_ShouldEnableAdaptivePolling(
-        FPGA_READ_TAGS_PER_GENERATION - 1, 7, 7));
+        (BOOL)0, FPGA_READ_TAGS_PER_GENERATION - 1, 7, 7));
     assert(FpgaReadPolicy_ShouldEnableAdaptivePolling(
-        FPGA_READ_TAGS_PER_GENERATION, 7, 7));
+        (BOOL)0, FPGA_READ_TAGS_PER_GENERATION, 7, 7));
+    assert(!FpgaReadPolicy_ShouldEnableAdaptivePolling(
+        (BOOL)1, FPGA_READ_TAGS_PER_GENERATION, 7, 7));
 }
 
 static void test_adaptive_polling_rejects_stale_transport_evidence(void)
 {
     assert(!FpgaReadPolicy_ShouldEnableAdaptivePolling(
-        FPGA_READ_TAGS_PER_GENERATION, 7, 8));
+        (BOOL)0, FPGA_READ_TAGS_PER_GENERATION, 7, 8));
 }
 
 static void test_probe_extra_receive_passes_require_bounded_pipe_reads(void)
 {
-    assert(FpgaReadPolicy_ProbeReceiveMaxReads((BOOL)1) == 3);
-    assert(FpgaReadPolicy_ProbeReceiveMaxReads((BOOL)0) == 1);
+    assert(FpgaReadPolicy_ProbeReceiveMaxReads((BOOL)1, (BOOL)0) == 3);
+    assert(FpgaReadPolicy_ProbeReceiveMaxReads((BOOL)0, (BOOL)0) == 1);
+    assert(FpgaReadPolicy_ProbeReceiveMaxReads((BOOL)1, (BOOL)1) == 1);
 }
 
 static void test_adaptive_polling_counts_only_transport_evidence(void)
@@ -192,18 +195,18 @@ static void test_adaptive_polling_counts_only_transport_evidence(void)
     cEvidence = FpgaReadPolicy_CountAdaptivePollingEvidence(
         FPGA_READ_TAGS_PER_GENERATION - 1, boundary);
     assert(cEvidence == FPGA_READ_TAGS_PER_GENERATION - 1);
-    assert(!FpgaReadPolicy_ShouldEnableAdaptivePolling(cEvidence, 7, 7));
+    assert(!FpgaReadPolicy_ShouldEnableAdaptivePolling((BOOL)0, cEvidence, 7, 7));
 
     cEvidence = FpgaReadPolicy_CountAdaptivePollingEvidence(
         FPGA_READ_TAGS_PER_GENERATION, boundary);
     assert(cEvidence == FPGA_READ_TAGS_PER_GENERATION);
-    assert(FpgaReadPolicy_ShouldEnableAdaptivePolling(cEvidence, 7, 7));
+    assert(FpgaReadPolicy_ShouldEnableAdaptivePolling((BOOL)0, cEvidence, 7, 7));
 
     boundary[0] = LC_READ_PAGE_RESULT_NOT_ISSUED;
     cEvidence = FpgaReadPolicy_CountAdaptivePollingEvidence(
         FPGA_READ_TAGS_PER_GENERATION, boundary);
     assert(cEvidence == FPGA_READ_TAGS_PER_GENERATION - 1);
-    assert(!FpgaReadPolicy_ShouldEnableAdaptivePolling(cEvidence, 7, 7));
+    assert(!FpgaReadPolicy_ShouldEnableAdaptivePolling((BOOL)0, cEvidence, 7, 7));
 
     for(i = 0; i < FPGA_READ_TAGS_PER_GENERATION; i++) {
         boundary[i] = LC_READ_PAGE_RESULT_NOT_ISSUED;
