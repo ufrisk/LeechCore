@@ -183,17 +183,17 @@ error_status_t LeechRpc_CommandReadScatter(_In_ HANDLE hLC, _In_ PLEECHRPC_MSG_B
     PMEM_SCATTER pMEM_Src, pMEM_Dst;
     PPMEM_SCATTER ppMEMs = NULL;
     DWORD i, cMEMs, cbMax;
-    PBYTE pbData = NULL, pbDataDst;
+    PBYTE pbData, pbDataDst;
     DWORD cbDataOffset = 0, cbRead = 0;
-    DWORD cbRsp;
     cMEMs = (DWORD)pReq->qwData[0];
     cbMax = (DWORD)pReq->qwData[1];
     // 1: verify incoming result
     fOK = (pReq->cb == cMEMs * sizeof(MEM_SCATTER)) && (cMEMs <= 0x2000) && (cbMax <= (cMEMs << 12));
     if(!fOK) { goto fail; }
-    // 2: allocate read data buffer, ppMEMs & prepare LeechCore call
+    // 2: allocate the response and read directly into its data buffer
     if(!(ppMEMs = LocalAlloc(LMEM_ZEROINIT, cMEMs * sizeof(PMEM_SCATTER)))) { goto fail; }
-    if(!(pbData = LocalAlloc(0, cbMax))) { goto fail; }
+    if(!(pRsp = LocalAlloc(0, sizeof(LEECHRPC_MSG_BIN) + pReq->cb + cbMax))) { goto fail; }
+    pbData = pRsp->pb + pReq->cb;
     pMEM_Src = (PMEM_SCATTER)pReq->pb;
     for(i = 0; i < cMEMs; i++) {
         pMEM_Src->pb = pbData + cbDataOffset;
@@ -202,48 +202,37 @@ error_status_t LeechRpc_CommandReadScatter(_In_ HANDLE hLC, _In_ PLEECHRPC_MSG_B
         pMEM_Src = pMEM_Src + 1;
     }
     if(cbDataOffset > cbMax) { goto fail; }
-    // 4: call & count read data
+    // 3: call and prepare result
     LcReadScatter(hLC, cMEMs, ppMEMs);
-    pMEM_Src = (PMEM_SCATTER)pReq->pb;
-    for(i = 0, cbRead = 0; i < cMEMs; i++) {
-        if(pMEM_Src->f) {
-            cbRead += pMEM_Src->cb;
-        }
-        pMEM_Src = pMEM_Src + 1;
-    }
-    // 5: allocate and prepare result
-    cbRsp = sizeof(LEECHRPC_MSG_BIN) + cMEMs * sizeof(MEM_SCATTER) + cbRead;
-    if(!(pRsp = LocalAlloc(0, cbRsp))) { goto fail; }
     ZeroMemory(pRsp, sizeof(LEECHRPC_MSG_BIN));
-    pRsp->cbMsg = cbRsp;
     pRsp->dwMagic = LEECHRPC_MSGMAGIC;
     pRsp->fMsgResult = TRUE;
     pRsp->tpMsg = LEECHRPC_MSGTYPE_READSCATTER_RSP;
     memcpy(pRsp->pb, pReq->pb, pReq->cb);   // all MEMs
-    pbDataDst = pRsp->pb + pReq->cb;        // rsp data buffer
+    pbDataDst = pbData;
     pMEM_Dst = (PMEM_SCATTER)pRsp->pb;
-    for(i = 0, cbRead = 0; i < cMEMs; i++) {
+    for(i = 0; i < cMEMs; i++) {
         if(pMEM_Dst->f) {
-            memcpy(pbDataDst, pMEM_Dst->pb, pMEM_Dst->cb);
+            // Failed reads leave holes; compact successful data only when needed.
+            if(pbDataDst != pMEM_Dst->pb) { memmove(pbDataDst, pMEM_Dst->pb, pMEM_Dst->cb); }
             pbDataDst = pbDataDst + pMEM_Dst->cb;
             cbRead += pMEM_Dst->cb;
         }
         pMEM_Dst = pMEM_Dst + 1;
     }
     pRsp->cb = pReq->cb + cbRead;
+    pRsp->cbMsg = sizeof(LEECHRPC_MSG_BIN) + pRsp->cb;
     pRsp->qwData[0] = cMEMs;
     LeechRPC_Compress(&ctxLeechRpc.Compress, pRsp, (pReq->flags & LEECHRPC_FLAG_NOCOMPRESS));
     *pcbOut = pRsp->cbMsg;
     *ppbOut = (PBYTE)pRsp;
     LocalFree(ppMEMs);
-    LocalFree(pbData);
     return 0;
 fail:
     *pcbOut = 0;
     *ppbOut = NULL;
     LocalFree(pRsp);
     LocalFree(ppMEMs);
-    LocalFree(pbData);
     return (error_status_t)-1;
 }
 

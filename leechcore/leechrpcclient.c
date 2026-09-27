@@ -157,8 +157,6 @@ VOID LeechRPC_KeepaliveThreadClient(_In_ PLC_CONTEXT ctxLC)
     LEECHRPC_MSG_HDR MsgReq = { 0 };
     PLEECHRPC_MSG_HDR pMsgRsp = NULL;
     DWORD c = 0;
-    ctx->fHousekeeperThread = TRUE;
-    ctx->fHousekeeperThreadIsRunning = TRUE;
     while(ctx->fHousekeeperThread) {
         c++;
         if(0 == (c % (10 * 15))) { // send keepalive every 15s
@@ -213,12 +211,15 @@ VOID LeechRPC_Close(_Inout_ PLC_CONTEXT ctxLC)
     if(LeechRPC_SubmitCommand(ctxLC, &Msg, LEECHRPC_MSGTYPE_CLOSE_RSP, &pMsgRsp)) {
         LocalFree(pMsgRsp);
     }
-    while(ctx->fHousekeeperThreadIsRunning) {
-        SwitchToThread();
+    if(ctx->hHousekeeperThread) {
+#ifdef _WIN32
+        WaitForSingleObject(ctx->hHousekeeperThread, INFINITE);
+#endif /* _WIN32 */
+        CloseHandle(ctx->hHousekeeperThread);
+        ctx->hHousekeeperThread = NULL;
     }
     LeechRPC_RpcClose(ctx);
     LeechRPC_CompressClose(&ctx->Compress);
-    if(ctx->hHousekeeperThread) { CloseHandle(ctx->hHousekeeperThread); }
     LocalFree(ctx);
     ctxLC->hDevice = 0;
 }
@@ -916,7 +917,12 @@ BOOL LeechRpc_Open(_Inout_ PLC_CONTEXT ctxLC, _Out_opt_ PPLC_CONFIG_ERRORINFO pp
         lcprintfv(ctxLC, "REMOTE: INFO: Compression disabled.\n");
     }
     // all ok - initialize this rpc device stub.
-    ctx->hHousekeeperThread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)LeechRPC_KeepaliveThreadClient, ctxLC, 0, NULL);
+    ctx->fHousekeeperThread = TRUE;
+    ctx->fHousekeeperThreadIsRunning = TRUE;
+    if(!(ctx->hHousekeeperThread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)LeechRPC_KeepaliveThreadClient, ctxLC, 0, NULL))) {
+        ctx->fHousekeeperThreadIsRunning = FALSE;
+        goto fail;
+    }
     strncpy_s(pMsgRsp->cfg.szRemote, sizeof(pMsgRsp->cfg.szRemote), ctxLC->Config.szRemote, _TRUNCATE); // ctx from remote doesn't contain remote info ...
     pfn_printf_opt_tmp = ctxLC->Config.pfn_printf_opt;
     memcpy(&ctxLC->Config, &pMsgRsp->cfg, sizeof(LC_CONFIG));

@@ -48,6 +48,7 @@ BOOL LeechSvc_ParseArgs(_In_ int argc, _In_ char **argv, _In_ PLEECHSVC_CONFIG p
             i++;
             continue;
         } else if(0 == _stricmp(argv[i], "-grpc")) {
+            i++;
             continue;
         } else if(0 == _stricmp(argv[i], "-grpc-tls-p12") && (i + 1 < argc)) {
             szOpt = argv[i + 1];
@@ -104,7 +105,8 @@ BOOL LeechSvc_ParseArgs(_In_ int argc, _In_ char **argv, _In_ PLEECHSVC_CONFIG p
 VOID LeechSvc_ParseArgs_FromConfigFile(_In_ PLEECHSVC_CONFIG pConfig)
 {
     FILE *hFile;
-    DWORD i, argc = 0;
+    BOOL fFirstToken = TRUE;
+    DWORD i, argc = 1;    // reserve argv[0] for the command-line parser
     LPSTR argv[MAX_CONFIGFILE_ARGS] = { 0 };
     CHAR szBuffer[MAX_CONFIGFILE_ARG_LENGTH];
     CHAR szConfigFileName[MAX_PATH] = { 0 }; 
@@ -117,13 +119,18 @@ VOID LeechSvc_ParseArgs_FromConfigFile(_In_ PLEECHSVC_CONFIG pConfig)
     _snprintf_s(szConfigFileName, _countof(szConfigFileName), _TRUNCATE, "%s%s", pConfig->grpc.szCurrentDirectory, LEECHAGENT_CONFIG_FILE);
     if(fopen_s(&hFile, szConfigFileName, "r")) { return; }
     while(fgets(szBuffer, sizeof(szBuffer), hFile)) {
-        while((szToken = strtok_s((ctx ? NULL : szBuffer), " \n", &ctx))) {
-            argv[argc] = strdup(szToken);
+        for(szToken = strtok_s(szBuffer, " \t\r\n", &ctx); szToken; szToken = strtok_s(NULL, " \t\r\n", &ctx)) {
+            if(fFirstToken) {
+                fFirstToken = FALSE;
+                if(szToken[0] != '-') { continue; }    // optional legacy program/dummy token
+            }
+            if(argc >= MAX_CONFIGFILE_ARGS) { goto finish; }
+            if(!(argv[argc] = strdup(szToken))) { goto finish; }
             argc++;
-            if(argc >= MAX_CONFIGFILE_ARGS) { return; }
         }
     }
     LeechSvc_ParseArgs(argc, argv, pConfig);
+finish:
     for(i = 0; i < argc; i++) {
         free(argv[i]);
     }
